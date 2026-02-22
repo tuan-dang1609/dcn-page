@@ -68,7 +68,7 @@ const userExtractor = async (req, res, next) => {
     const userId = decoded.id;
 
     const { rows } = await pool.query(
-      "SELECT id, username FROM users WHERE id = $1",
+      "SELECT id, username, role_id FROM users WHERE id = $1",
       [userId],
     );
     req.user = rows[0] || null;

@@ -1,6 +1,5 @@
 import express from "express";
 import { pool } from "../utils/db.js";
-
 const teamRouter = express();
 
 // Xem thông tin tất cả các team
@@ -31,12 +30,16 @@ GROUP BY t.id, t.name, t.short_name, t.logo_url, creator.username;`,
 teamRouter.post("/", async (request, response) => {
   const cteSql = `
   WITH new_team AS (
-    INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by, role_id)
-    VALUES ($1, $2, $3, $4, $5, 3)
+    INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING id, name, short_name, logo_url, team_color_hex, created_by, created_at
   )
   UPDATE users
-  SET team_id = new_team.id, role_id = 4
+  SET team_id = new_team.id,
+      role_id = CASE
+        WHEN users.role_id IS NULL OR users.role_id > 4 THEN 4
+        ELSE users.role_id
+      END
   FROM new_team
   WHERE users.id = $5
   RETURNING
@@ -47,8 +50,7 @@ teamRouter.post("/", async (request, response) => {
     new_team.team_color_hex,
     new_team.created_by,
     users.id        AS user_id,
-    users.username,
-    users.team_id   AS user_team_id;
+    users.username  
 `;
   const user_id = request.user.id;
 
@@ -101,7 +103,20 @@ teamRouter.put("/:id", async (request, response) => {
   const id = request.params.id;
   const user = request.user;
   const { name, team_color_hex, short_name, logo_url } = request.body;
-  if (!user) return response.status(401).json({ error: "Unauthorized" });
+  const { rows: teams } = await pool.query(
+    "SELECT * FROM teams WHERE id = $1 FOR UPDATE",
+    [id],
+  );
+  const team = teams[0];
+  const allowedRoleIds = new Set([1, 2, 3]);
+  if (
+    Number(user.id) !== Number(team.created_by) &&
+    !allowedRoleIds.has(Number(user.role_id))
+  ) {
+    return response
+      .status(403)
+      .json({ error: "Bạn không phải chủ sở hữu team" });
+  }
 
   const { rows } = await pool.query(
     "UPDATE teams SET name = $1, short_name = $2, logo_url = $3, team_color_hex = $4 WHERE id = $5 RETURNING *",
@@ -115,6 +130,7 @@ teamRouter.patch("/:id", async (request, response) => {
   const id = request.params.id;
   const { user_ids } = request.body;
   const user = request.user;
+  const allowedRoleIds = new Set([1, 2, 3]);
   console.log(user.id);
   if (!user) {
     return response.status(401).json({ error: "Unathourized" });
@@ -125,8 +141,8 @@ teamRouter.patch("/:id", async (request, response) => {
   );
   if (teamRows.length === 0)
     return response.status(404).json({ error: "Team not found" });
-  const team = teamRows[0];
-  if (Number(team.created_by) !== Number(user.id)) {
+  const isOwner = Number(user.id) === Number(team.created_by);
+  if (!isOwner && !allowedRoleIds.has(Number(user.role_id))) {
     return response
       .status(403)
       .json({ error: "Không có quyền gán user vào team này" });
@@ -167,10 +183,12 @@ teamRouter.delete("/:id", async (request, response) => {
     return response.status(404).json({ error: "Team not found" });
   }
   const team = teams[0];
-  if (Number(user.id) !== Number(team.created_by)) {
+  const allowedRoleIds = new Set([1, 2, 3]);
+  const isOwner = Number(user.id) === Number(team.created_by);
+  if (!isOwner && !allowedRoleIds.has(Number(user.role_id))) {
     return response
       .status(403)
-      .json({ error: "Bạn không phải chủ sở hữu team" });
+      .json({ error: "Bạn không có quyền xóa team này" });
   }
 
   await pool.query("UPDATE users SET team_id = NULL WHERE team_id = $1", [id]);

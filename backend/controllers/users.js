@@ -22,13 +22,26 @@ usersRouter.post("/", async (request, response) => {
 
 usersRouter.get("/:id", async (request, response) => {
   const id = request.params.id;
-  const { rows } = await pool.query(
-    `SELECT * FROM users u
-    LEFT JOIN teams t ON t.id = u.team_id
-    WHERE u.id = $1`,
+  const { rows: user_info } = await pool.query(
+    `SELECT id, nickname, profile_picture, riot_account, role_id, team_id FROM users
+    WHERE id = $1`,
     [id],
   );
-  response.status(200).json(rows[0]);
+  const team_id = user_info[0].team_id;
+  if (team_id !== null) {
+    const { rows: team_user_info } = await pool.query(
+      `SELECT t.name, t.short_name, t.logo_url, t.team_color_hex, u.nickname AS created_by, t.created_at FROM teams t
+      INNER JOIN users u ON u.id = t.created_by
+      WHERE t.id = $1`,
+      [team_id],
+    );
+    return response.status(200).json({
+      ...user_info[0],
+      team: team_user_info[0],
+    });
+  } else {
+    return response.status(200).json(user_info[0]);
+  }
 });
 
 export default usersRouter;
