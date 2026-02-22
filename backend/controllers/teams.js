@@ -36,7 +36,7 @@ teamRouter.post("/", async (request, response) => {
     RETURNING id, name, short_name, logo_url, team_color_hex, created_by, created_at
   )
   UPDATE users
-  SET team_id = new_team.id
+  SET team_id = new_team.id, role_id = 4
   FROM new_team
   WHERE users.id = $5
   RETURNING
@@ -96,7 +96,7 @@ GROUP BY t.id, t.name, t.short_name, t.logo_url, creator.username;`,
   return response.status(200).json(rows[0]);
 });
 
-//
+// Update thông tin của đội
 teamRouter.put("/:id", async (request, response) => {
   const id = request.params.id;
   const user = request.user;
