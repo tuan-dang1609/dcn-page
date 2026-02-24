@@ -1,199 +1,458 @@
-import express from "express";
+import { Elysia } from "elysia";
 import { pool } from "../utils/db.js";
-const teamRouter = express();
+import middleware from "../utils/middleware.js";
+
+const teamRouter = new Elysia().derive(middleware.deriveAuthContext);
+const TAG = "Teams";
 
 // Xem thông tin tất cả các team
-teamRouter.get("/", async (request, response) => {
-  const { rows } = await pool.query(
-    `SELECT
-  t.id,
-  t.name,
-  t.short_name,
-  t.logo_url,
-  creator.username        AS created_by_username,
-  COALESCE(
-    json_agg(
-      json_build_object('id', u.id, 'username', u.username, 'profile_picture', u.profile_picture)
-      ORDER BY u.id
-    ) FILTER (WHERE u.id IS NOT NULL),
-    '[]'
-  ) AS members
-FROM teams t
-LEFT JOIN users creator ON creator.id = t.created_by
-LEFT JOIN users u       ON u.team_id = t.id
-GROUP BY t.id, t.name, t.short_name, t.logo_url, creator.username;`,
-  );
-  return response.status(200).json(rows);
-});
+teamRouter.get(
+  "/",
+  async ({ set }) => {
+    const { rows } = await pool.query(
+      `SELECT
+      t.id,
+      t.name,
+      t.short_name,
+      t.logo_url,
+      creator.username AS created_by_username,
+      COALESCE(
+        json_agg(
+          json_build_object('id', u.id, 'username', u.username, 'profile_picture', u.profile_picture)
+          ORDER BY u.id
+        ) FILTER (WHERE u.id IS NOT NULL),
+        '[]'
+      ) AS members
+    FROM teams t
+    LEFT JOIN users creator ON creator.id = t.created_by
+    LEFT JOIN users u ON u.team_id = t.id
+    GROUP BY t.id, t.name, t.short_name, t.logo_url, creator.username;`,
+    );
+
+    set.status = 200;
+    return rows;
+  },
+  { tags: [TAG], summary: "List teams" },
+);
 
 // Thêm team mới
-teamRouter.post("/", async (request, response) => {
-  const cteSql = `
-  WITH new_team AS (
-    INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING id, name, short_name, logo_url, team_color_hex, created_by, created_at
-  )
-  UPDATE users
-  SET team_id = new_team.id,
-      role_id = CASE
-        WHEN users.role_id IS NULL OR users.role_id > 4 THEN 4
-        ELSE users.role_id
-      END
-  FROM new_team
-  WHERE users.id = $5
-  RETURNING
-    new_team.id     AS team_id,
-    new_team.name   AS team_name,
-    new_team.short_name,
-    new_team.logo_url,
-    new_team.team_color_hex,
-    new_team.created_by,
-    users.id        AS user_id,
-    users.username  
-`;
-  const user_id = request.user.id;
+teamRouter.post(
+  "/",
+  async ({ body, set, user }) => {
+    const cteSql = `
+    WITH new_team AS (
+      INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, name, short_name, logo_url, team_color_hex, created_by, created_at
+    )
+    UPDATE users
+    SET team_id = new_team.id,
+        role_id = CASE
+          WHEN users.role_id IS NULL OR users.role_id > 4 THEN 4
+          ELSE users.role_id
+        END
+    FROM new_team
+    WHERE users.id = $5
+    RETURNING
+      new_team.id AS team_id,
+      new_team.name AS team_name,
+      new_team.short_name,
+      new_team.logo_url,
+      new_team.team_color_hex,
+      new_team.created_by,
+      users.id AS user_id,
+      users.username
+  `;
 
-  const { name, short_name, logo_url, team_color_hex } = request.body;
+    const userId = Number(user?.id);
+    const { name, short_name, logo_url, team_color_hex } = body ?? {};
 
-  if (!user_id) {
-    return response.status(401).json({ error: "Unathourized" });
-  }
-  const { rows } = await pool.query(cteSql, [
-    name,
-    short_name,
-    logo_url,
-    team_color_hex,
-    user_id,
-  ]);
+    if (!userId) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
 
-  response.status(201).json(rows[0]);
-});
+    const { rows } = await pool.query(cteSql, [
+      name,
+      short_name,
+      logo_url,
+      team_color_hex,
+      userId,
+    ]);
+
+    set.status = 201;
+    return rows[0];
+  },
+  {
+    tags: [TAG],
+    summary: "Create team",
+    detail: {
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["name", "short_name"],
+              properties: {
+                name: { type: "string", example: "Beacon Esports" },
+                short_name: { type: "string", example: "BCN" },
+                logo_url: {
+                  type: "string",
+                  example: "https://cdn.example.com/team-logo.png",
+                },
+                team_color_hex: { type: "string", example: "#4F46E5" },
+              },
+            },
+            examples: {
+              createTeamSample: {
+                value: {
+                  name: "Beacon Esports",
+                  short_name: "BCN",
+                  logo_url: "https://cdn.example.com/team-logo.png",
+                  team_color_hex: "#4F46E5",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+);
 
 // Coi thông tin chi tiết của team
-teamRouter.get("/:id", async (request, response) => {
-  const id = request.params.id;
+teamRouter.get(
+  "/:id",
+  async ({ params, set }) => {
+    const id = Number(params.id);
 
-  const { rows } = await pool.query(
-    `SELECT
-  t.id,
-  t.name,
-  t.short_name,
-  t.logo_url,
-  creator.username        AS created_by_username,
-  COALESCE(
-    json_agg(
-      json_build_object('id', u.id, 'username', u.username, 'profile_picture', u.profile_picture)
-      ORDER BY u.id
-    ) FILTER (WHERE u.id IS NOT NULL),
-    '[]'
-  ) AS members
-FROM teams t
-LEFT JOIN users creator ON creator.id = t.created_by
-LEFT JOIN users u       ON u.team_id = t.id
-WHERE t.id = $1
-GROUP BY t.id, t.name, t.short_name, t.logo_url, creator.username;`,
-    [id],
-  );
-  return response.status(200).json(rows[0]);
-});
+    const { rows } = await pool.query(
+      `SELECT
+      t.id,
+      t.name,
+      t.short_name,
+      t.logo_url,
+      creator.username AS created_by_username,
+      COALESCE(
+        json_agg(
+          json_build_object('id', u.id, 'username', u.username, 'profile_picture', u.profile_picture)
+          ORDER BY u.id
+        ) FILTER (WHERE u.id IS NOT NULL),
+        '[]'
+      ) AS members
+    FROM teams t
+    LEFT JOIN users creator ON creator.id = t.created_by
+    LEFT JOIN users u ON u.team_id = t.id
+    WHERE t.id = $1
+    GROUP BY t.id, t.name, t.short_name, t.logo_url, creator.username;`,
+      [id],
+    );
+
+    set.status = 200;
+    return rows[0] ?? null;
+  },
+  {
+    tags: [TAG],
+    summary: "Get team by id",
+    detail: {
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", example: 1 },
+          description: "ID đội",
+        },
+      ],
+    },
+  },
+);
 
 // Update thông tin của đội
-teamRouter.put("/:id", async (request, response) => {
-  const id = request.params.id;
-  const user = request.user;
-  const { name, team_color_hex, short_name, logo_url } = request.body;
-  const { rows: teams } = await pool.query(
-    "SELECT * FROM teams WHERE id = $1 FOR UPDATE",
-    [id],
-  );
-  const team = teams[0];
-  const allowedRoleIds = new Set([1, 2, 3]);
-  if (
-    Number(user.id) !== Number(team.created_by) &&
-    !allowedRoleIds.has(Number(user.role_id))
-  ) {
-    return response
-      .status(403)
-      .json({ error: "Bạn không phải chủ sở hữu team" });
-  }
+teamRouter.put(
+  "/:id",
+  async ({ params, body, set, user }) => {
+    const id = Number(params.id);
+    const { name, team_color_hex, short_name, logo_url } = body ?? {};
 
-  const { rows } = await pool.query(
-    "UPDATE teams SET name = $1, short_name = $2, logo_url = $3, team_color_hex = $4 WHERE id = $5 RETURNING *",
-    [name, short_name, logo_url, team_color_hex, id],
-  );
-  return response.status(200).json(rows[0]);
-});
+    if (!user) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+
+    const { rows: teams } = await pool.query(
+      "SELECT * FROM teams WHERE id = $1 FOR UPDATE",
+      [id],
+    );
+
+    if (teams.length === 0) {
+      set.status = 404;
+      return { error: "Team not found" };
+    }
+
+    const team = teams[0];
+    const allowedRoleIds = new Set([1, 2, 3]);
+
+    if (
+      Number(user.id) !== Number(team.created_by) &&
+      !allowedRoleIds.has(Number(user.role_id))
+    ) {
+      set.status = 403;
+      return { error: "Bạn không phải chủ sở hữu team" };
+    }
+
+    const { rows } = await pool.query(
+      "UPDATE teams SET name = $1, short_name = $2, logo_url = $3, team_color_hex = $4 WHERE id = $5 RETURNING *",
+      [name, short_name, logo_url, team_color_hex, id],
+    );
+
+    set.status = 200;
+    return rows[0];
+  },
+  {
+    tags: [TAG],
+    summary: "Update team",
+    detail: {
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", example: 1 },
+          description: "ID đội cần cập nhật",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                name: { type: "string", example: "Beacon Academy" },
+                short_name: { type: "string", example: "BCA" },
+                logo_url: {
+                  type: "string",
+                  example: "https://cdn.example.com/team-logo-new.png",
+                },
+                team_color_hex: { type: "string", example: "#06B6D4" },
+              },
+            },
+            examples: {
+              updateTeamSample: {
+                value: {
+                  name: "Beacon Academy",
+                  short_name: "BCA",
+                  logo_url: "https://cdn.example.com/team-logo-new.png",
+                  team_color_hex: "#06B6D4",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+);
 
 // Thêm user vào đội thông qua team_id và user_ids = []
-teamRouter.patch("/:id", async (request, response) => {
-  const id = request.params.id;
-  const { user_ids } = request.body;
-  const user = request.user;
-  const allowedRoleIds = new Set([1, 2, 3]);
-  console.log(user.id);
-  if (!user) {
-    return response.status(401).json({ error: "Unathourized" });
-  }
-  const { rows: teamRows } = await pool.query(
-    "SELECT created_by FROM teams WHERE id = $1",
-    [id],
-  );
-  if (teamRows.length === 0)
-    return response.status(404).json({ error: "Team not found" });
-  const isOwner = Number(user.id) === Number(team.created_by);
-  if (!isOwner && !allowedRoleIds.has(Number(user.role_id))) {
-    return response
-      .status(403)
-      .json({ error: "Không có quyền gán user vào team này" });
-  }
+teamRouter.patch(
+  "/:id",
+  async ({ params, body, set, user }) => {
+    const id = Number(params.id);
+    const { user_ids } = body ?? {};
+    const allowedRoleIds = new Set([1, 2, 3]);
 
-  await pool.query(
-    "UPDATE users SET team_id = $1 WHERE id = ANY($2::bigint[]) RETURNING id, username, team_id",
-    [id, user_ids],
-  );
+    if (!user) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
 
-  // Return current members of the team
-  const { rows } = await pool.query(
-    `SELECT t.id, t.name,
+    if (!Number.isFinite(id)) {
+      set.status = 400;
+      return { error: "Team id không hợp lệ" };
+    }
+
+    const ids = Array.isArray(user_ids)
+      ? [...new Set(user_ids.map(Number).filter(Number.isFinite))]
+      : [
+          ...new Set(
+            String(user_ids ?? "")
+              .split(",")
+              .map((x) => Number(x.trim()))
+              .filter(Number.isFinite),
+          ),
+        ];
+
+    const { rows: teamRows } = await pool.query(
+      "SELECT created_by FROM teams WHERE id = $1 FOR UPDATE",
+      [id],
+    );
+
+    if (teamRows.length === 0) {
+      set.status = 404;
+      return { error: "Team not found" };
+    }
+
+    const isOwner = Number(user.id) === Number(teamRows[0].created_by);
+    const hasRolePermission = allowedRoleIds.has(Number(user.role_id));
+
+    if (!isOwner && !hasRolePermission) {
+      set.status = 403;
+      return { error: "Không có quyền gán user vào team này" };
+    }
+
+    if (ids.length === 0) {
+      await pool.query("UPDATE users SET team_id = NULL WHERE team_id = $1", [
+        id,
+      ]);
+    } else {
+      const idsCsv = ids.join(",");
+
+      await pool.query(
+        `
+        UPDATE users
+        SET team_id = NULL
+        WHERE team_id = $1
+          AND NOT (id = ANY(string_to_array($2, ',')::bigint[]))
+      `,
+        [id, idsCsv],
+      );
+
+      await pool.query(
+        `
+        UPDATE users
+        SET team_id = $1
+        WHERE id = ANY(string_to_array($2, ',')::bigint[])
+      `,
+        [id, idsCsv],
+      );
+    }
+
+    const { rows } = await pool.query(
+      `
+      SELECT t.id, t.name,
         COALESCE(
-          json_agg(json_build_object('id', u.id, 'username', u.username) ORDER BY u.id)
-          FILTER (WHERE u.id IS NOT NULL),
+          json_agg(
+            json_build_object('id', u.id, 'username', u.username)
+            ORDER BY u.id
+          ) FILTER (WHERE u.id IS NOT NULL),
           '[]'
         ) AS members
-       FROM teams t
-       LEFT JOIN users u ON u.team_id = t.id
-       WHERE t.id = $1
-       GROUP BY t.id, t.name;`,
-    [id],
-  );
+      FROM teams t
+      LEFT JOIN users u ON u.team_id = t.id
+      WHERE t.id = $1
+      GROUP BY t.id, t.name
+    `,
+      [id],
+    );
 
-  return response.status(200).json(rows[0]);
-});
+    set.status = 200;
+    return rows[0];
+  },
+  {
+    tags: [TAG],
+    summary: "Assign team members",
+    detail: {
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", example: 1 },
+          description: "ID đội cần gán thành viên",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                user_ids: {
+                  oneOf: [
+                    { type: "array", items: { type: "integer" } },
+                    { type: "string" },
+                  ],
+                  description:
+                    "Danh sách user id, có thể là mảng số hoặc chuỗi phân tách bằng dấu phẩy",
+                },
+              },
+            },
+            examples: {
+              arraySample: {
+                value: {
+                  user_ids: [6, 7, 8],
+                },
+              },
+              csvSample: {
+                value: {
+                  user_ids: "6,7,8",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+);
 
-// Xóa đội (Điều kiện là chủ sở hữu mới được xóa)
-teamRouter.delete("/:id", async (request, response) => {
-  const id = request.params.id;
-  const user = request.user;
-  const { rows: teams } = await pool.query(
-    "SELECT * FROM teams WHERE id = $1 FOR UPDATE",
-    [id],
-  );
-  if (teams.length === 0) {
-    return response.status(404).json({ error: "Team not found" });
-  }
-  const team = teams[0];
-  const allowedRoleIds = new Set([1, 2, 3]);
-  const isOwner = Number(user.id) === Number(team.created_by);
-  if (!isOwner && !allowedRoleIds.has(Number(user.role_id))) {
-    return response
-      .status(403)
-      .json({ error: "Bạn không có quyền xóa team này" });
-  }
+// Xóa đội
+teamRouter.delete(
+  "/:id",
+  async ({ params, set, user }) => {
+    const id = Number(params.id);
 
-  await pool.query("UPDATE users SET team_id = NULL WHERE team_id = $1", [id]);
+    if (!user) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
 
-  await pool.query("DELETE FROM teams WHERE id = $1", [id]);
-  return response.status(204).end();
-});
+    const { rows: teams } = await pool.query(
+      "SELECT * FROM teams WHERE id = $1 FOR UPDATE",
+      [id],
+    );
+
+    if (teams.length === 0) {
+      set.status = 404;
+      return { error: "Team not found" };
+    }
+
+    const team = teams[0];
+    const allowedRoleIds = new Set([1, 2, 3]);
+    const isOwner = Number(user.id) === Number(team.created_by);
+
+    if (!isOwner && !allowedRoleIds.has(Number(user.role_id))) {
+      set.status = 403;
+      return { error: "Bạn không có quyền xóa team này" };
+    }
+
+    await pool.query("UPDATE users SET team_id = NULL WHERE team_id = $1", [
+      id,
+    ]);
+    await pool.query("DELETE FROM teams WHERE id = $1", [id]);
+
+    set.status = 204;
+    return;
+  },
+  {
+    tags: [TAG],
+    summary: "Delete team",
+    detail: {
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", example: 1 },
+          description: "ID đội cần xóa",
+        },
+      ],
+    },
+  },
+);
+
 export default teamRouter;

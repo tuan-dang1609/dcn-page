@@ -1,87 +1,82 @@
+import { Elysia } from "elysia";
 import logger from "./logger.js";
 import { pool } from "./db.js";
 import jwt from "jsonwebtoken";
-function requestLogger(req, res, next) {
-  logger.info("Method:", req.method);
-  logger.info("Path:  ", req.path);
-  logger.info("Body:  ", req.body);
-  logger.info("---");
-  next();
-}
+export const requestLogger = new Elysia({ name: "request-logger" }).onRequest(
+  ({ request }) => {
+    const url = new URL(request.url);
+    logger.info("Method:", request.method);
+    logger.info("Path:  ", url.pathname);
+    logger.info("---");
+  },
+);
 
-const unknownEndpoint = (request, response) => {
-  response.status(404).send({ error: "unknown endpoint" });
-};
+export const deriveAuthContext = async ({ request }) => {
+  const auth = request.headers.get("authorization");
 
-const errorHandler = (error, request, response, next) => {
-  logger.error(error.message);
+  const match = auth?.match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1]?.trim() ?? null;
+  if (!token) return { token: null, user: null, authError: "NO_TOKEN" };
+  const secret = process.env.SECRET ?? "dev-secret";
+  const decoded = jwt.verify(token, secret);
 
-  if (error.name === "CastError") {
-    return response.status(400).send({ error: "malformatted id" });
-  } else if (error.name === "ValidationError") {
-    return response.status(400).json({ error: error.message });
-  } else if (
-    error.name === "MongoServerError" &&
-    error.message.includes("E11000 duplicate key error")
-  ) {
-    return response
-      .status(400)
-      .json({ error: "expected `username` to be unique" });
-  } else if (
-    error.name === "MongoServerError" &&
-    error.message.includes("E11000 duplicate key error")
-  ) {
-    return response
-      .status(400)
-      .json({ error: "expected `username` to be unique" });
-  } else if (error.name === "JsonWebTokenError") {
-    return response.status(401).json({ error: "token invalid" });
-  } else if (error.name === "TokenExpiredError") {
-    return response.status(401).json({
-      error: "token expired",
-    });
+  const userId = Number(decoded?.id);
+  if (!Number.isFinite(userId)) {
+    return { token, user: null, authError: "BAD_ID" };
   }
 
-  next(error);
+  const { rows } = await pool.query(
+    "SELECT id, username, role_id, team_id FROM users WHERE id = $1",
+    [userId],
+  );
+
+  return { token, user: rows[0] ?? null, authError: null };
 };
-const tokenExtractor = (req, res, next) => {
-  const auth = req.get("authorization");
-  if (auth && auth.toLowerCase().startsWith("bearer ")) {
-    req.token = auth.substring(7);
-  } else {
-    req.token = null;
-  }
-  next();
-};
-const userExtractor = async (req, res, next) => {
-  try {
-    const token = req.token;
-    if (!token) {
-      req.user = null;
-      return next();
+
+export const authContext = new Elysia({ name: "auth-context" }).derive(
+  deriveAuthContext,
+);
+export const unknownEndpoint = new Elysia({ name: "unknown-endpoint" }).all(
+  "*",
+  ({ set }) => {
+    set.status = 404;
+    return { error: "unknown endpoint" };
+  },
+);
+
+export const errorHandler = new Elysia({ name: "error-handler" }).onError(
+  ({ error, set }) => {
+    logger.error(error?.message);
+
+    if (error?.name === "CastError") {
+      set.status = 400;
+      return { error: "malformatted id" };
     }
-    const decoded = jwt.verify(token, process.env.SECRET);
-    if (!decoded.id) {
-      req.user = null;
-      return next();
-    }
-    const userId = decoded.id;
 
-    const { rows } = await pool.query(
-      "SELECT id, username, role_id FROM users WHERE id = $1",
-      [userId],
-    );
-    req.user = rows[0] || null;
-    next();
-  } catch (err) {
-    next(err);
-  }
-};
+    if (error?.name === "ValidationError") {
+      set.status = 400;
+      return { error: error.message };
+    }
+
+    if (error?.name === "JsonWebTokenError") {
+      set.status = 401;
+      return { error: "token invalid" };
+    }
+
+    if (error?.name === "TokenExpiredError") {
+      set.status = 401;
+      return { error: "token expired" };
+    }
+
+    set.status = 500;
+    return { error: "internal server error" };
+  },
+);
 
 export default {
+  deriveAuthContext,
   requestLogger,
+  authContext,
   unknownEndpoint,
   errorHandler,
-  userExtractor,
-  tokenExtractor,
 };

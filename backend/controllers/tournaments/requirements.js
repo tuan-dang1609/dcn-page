@@ -1,43 +1,107 @@
-import express from "express";
+import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 
-const requirementRouter = express();
+const requirementRouter = new Elysia();
+const TAG = "Requirements";
 
 function toPgTextArray(arr) {
-  // arr: string[]
   if (!Array.isArray(arr)) return null;
-  // quote each element and escape backslash + double-quote
   const quoted = arr.map(
     (s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
   );
   return `{${quoted.join(",")}}`;
 }
 
-requirementRouter.post("/:id", async (request, response) => {
-  const id = request.params.id;
-  const user = request.user;
-  if (!user) {
-    return response.status(401).json({ error: "Unauthorized" });
-  }
+requirementRouter.post(
+  "/:id",
+  async ({ params, body, set, user }) => {
+    const id = Number(params.id);
 
-  const { rank_min, rank_max, devices, discord } = request.body;
+    if (!user) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
 
-  const all_devices = Array.isArray(devices)
-    ? devices
-    : devices
-      ? [String(devices)]
-      : null;
+    const { rank_min, rank_max, devices, discord } = body ?? {};
 
-  const deviceLiteral = all_devices ? toPgTextArray(all_devices) : null;
+    const all_devices = Array.isArray(devices)
+      ? devices
+      : devices
+        ? [String(devices)]
+        : null;
 
-  const { rows } = await pool.query(
-    `INSERT INTO requirements (rank_min, rank_max, device, discord, tournament_id)
-       VALUES ($1, $2, $3::text[], $4, $5)
-       RETURNING *`,
-    [rank_min, rank_max, deviceLiteral, discord, id],
-  );
+    const deviceLiteral = all_devices ? toPgTextArray(all_devices) : null;
 
-  return response.status(201).json(rows[0]);
-});
+    const { rows } = await pool.query(
+      `INSERT INTO requirements (rank_min, rank_max, device, discord, tournament_id)
+     VALUES ($1, $2, $3::text[], $4, $5)
+     RETURNING *`,
+      [rank_min, rank_max, deviceLiteral, discord, id],
+    );
+
+    set.status = 201;
+    return rows[0];
+  },
+  {
+    tags: [TAG],
+    summary: "Create tournament requirements",
+    detail: {
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", example: 1 },
+          description: "ID giải đấu",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["rank_min", "rank_max"],
+              properties: {
+                rank_min: { type: "integer", example: 1 },
+                rank_max: { type: "integer", example: 10 },
+                devices: {
+                  oneOf: [
+                    { type: "array", items: { type: "string" } },
+                    { type: "string" },
+                  ],
+                  description:
+                    "Thiết bị cho phép: nhập mảng hoặc 1 chuỗi plain text",
+                },
+                discord: {
+                  type: "string",
+                  example: "https://discord.gg/dcn-community",
+                },
+              },
+            },
+            examples: {
+              arrayDevice: {
+                value: {
+                  rank_min: 1,
+                  rank_max: 10,
+                  devices: ["PC", "Mobile"],
+                  discord: "https://discord.gg/dcn-community",
+                },
+              },
+              plainTextDevice: {
+                value: {
+                  rank_min: 1,
+                  rank_max: 10,
+                  devices: "PC",
+                  discord: "https://discord.gg/dcn-community",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+);
 
 export default requirementRouter;
