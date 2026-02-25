@@ -14,6 +14,8 @@ import ruleRouter from "./controllers/tournaments/rules.js";
 import requirementRouter from "./controllers/tournaments/requirements.js";
 import teamTourRoute from "./controllers/tournaments/tournament_team.js";
 import playerTourRoute from "./controllers/tournaments/tournament_team_player.js";
+import matchRouter from "./controllers/tournaments/matches.js";
+import bracketRouter from "./controllers/tournaments/brackets.js";
 
 const app = new Elysia()
   .use(cors())
@@ -46,6 +48,8 @@ const app = new Elysia()
   .group("/api/tournaments/requirements", (app) => app.use(requirementRouter))
   .group("/api/tournaments/teams", (app) => app.use(teamTourRoute))
   .group("/api/tournaments/team/players", (app) => app.use(playerTourRoute))
+  .group("/api/tournaments/brackets", (app) => app.use(bracketRouter))
+  .group("/api/tournaments/matches", (app) => app.use(matchRouter))
   .use(middleware.unknownEndpoint)
   .use(middleware.errorHandler);
 
