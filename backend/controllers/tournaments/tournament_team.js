@@ -46,7 +46,7 @@ teamTourRoute.get(
 
 teamTourRoute.post(
   "/:tournament_id",
-  async ({ params, set, user, authError }) => {
+  async ({ params, set, user }) => {
     const tournamentId = Number(params.tournament_id);
 
     if (!user) {

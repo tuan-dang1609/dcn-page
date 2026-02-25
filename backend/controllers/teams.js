@@ -104,16 +104,6 @@ teamRouter.post(
                 team_color_hex: { type: "string", example: "#4F46E5" },
               },
             },
-            examples: {
-              createTeamSample: {
-                value: {
-                  name: "Beacon Esports",
-                  short_name: "BCN",
-                  logo_url: "https://cdn.example.com/team-logo.png",
-                  team_color_hex: "#4F46E5",
-                },
-              },
-            },
           },
         },
       },
@@ -239,16 +229,6 @@ teamRouter.put(
                 team_color_hex: { type: "string", example: "#06B6D4" },
               },
             },
-            examples: {
-              updateTeamSample: {
-                value: {
-                  name: "Beacon Academy",
-                  short_name: "BCA",
-                  logo_url: "https://cdn.example.com/team-logo-new.png",
-                  team_color_hex: "#06B6D4",
-                },
-              },
-            },
           },
         },
       },
@@ -274,16 +254,12 @@ teamRouter.patch(
       return { error: "Team id không hợp lệ" };
     }
 
-    const ids = Array.isArray(user_ids)
-      ? [...new Set(user_ids.map(Number).filter(Number.isFinite))]
-      : [
-          ...new Set(
-            String(user_ids ?? "")
-              .split(",")
-              .map((x) => Number(x.trim()))
-              .filter(Number.isFinite),
-          ),
-        ];
+    if (!Array.isArray(user_ids)) {
+      set.status = 400;
+      return { error: "user_ids phải là mảng số" };
+    }
+
+    const ids = [...new Set(user_ids.map(Number).filter(Number.isFinite))];
 
     const { rows: teamRows } = await pool.query(
       "SELECT created_by FROM teams WHERE id = $1 FOR UPDATE",
@@ -303,22 +279,45 @@ teamRouter.patch(
       return { error: "Không có quyền gán user vào team này" };
     }
 
+    const creatorId = Number(teamRows[0].created_by);
+    const creatorIdIsValid = Number.isFinite(creatorId);
+
     if (ids.length === 0) {
-      await pool.query("UPDATE users SET team_id = NULL WHERE team_id = $1", [
-        id,
-      ]);
+      if (creatorIdIsValid) {
+        await pool.query(
+          "UPDATE users SET team_id = NULL WHERE team_id = $1 AND id <> $2",
+          [id, creatorId],
+        );
+      } else {
+        await pool.query("UPDATE users SET team_id = NULL WHERE team_id = $1", [
+          id,
+        ]);
+      }
     } else {
       const idsCsv = ids.join(",");
 
-      await pool.query(
-        `
-        UPDATE users
-        SET team_id = NULL
-        WHERE team_id = $1
-          AND NOT (id = ANY(string_to_array($2, ',')::bigint[]))
-      `,
-        [id, idsCsv],
-      );
+      if (creatorIdIsValid) {
+        await pool.query(
+          `
+          UPDATE users
+          SET team_id = NULL
+          WHERE team_id = $1
+            AND NOT (id = ANY(string_to_array($2, ',')::bigint[]))
+            AND id <> $3
+        `,
+          [id, idsCsv, creatorId],
+        );
+      } else {
+        await pool.query(
+          `
+          UPDATE users
+          SET team_id = NULL
+          WHERE team_id = $1
+            AND NOT (id = ANY(string_to_array($2, ',')::bigint[]))
+        `,
+          [id, idsCsv],
+        );
+      }
 
       await pool.query(
         `
@@ -372,12 +371,9 @@ teamRouter.patch(
               type: "object",
               properties: {
                 user_ids: {
-                  oneOf: [
-                    { type: "array", items: { type: "integer" } },
-                    { type: "string" },
-                  ],
-                  description:
-                    "Danh sách user id, có thể là mảng số hoặc chuỗi phân tách bằng dấu phẩy",
+                  type: "array",
+                  items: { type: "integer" },
+                  description: "Danh sách user id (chỉ chấp nhận mảng số)",
                 },
               },
             },
@@ -387,9 +383,9 @@ teamRouter.patch(
                   user_ids: [6, 7, 8],
                 },
               },
-              csvSample: {
+              emptyArraySample: {
                 value: {
-                  user_ids: "6,7,8",
+                  user_ids: [],
                 },
               },
             },

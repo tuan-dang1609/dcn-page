@@ -68,14 +68,6 @@ loginRouter.post(
                 password: { type: "string", example: "123456" },
               },
             },
-            examples: {
-              loginSample: {
-                value: {
-                  username: "Beacon",
-                  password: "123456",
-                },
-              },
-            },
           },
         },
       },

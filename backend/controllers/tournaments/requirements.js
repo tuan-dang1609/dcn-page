@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
-
-const requirementRouter = new Elysia();
+import middleware from "../../utils/middleware.js";
+const requirementRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Requirements";
 
 function toPgTextArray(arr) {

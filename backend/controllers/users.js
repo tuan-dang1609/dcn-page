@@ -42,15 +42,6 @@ usersRouter.post(
                 password: { type: "string", example: "123456" },
               },
             },
-            examples: {
-              createUserSample: {
-                value: {
-                  username: "Beacon",
-                  nickname: "Béo Cần",
-                  password: "123456",
-                },
-              },
-            },
           },
         },
       },
