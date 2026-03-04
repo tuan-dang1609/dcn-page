@@ -1,5 +1,4 @@
 import { Elysia } from "elysia";
-import { cors } from "@elysiajs/cors";
 import swagger from "@elysiajs/swagger";
 import { testConnection } from "./utils/db.js";
 import logger from "./utils/logger.js";
@@ -17,8 +16,68 @@ import playerTourRoute from "./controllers/tournaments/tournament_team_player.js
 import matchRouter from "./controllers/tournaments/matches.js";
 import bracketRouter from "./controllers/tournaments/brackets.js";
 
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
+];
+
+const buildCorsHeaders = (origin) => ({
+  "access-control-allow-origin": origin,
+  "access-control-allow-credentials": "true",
+  "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  "access-control-allow-headers": "Content-Type, Authorization",
+  vary: "Origin",
+});
+
 const app = new Elysia()
-  .use(cors())
+  .onRequest(({ request, set }) => {
+    const origin = request.headers.get("origin");
+
+    if (!origin || !allowedOrigins.includes(origin)) return;
+
+    set.headers = {
+      ...(set.headers ?? {}),
+      ...buildCorsHeaders(origin),
+    };
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: buildCorsHeaders(origin),
+      });
+    }
+  })
+  .onAfterHandle(({ request, response, set }) => {
+    const origin = request.headers.get("origin");
+    const pathname = new URL(request.url).pathname;
+
+    if (!origin || !allowedOrigins.includes(origin)) return;
+    if (!pathname.startsWith("/api")) return;
+
+    const headers = new Headers(
+      response instanceof Response
+        ? response.headers
+        : { "content-type": "application/json" },
+    );
+
+    Object.entries(buildCorsHeaders(origin)).forEach(([key, value]) => {
+      headers.set(key, value);
+    });
+
+    if (response instanceof Response) {
+      return new Response(response.body, {
+        status: response.status,
+        headers,
+      });
+    }
+
+    return new Response(JSON.stringify(response), {
+      status: Number(set.status) || 200,
+      headers,
+    });
+  })
   .use(
     swagger({
       path: "/docs",
