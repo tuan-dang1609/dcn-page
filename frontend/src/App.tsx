@@ -1,39 +1,36 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { APITester } from "./APITester";
-import "./index.css";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Layout from "./pages/tournaments/Index";
+import BracketPage from "./pages/tournaments/BracketPage";
+import PlayersPage from "./pages/tournaments/PlayersPage";
+import LeaderboardPage from "./pages/tournaments/LeaderboardPage";
+import RulePage from "./pages/tournaments/RulePage";
+import NotFound from "./pages/tournaments/NotFound";
 
-import logo from "./logo.svg";
-import reactLogo from "./react.svg";
+const queryClient = new QueryClient();
 
-export function App() {
-  return (
-    <div className="container mx-auto p-8 text-center relative z-10">
-      <div className="flex justify-center items-center gap-8 mb-8">
-        <img
-          src={logo}
-          alt="Bun Logo"
-          className="h-36 p-6 transition-all duration-300 hover:drop-shadow-[0_0_2em_#646cffaa] scale-120"
-        />
-        <img
-          src={reactLogo}
-          alt="React Logo"
-          className="h-36 p-6 transition-all duration-300 hover:drop-shadow-[0_0_2em_#61dafbaa] [animation:spin_20s_linear_infinite]"
-        />
-      </div>
-      <Card>
-        <CardHeader className="gap-4">
-          <CardTitle className="text-3xl font-bold">Bun + React</CardTitle>
-          <CardDescription>
-            Edit <code className="rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono">src/App.tsx</code> and save to
-            test HMR
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <APITester />
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/tournament/:game/:slug/" element={<Layout />}>
+            <Route path="bracket" element={<BracketPage />} />
+            <Route path="bracket/:matchId" element={<BracketPage />} />
+            <Route path="players" element={<PlayersPage />} />
+            <Route path="leaderboard" element={<LeaderboardPage />} />
+            <Route path="rule" element={<RulePage />} />
+          </Route>
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
 
 export default App;

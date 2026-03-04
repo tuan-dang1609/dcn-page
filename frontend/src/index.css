@@ -1,51 +1,114 @@
-@import "../styles/globals.css";
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300..700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 @layer base {
   :root {
-    @apply font-sans;
+    --background: 220 20% 10%;
+    --foreground: 0 0% 92%;
+
+    --card: 220 18% 14%;
+    --card-foreground: 0 0% 92%;
+
+    --popover: 220 18% 14%;
+    --popover-foreground: 0 0% 92%;
+
+    --primary: 50 100% 55%;
+    --primary-foreground: 0 0% 5%;
+
+    --secondary: 340 80% 60%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 220 15% 20%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 195 90% 50%;
+    --accent-foreground: 0 0% 5%;
+
+    --destructive: 0 84% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 28%;
+    --input: 220 15% 28%;
+    --ring: 50 100% 55%;
+
+    --radius: 1rem;
+
+    --neo-shadow: 4px 4px 0px hsl(0 0% 0% / 0.5);
+    --neo-shadow-sm: 2px 2px 0px hsl(0 0% 0% / 0.5);
+    --neo-shadow-lg: 6px 6px 0px hsl(0 0% 0% / 0.5);
+    --neo-border: 3px solid hsl(220 15% 28%);
+    --neo-border-sm: 2px solid hsl(220 15% 28%);
+
+    --success: 145 70% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 35 95% 55%;
+    --warning-foreground: 0 0% 5%;
+
+    --sidebar-background: 220 20% 10%;
+    --sidebar-foreground: 0 0% 92%;
+    --sidebar-primary: 50 100% 55%;
+    --sidebar-primary-foreground: 0 0% 5%;
+    --sidebar-accent: 195 90% 50%;
+    --sidebar-accent-foreground: 0 0% 5%;
+    --sidebar-border: 220 15% 28%;
+    --sidebar-ring: 50 100% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
   }
 
   body {
-    @apply grid place-items-center min-w-[320px] min-h-screen relative m-0 bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-sans font-bold;
   }
 }
 
-/* cool Bun background animation 😎 */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  opacity: 0.05;
-  background: url("./logo.svg");
-  background-size: 256px;
-  transform: rotate(-12deg) scale(1.35);
-  animation: slide 30s linear infinite;
-  pointer-events: none;
-}
+@layer utilities {
+  .neo-box {
+    border: var(--neo-border);
+    box-shadow: var(--neo-shadow);
+    border-radius: var(--radius);
+  }
 
-@keyframes slide {
-  from {
-    background-position: 0 0;
+  .neo-box-sm {
+    border: var(--neo-border-sm);
+    box-shadow: var(--neo-shadow-sm);
+    border-radius: var(--radius);
   }
-  to {
-    background-position: 256px 224px;
-  }
-}
 
-@keyframes spin {
-  from {
-    transform: rotate(0);
+  .neo-box-lg {
+    border: var(--neo-border);
+    box-shadow: var(--neo-shadow-lg);
+    border-radius: var(--radius);
   }
-  to {
-    transform: rotate(360deg);
-  }
-}
 
-@media (prefers-reduced-motion) {
-  *,
-  ::before,
-  ::after {
-    animation: none !important;
+  .neo-box-hover {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .neo-box-hover:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: var(--neo-shadow-lg);
+  }
+
+  .neo-btn {
+    border: var(--neo-border);
+    box-shadow: var(--neo-shadow);
+    border-radius: var(--radius);
+    font-weight: 700;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+  }
+  .neo-btn:active {
+    transform: translate(2px, 2px);
+    box-shadow: none;
   }
 }

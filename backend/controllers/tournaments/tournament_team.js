@@ -19,13 +19,16 @@ teamTourRoute.get(
       [tournamentId],
     );
 
-    if (tourTeam.length === 0) {
-      set.status = 400;
-      return { message: "Chưa có đội nào đăng ký cho giải này" };
-    }
+    // count total registered teams for this tournament
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM tournament_teams WHERE tournament_id = $1`,
+      [tournamentId],
+    );
+
+    const total = (countRows[0] && countRows[0].total) || 0;
 
     set.status = 200;
-    return tourTeam;
+    return { total, teams: tourTeam };
   },
   {
     tags: [TAG],

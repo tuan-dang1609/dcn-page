@@ -67,11 +67,18 @@ tournamentRouter.get(
         [tournament.created_by],
       );
 
+      const { rows: regCountRows } = await pool.query(
+        "SELECT COUNT(*)::int AS registered_count FROM tournament_teams WHERE tournament_id = $1",
+        [tournament.id],
+      );
+      const registered_count = regCountRows[0]?.registered_count ?? 0;
+
       set.status = 200;
       return {
         status: "success",
         info: {
           ...tournament,
+          registered_count,
           rule: rulesRows,
           requirement: requirementRows[0] || null,
           milestones: mRows,
