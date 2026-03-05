@@ -30,6 +30,8 @@ type DisplayMatch = {
   routeMatchId?: number;
   round: number;
   matchNo: number;
+  teamAId: number | null;
+  teamBId: number | null;
   p1: string;
   p2: string;
   p1Logo?: string | null;
@@ -548,8 +550,8 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       const response = await getMatchesByBracketId(bracketId);
       return response.data?.data ?? [];
     },
-    staleTime: Number.POSITIVE_INFINITY,
-    refetchOnMount: false,
+    staleTime: useMockDoubleElim ? Number.POSITIVE_INFINITY : 0,
+    refetchOnMount: useMockDoubleElim ? false : true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
@@ -590,6 +592,8 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
           routeMatchId: Number(match.id),
           round: Number(match.round_number ?? 0),
           matchNo: Number(match.match_no ?? 0),
+          teamAId,
+          teamBId,
           p1,
           p2,
           p1Logo: match.team_a?.logo_url ?? null,
@@ -600,6 +604,15 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
         };
       });
   }, [data, teamNameById]);
+
+  const inferredTeamCount = useMemo(() => {
+    const teamIds = new Set<number>();
+    for (const match of displayMatches) {
+      if (match.teamAId !== null) teamIds.add(match.teamAId);
+      if (match.teamBId !== null) teamIds.add(match.teamBId);
+    }
+    return teamIds.size;
+  }, [displayMatches]);
 
   const rounds = useMemo(() => {
     const grouped = new Map<number, DisplayMatch[]>();
@@ -666,7 +679,9 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   }, [rounds]);
 
   const eightTeamSpecial = useMemo(() => {
-    if (teamCount !== 8 || rounds.length < 8) return null;
+    const likelyEightTeamBracket = inferredTeamCount >= 7 || mockMode === "8";
+    if (!likelyEightTeamBracket) return null;
+    if (rounds.length < 8) return null;
 
     const byRound = new Map(rounds);
     const r1 = (byRound.get(1) ?? []).sort((a, b) => a.matchNo - b.matchNo);
@@ -701,10 +716,13 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       r7: r7[0],
       r8: r8[0],
     };
-  }, [rounds, teamCount]);
+  }, [rounds, inferredTeamCount, mockMode]);
 
   const sixTeamSpecial = useMemo(() => {
-    if (teamCount !== 6 || rounds.length < 8) return null;
+    const likelySixTeamBracket =
+      mockMode === "6" || (inferredTeamCount > 0 && inferredTeamCount <= 6);
+    if (!likelySixTeamBracket) return null;
+    if (rounds.length < 7) return null;
 
     const byRound = new Map(rounds);
     const r1 = (byRound.get(1) ?? []).sort((a, b) => a.matchNo - b.matchNo);
@@ -714,17 +732,15 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     const r5 = (byRound.get(5) ?? []).sort((a, b) => a.matchNo - b.matchNo);
     const r6 = (byRound.get(6) ?? []).sort((a, b) => a.matchNo - b.matchNo);
     const r7 = (byRound.get(7) ?? []).sort((a, b) => a.matchNo - b.matchNo);
-    const r8 = (byRound.get(8) ?? []).sort((a, b) => a.matchNo - b.matchNo);
 
     if (
       r1.length !== 2 ||
       r2.length !== 2 ||
       r3.length !== 1 ||
-      r4.length !== 1 ||
+      r4.length !== 2 ||
       r5.length !== 1 ||
       r6.length !== 1 ||
-      r7.length !== 1 ||
-      r8.length !== 1
+      r7.length !== 1
     ) {
       return null;
     }
@@ -733,13 +749,12 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       r1,
       r2,
       r3: r3[0],
-      r4: r4[0],
+      r4,
       r5: r5[0],
       r6: r6[0],
       r7: r7[0],
-      r8: r8[0],
     };
-  }, [rounds, teamCount]);
+  }, [rounds, inferredTeamCount, mockMode]);
 
   const layout = useMemo(() => {
     if (!rounds.length) return null;
@@ -876,7 +891,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               1,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
           <div
@@ -887,7 +902,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               2,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
           <div
@@ -898,7 +913,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               3,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
 
@@ -915,7 +930,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               4,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
           <div
@@ -931,7 +946,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               5,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
           <div
@@ -947,7 +962,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               6,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
           <div
@@ -963,7 +978,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               7,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
           <div
@@ -979,7 +994,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               8,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              8,
             )}
           </div>
 
@@ -1280,25 +1295,25 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     const y3 = (y2A + y2B + CARD_H) / 2 - CARD_H / 2;
 
     const lowerBase = y1B + CARD_H + 120;
-    const y4 = lowerBase;
-    const y5 = y4;
+    const y4A = lowerBase;
+    const y4B = lowerBase + CARD_H + 40;
+    const y5 = (y4A + y4B + CARD_H) / 2 - CARD_H / 2;
     const y6 = y5;
-    const y7 = y6;
-    const y8 = (y3 + y7 + CARD_H) / 2 - CARD_H / 2;
+    const y7 = (y3 + y6 + CARD_H) / 2 - CARD_H / 2;
 
     const totalW = x5 + CARD_W;
-    const totalH = y4 + CARD_H + HEADER_H + 24;
+    const totalH = y4B + CARD_H + HEADER_H + 24;
 
     const c1A = y1A + HEADER_H + CARD_H / 2;
     const c1B = y1B + HEADER_H + CARD_H / 2;
     const c2A = y2A + HEADER_H + CARD_H / 2;
     const c2B = y2B + HEADER_H + CARD_H / 2;
     const c3 = y3 + HEADER_H + CARD_H / 2;
-    const c4 = y4 + HEADER_H + CARD_H / 2;
+    const c4A = y4A + HEADER_H + CARD_H / 2;
+    const c4B = y4B + HEADER_H + CARD_H / 2;
     const c5 = y5 + HEADER_H + CARD_H / 2;
     const c6 = y6 + HEADER_H + CARD_H / 2;
     const c7 = y7 + HEADER_H + CARD_H / 2;
-    const c8 = y8 + HEADER_H + CARD_H / 2;
 
     return (
       <div className="space-y-3">
@@ -1313,7 +1328,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               1,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              6,
             )}
           </div>
           <div
@@ -1324,7 +1339,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               2,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              6,
             )}
           </div>
           <div
@@ -1335,7 +1350,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               3,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              6,
             )}
           </div>
 
@@ -1345,14 +1360,46 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               left: x1,
               width: CARD_W,
               textAlign: "center",
-              top: y4 - 28 + HEADER_H,
+              top: y4A - 28 + HEADER_H,
             }}
           >
             {getDoubleElimRoundTitle(
               4,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
+              6,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{
+              left: x5,
+              width: CARD_W,
+              textAlign: "center",
+              top: y7 - 28 + HEADER_H,
+            }}
+          >
+            {getDoubleElimRoundTitle(
+              7,
+              totalRounds,
+              firstRoundMatchCount,
+              6,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{
+              left: x4,
+              width: CARD_W,
+              textAlign: "center",
+              top: y6 - 28 + HEADER_H,
+            }}
+          >
+            {getDoubleElimRoundTitle(
+              6,
+              totalRounds,
+              firstRoundMatchCount,
+              6,
             )}
           </div>
           <div
@@ -1368,55 +1415,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               5,
               totalRounds,
               firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
-            style={{
-              left: x3,
-              width: CARD_W,
-              textAlign: "center",
-              top: y6 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(
               6,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
-            style={{
-              left: x4,
-              width: CARD_W,
-              textAlign: "center",
-              top: y7 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(
-              7,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
-            style={{
-              left: x5,
-              width: CARD_W,
-              textAlign: "center",
-              top: y8 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(
-              8,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
             )}
           </div>
 
@@ -1471,12 +1470,24 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             />
           </div>
 
-          <div className="absolute" style={{ left: x1, top: y4 + HEADER_H }}>
+          <div className="absolute" style={{ left: x1, top: y4A + HEADER_H }}>
             <MatchCard
-              match={sixTeamSpecial.r4}
+              match={sixTeamSpecial.r4[0]}
               hoveredPlayer={hoveredPlayer}
               onHover={setHoveredPlayer}
-              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r4.id)}
+              isInJourney={
+                !journeySet || journeySet.has(sixTeamSpecial.r4[0].id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x1, top: y4B + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r4[1]}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={
+                !journeySet || journeySet.has(sixTeamSpecial.r4[1].id)
+              }
             />
           </div>
           <div className="absolute" style={{ left: x2, top: y5 + HEADER_H }}>
@@ -1487,7 +1498,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r5.id)}
             />
           </div>
-          <div className="absolute" style={{ left: x3, top: y6 + HEADER_H }}>
+          <div className="absolute" style={{ left: x4, top: y6 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r6}
               hoveredPlayer={hoveredPlayer}
@@ -1495,20 +1506,12 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r6.id)}
             />
           </div>
-          <div className="absolute" style={{ left: x4, top: y7 + HEADER_H }}>
+          <div className="absolute" style={{ left: x5, top: y7 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r7}
               hoveredPlayer={hoveredPlayer}
               onHover={setHoveredPlayer}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r7.id)}
-            />
-          </div>
-          <div className="absolute" style={{ left: x5, top: y8 + HEADER_H }}>
-            <MatchCard
-              match={sixTeamSpecial.r8}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
-              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r8.id)}
             />
           </div>
 
@@ -1552,22 +1555,24 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           />
 
-          <ElbowConnector
+          <MergeConnector
             fromX={x1 + CARD_W}
-            fromY={c4}
+            fromYs={[c4A, c4B]}
             toX={x2}
             toY={c5}
             hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(sixTeamSpecial.r4.id) &&
-              journeySet.has(sixTeamSpecial.r5.id),
+            activeFrom={[
+              Boolean(journeySet && journeySet.has(sixTeamSpecial.r4[0].id)),
+              Boolean(journeySet && journeySet.has(sixTeamSpecial.r4[1].id)),
+            ]}
+            activeOutput={Boolean(
+              journeySet && journeySet.has(sixTeamSpecial.r5.id),
             )}
           />
           <ElbowConnector
             fromX={x2 + CARD_W}
             fromY={c5}
-            toX={x3}
+            toX={x4}
             toY={c6}
             hasHover={hoveredPlayer !== null}
             active={Boolean(
@@ -1576,31 +1581,18 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               journeySet.has(sixTeamSpecial.r6.id),
             )}
           />
-          <ElbowConnector
-            fromX={x3 + CARD_W}
-            fromY={c6}
-            toX={x4}
-            toY={c7}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(sixTeamSpecial.r6.id) &&
-              journeySet.has(sixTeamSpecial.r7.id),
-            )}
-          />
-
           <MergeConnector
             fromX={x4 + CARD_W}
-            fromYs={[c3, c7]}
+            fromYs={[c3, c6]}
             toX={x5}
-            toY={c8}
+            toY={c7}
             hasHover={hoveredPlayer !== null}
             activeFrom={[
               Boolean(journeySet && journeySet.has(sixTeamSpecial.r3.id)),
-              Boolean(journeySet && journeySet.has(sixTeamSpecial.r7.id)),
+              Boolean(journeySet && journeySet.has(sixTeamSpecial.r6.id)),
             ]}
             activeOutput={Boolean(
-              journeySet && journeySet.has(sixTeamSpecial.r8.id),
+              journeySet && journeySet.has(sixTeamSpecial.r7.id),
             )}
           />
         </div>

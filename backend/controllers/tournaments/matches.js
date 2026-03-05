@@ -141,12 +141,52 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
 
   const loserBracketId = toNumber(loserBracketRows[0]?.id);
 
+  const { rows: roundShapeRows } = await pool.query(
+    `
+    SELECT round_number, COUNT(*)::int AS total
+    FROM matches
+    WHERE bracket_id = $1
+    GROUP BY round_number
+    ORDER BY round_number ASC
+    `,
+    [updatedMatch.bracket_id],
+  );
+
+  const roundShape = roundShapeRows
+    .map((row) => `${Number(row.round_number)}:${Number(row.total)}`)
+    .join(",");
+
+  const isCompactSixSingleBracket =
+    !loserBracketId &&
+    roundShape === "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+
   let targetBracketId = loserBracketId;
   let targetRound = 1;
   let targetMatchNo = Math.ceil(currentMatchNo / 2);
   let preferredSlot = currentMatchNo % 2 === 1 ? "A" : "B";
 
-  if (loserBracketId) {
+  if (isCompactSixSingleBracket) {
+    targetBracketId = toNumber(updatedMatch.bracket_id);
+
+    const compactSixLoserMap = {
+      "1-1": { round: 4, matchNo: 2, slot: "A" },
+      "1-2": { round: 4, matchNo: 1, slot: "A" },
+      "2-1": { round: 4, matchNo: 1, slot: "B" },
+      "2-2": { round: 4, matchNo: 2, slot: "B" },
+      "3-1": { round: 6, matchNo: 1, slot: "A" },
+    };
+
+    const key = `${currentRound}-${currentMatchNo}`;
+    const target = compactSixLoserMap[key];
+
+    if (!target) {
+      return null;
+    }
+
+    targetRound = target.round;
+    targetMatchNo = target.matchNo;
+    preferredSlot = target.slot;
+  } else if (loserBracketId) {
     if (currentRound > 1) {
       targetRound = Math.max(1, currentRound * 2 - 2);
       targetMatchNo = currentMatchNo;

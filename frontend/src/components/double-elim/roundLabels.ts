@@ -30,6 +30,19 @@ export const getDoubleElimRoundTitle = (
   }
 
   if (teamCount === 6) {
+    if (totalRounds === 7) {
+      const labels: Record<number, string> = {
+        1: "PLAY-IN NHÁNH TRÊN",
+        2: "BÁN KẾT NHÁNH TRÊN",
+        3: "CHUNG KẾT NHÁNH TRÊN",
+        4: "LOẠI 1",
+        5: "LOẠI 2",
+        6: "CHUNG KẾT NHÁNH THUA",
+        7: "CHUNG KẾT TỔNG",
+      };
+      return labels[roundNumber] ?? `VÒNG ${roundNumber}`;
+    }
+
     const labels: Record<number, string> = {
       1: "PLAY-IN NHÁNH TRÊN",
       2: "BÁN KẾT NHÁNH TRÊN",

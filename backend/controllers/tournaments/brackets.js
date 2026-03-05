@@ -324,6 +324,144 @@ const generateSingleEliminationMatches = async ({
   };
 };
 
+const generateCompactSixTeamDoubleEliminationMatches = async ({
+  bracketId,
+  tournamentId,
+  teamIds,
+  bestOf = 1,
+}) => {
+  if (!Array.isArray(teamIds) || teamIds.length !== 6) {
+    return null;
+  }
+
+  const [seed1, seed2, seed3, seed4, seed5, seed6] = teamIds;
+
+  const insertMatch = async ({
+    round,
+    matchNo,
+    teamAId = null,
+    teamBId = null,
+    seedA = null,
+    seedB = null,
+  }) => {
+    const { rows } = await pool.query(
+      `
+      INSERT INTO matches (
+        bracket_id,
+        tournament_id,
+        round_number,
+        match_no,
+        seed_a,
+        seed_b,
+        team_a_id,
+        team_b_id,
+        best_of,
+        status
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING id
+      `,
+      [
+        bracketId,
+        tournamentId,
+        round,
+        matchNo,
+        seedA,
+        seedB,
+        teamAId,
+        teamBId,
+        bestOf,
+        "scheduled",
+      ],
+    );
+
+    return Number(rows[0]?.id);
+  };
+
+  const matchIds = {
+    r1m1: await insertMatch({
+      round: 1,
+      matchNo: 1,
+      teamAId: seed3,
+      teamBId: seed6,
+      seedA: 3,
+      seedB: 6,
+    }),
+    r1m2: await insertMatch({
+      round: 1,
+      matchNo: 2,
+      teamAId: seed4,
+      teamBId: seed5,
+      seedA: 4,
+      seedB: 5,
+    }),
+    r2m1: await insertMatch({
+      round: 2,
+      matchNo: 1,
+      teamAId: seed1,
+      teamBId: null,
+      seedA: 1,
+      seedB: null,
+    }),
+    r2m2: await insertMatch({
+      round: 2,
+      matchNo: 2,
+      teamAId: seed2,
+      teamBId: null,
+      seedA: 2,
+      seedB: null,
+    }),
+    r3m1: await insertMatch({ round: 3, matchNo: 1 }),
+    r4m1: await insertMatch({ round: 4, matchNo: 1 }),
+    r4m2: await insertMatch({ round: 4, matchNo: 2 }),
+    r5m1: await insertMatch({ round: 5, matchNo: 1 }),
+    r6m1: await insertMatch({ round: 6, matchNo: 1 }),
+    r7m1: await insertMatch({ round: 7, matchNo: 1 }),
+  };
+
+  const links = [
+    [matchIds.r1m1, matchIds.r2m1, "B"],
+    [matchIds.r1m2, matchIds.r2m2, "B"],
+    [matchIds.r2m1, matchIds.r3m1, "A"],
+    [matchIds.r2m2, matchIds.r3m1, "B"],
+    [matchIds.r3m1, matchIds.r7m1, "A"],
+
+    [matchIds.r4m1, matchIds.r5m1, "A"],
+    [matchIds.r4m2, matchIds.r5m1, "B"],
+    [matchIds.r5m1, matchIds.r6m1, "B"],
+    [matchIds.r6m1, matchIds.r7m1, "B"],
+  ];
+
+  for (const [fromMatchId, toMatchId, slot] of links) {
+    await pool.query(
+      `
+      UPDATE matches
+      SET next_match_id = $1, next_slot = $2
+      WHERE id = $3
+      `,
+      [toMatchId, slot, fromMatchId],
+    );
+  }
+
+  const { rows: matches } = await pool.query(
+    `
+    SELECT *
+    FROM matches
+    WHERE bracket_id = $1
+    ORDER BY round_number ASC, match_no ASC, id ASC
+    `,
+    [bracketId],
+  );
+
+  return {
+    matches,
+    bracketSize: 6,
+    winnerRounds: 3,
+    loserRounds: 4,
+    roundsTotal: 7,
+  };
+};
+
 const generateSwissMatches = async ({
   bracketId,
   tournamentId,
@@ -957,9 +1095,40 @@ bracketRouter.post(
       return { error: "team_ids chứa đội không thuộc tournament này" };
     }
 
+    if (Array.isArray(body?.team_ids)) {
+      const normalizedProvidedTeamIds = body.team_ids
+        .map((id) => toNumber(id))
+        .filter(Number.isFinite);
+
+      const seenTeamIds = new Set();
+      const duplicateTeamIds = [];
+      for (const teamId of normalizedProvidedTeamIds) {
+        if (seenTeamIds.has(teamId)) {
+          duplicateTeamIds.push(teamId);
+          continue;
+        }
+        seenTeamIds.add(teamId);
+      }
+
+      if (duplicateTeamIds.length > 0) {
+        set.status = 400;
+        return {
+          error: `team_ids bị trùng: ${[...new Set(duplicateTeamIds)].join(", ")}. Cần ${[4, 6, 8].join("/")} đội khác nhau cho double-elimination.`,
+        };
+      }
+    }
+
     if (!teamIds || teamIds.length < 2) {
       set.status = 400;
       return { error: "Cần tối thiểu 2 đội để tạo bracket" };
+    }
+
+    if (![4, 6, 8].includes(teamIds.length)) {
+      set.status = 400;
+      return {
+        error:
+          "Double-elimination hiện chỉ hỗ trợ 4, 6 hoặc 8 đội. Hãy truyền đúng team_ids hoặc cập nhật danh sách đội của giải.",
+      };
     }
 
     const bestOf = toNumber(body?.best_of) ?? 1;
@@ -972,147 +1141,229 @@ bracketRouter.post(
       status: body?.status ?? "scheduled",
     });
 
-    const winnerResult = await generateSingleEliminationMatches({
-      bracketId: Number(bracket.id),
-      tournamentId,
-      teamIds,
-      bestOf,
-      autoAdvanceByes: true,
-    });
+    let bracketSize = 0;
+    let winnerRounds = 0;
+    let loserMainRounds = 0;
+    let roundsTotal = 0;
+    let roundMap = {};
+    let note =
+      "Double-elimination được tạo trong 1 bracket duy nhất. Hỗ trợ 4/6/8 đội; với 6 đội sẽ auto-advance bye ở nhánh trên.";
 
-    const winnerRounds = Number(winnerResult.totalRounds);
-    const bracketSize = Number(winnerResult.bracketSize);
+    if (teamIds.length === 6) {
+      const compactSixResult = await generateCompactSixTeamDoubleEliminationMatches(
+        {
+          bracketId: Number(bracket.id),
+          tournamentId,
+          teamIds,
+          bestOf,
+        },
+      );
 
-    const loserMainRounds = Math.max(1, 2 * (winnerRounds - 1));
-    const loserTotalRounds = loserMainRounds + 1;
-    const loserRoundMatchIds = [];
-
-    for (
-      let loserRoundIndex = 1;
-      loserRoundIndex <= loserMainRounds;
-      loserRoundIndex += 1
-    ) {
-      const exponent = Math.floor((loserRoundIndex + 1) / 2) + 1;
-      const matchCount = Math.max(1, bracketSize / 2 ** exponent);
-      const currentRoundIds = [];
-      const absoluteRoundNumber = winnerRounds + loserRoundIndex;
-
-      for (let matchNo = 1; matchNo <= matchCount; matchNo += 1) {
-        const { rows: insertedRows } = await pool.query(
-          `
-          INSERT INTO matches (
-            bracket_id,
-            tournament_id,
-            round_number,
-            match_no,
-            best_of,
-            status
-          )
-          VALUES ($1,$2,$3,$4,$5,$6)
-          RETURNING id
-          `,
-          [
-            Number(bracket.id),
-            tournamentId,
-            absoluteRoundNumber,
-            matchNo,
-            bestOf,
-            "scheduled",
-          ],
-        );
-
-        currentRoundIds.push(Number(insertedRows[0]?.id));
-      }
-
-      loserRoundMatchIds.push(currentRoundIds);
-    }
-
-    const { rows: grandFinalRows } = await pool.query(
-      `
-      INSERT INTO matches (
-        bracket_id,
-        tournament_id,
-        round_number,
-        match_no,
-        best_of,
-        status
-      )
-      VALUES ($1,$2,$3,$4,$5,$6)
-      RETURNING id
-      `,
-      [
-        Number(bracket.id),
+      bracketSize = Number(compactSixResult?.bracketSize ?? 6);
+      winnerRounds = Number(compactSixResult?.winnerRounds ?? 3);
+      loserMainRounds = Number(compactSixResult?.loserRounds ?? 4);
+      roundsTotal = Number(compactSixResult?.roundsTotal ?? 7);
+      roundMap = {
+        winner_rounds: {
+          1: "Play-in nhánh trên",
+          2: "Bán kết nhánh trên",
+          3: "Chung kết nhánh trên",
+        },
+        loser_rounds: {
+          4: "Loại 1",
+          5: "Loại 2",
+          6: "Chung kết nhánh thua",
+          7: "Chung kết tổng",
+        },
+      };
+      note =
+        "Double-elimination 6 đội được tạo theo compact layout (2-2-1-2-1-1-1), khớp style bracket 6 đội ở frontend.";
+    } else {
+      const winnerResult = await generateSingleEliminationMatches({
+        bracketId: Number(bracket.id),
         tournamentId,
-        winnerRounds + loserTotalRounds,
-        1,
+        teamIds,
         bestOf,
-        "scheduled",
-      ],
-    );
-    const grandFinalMatchId = Number(grandFinalRows[0]?.id);
+        autoAdvanceByes: true,
+      });
 
-    for (let round = 1; round <= loserMainRounds - 1; round += 1) {
-      const currentRound = loserRoundMatchIds[round - 1];
-      const nextRound = loserRoundMatchIds[round];
+      winnerRounds = Number(winnerResult.totalRounds);
+      bracketSize = Number(winnerResult.bracketSize);
 
-      for (let index = 0; index < currentRound.length; index += 1) {
-        const currentMatchId = currentRound[index];
+      const loserTotalRounds = Math.max(1, 2 * (winnerRounds - 1)) + 1;
+      loserMainRounds = loserTotalRounds - 1;
+      roundsTotal = winnerRounds + loserTotalRounds;
+      const loserRoundMatchIds = [];
 
-        let targetMatchId = null;
-        let nextSlot = "A";
+      for (
+        let loserRoundIndex = 1;
+        loserRoundIndex <= loserMainRounds;
+        loserRoundIndex += 1
+      ) {
+        const exponent = Math.floor((loserRoundIndex + 1) / 2) + 1;
+        const matchCount = Math.max(1, bracketSize / 2 ** exponent);
+        const currentRoundIds = [];
+        const absoluteRoundNumber = winnerRounds + loserRoundIndex;
 
-        if (round % 2 === 1) {
-          targetMatchId = nextRound[index] ?? null;
-          nextSlot = "A";
-        } else {
-          targetMatchId = nextRound[Math.floor(index / 2)] ?? null;
-          nextSlot = index % 2 === 0 ? "A" : "B";
+        for (let matchNo = 1; matchNo <= matchCount; matchNo += 1) {
+          const { rows: insertedRows } = await pool.query(
+            `
+            INSERT INTO matches (
+              bracket_id,
+              tournament_id,
+              round_number,
+              match_no,
+              best_of,
+              status
+            )
+            VALUES ($1,$2,$3,$4,$5,$6)
+            RETURNING id
+            `,
+            [
+              Number(bracket.id),
+              tournamentId,
+              absoluteRoundNumber,
+              matchNo,
+              bestOf,
+              "scheduled",
+            ],
+          );
+
+          currentRoundIds.push(Number(insertedRows[0]?.id));
         }
 
-        if (!targetMatchId) continue;
+        loserRoundMatchIds.push(currentRoundIds);
+      }
 
+      const { rows: grandFinalRows } = await pool.query(
+        `
+        INSERT INTO matches (
+          bracket_id,
+          tournament_id,
+          round_number,
+          match_no,
+          best_of,
+          status
+        )
+        VALUES ($1,$2,$3,$4,$5,$6)
+        RETURNING id
+        `,
+        [
+          Number(bracket.id),
+          tournamentId,
+          winnerRounds + loserTotalRounds,
+          1,
+          bestOf,
+          "scheduled",
+        ],
+      );
+      const grandFinalMatchId = Number(grandFinalRows[0]?.id);
+
+      for (let round = 1; round <= loserMainRounds - 1; round += 1) {
+        const currentRound = loserRoundMatchIds[round - 1];
+        const nextRound = loserRoundMatchIds[round];
+
+        for (let index = 0; index < currentRound.length; index += 1) {
+          const currentMatchId = currentRound[index];
+
+          let targetMatchId = null;
+          let nextSlot = "A";
+
+          if (round % 2 === 1) {
+            targetMatchId = nextRound[index] ?? null;
+            nextSlot = "A";
+          } else {
+            targetMatchId = nextRound[Math.floor(index / 2)] ?? null;
+            nextSlot = index % 2 === 0 ? "A" : "B";
+          }
+
+          if (!targetMatchId) continue;
+
+          await pool.query(
+            `
+            UPDATE matches
+            SET next_match_id = $1, next_slot = $2
+            WHERE id = $3
+            `,
+            [targetMatchId, nextSlot, currentMatchId],
+          );
+        }
+      }
+
+      const lastLoserMainRound = loserRoundMatchIds[loserMainRounds - 1] ?? [];
+      if (lastLoserMainRound[0] && grandFinalMatchId) {
         await pool.query(
           `
           UPDATE matches
-          SET next_match_id = $1, next_slot = $2
-          WHERE id = $3
+          SET next_match_id = $1, next_slot = 'B'
+          WHERE id = $2
           `,
-          [targetMatchId, nextSlot, currentMatchId],
+          [grandFinalMatchId, lastLoserMainRound[0]],
         );
       }
-    }
 
-    const lastLoserMainRound = loserRoundMatchIds[loserMainRounds - 1] ?? [];
-    if (lastLoserMainRound[0] && grandFinalMatchId) {
-      await pool.query(
-        `
-        UPDATE matches
-        SET next_match_id = $1, next_slot = 'B'
-        WHERE id = $2
-        `,
-        [grandFinalMatchId, lastLoserMainRound[0]],
-      );
-    }
+      const winnerFinalMatchId =
+        winnerResult.roundMatchIds[winnerRounds - 1]?.[0] ?? null;
+      if (winnerFinalMatchId && grandFinalMatchId) {
+        await pool.query(
+          `
+          UPDATE matches
+          SET next_match_id = $1, next_slot = 'A'
+          WHERE id = $2
+          `,
+          [grandFinalMatchId, winnerFinalMatchId],
+        );
+      }
 
-    const winnerFinalMatchId =
-      winnerResult.roundMatchIds[winnerRounds - 1]?.[0] ?? null;
-    if (winnerFinalMatchId && grandFinalMatchId) {
-      await pool.query(
-        `
-        UPDATE matches
-        SET next_match_id = $1, next_slot = 'A'
-        WHERE id = $2
-        `,
-        [grandFinalMatchId, winnerFinalMatchId],
-      );
+      roundMap = {
+        winner_rounds: {
+          1: winnerRounds >= 3 ? "Tứ kết nhánh trên" : "Bán kết nhánh trên",
+          2: "Bán kết nhánh trên",
+          3: "Chung kết nhánh trên",
+        },
+        loser_rounds: {
+          [winnerRounds + 1]: "Vòng loại 1",
+          [winnerRounds + 2]: "Vòng loại 2",
+          [winnerRounds + 3]: "Tranh hạng 4",
+          [winnerRounds + 4]: "Tranh hạng 3",
+          [winnerRounds + 5]: "Chung kết tổng",
+        },
+      };
     }
 
     const { rows: allMatches } = await pool.query(
       `
-      SELECT *
-      FROM matches
-      WHERE bracket_id = $1
-      ORDER BY round_number ASC, match_no ASC, id ASC
+      SELECT m.id,
+             m.bracket_id,
+             m.round_number,
+             m.match_no,
+             m.team_a_id,
+             m.team_b_id,
+             m.seed_a,
+             m.seed_b,
+             m.score_a,
+             m.score_b,
+             m.winner_team_id,
+             m.status,
+             json_build_object(
+               'id', t1.id,
+               'name', t1.name,
+               'short_name', t1.short_name,
+               'logo_url', t1.logo_url,
+               'team_color_hex', t1.team_color_hex
+             ) AS team_a,
+             json_build_object(
+               'id', t2.id,
+               'name', t2.name,
+               'short_name', t2.short_name,
+               'logo_url', t2.logo_url,
+               'team_color_hex', t2.team_color_hex
+             ) AS team_b
+      FROM matches m
+      LEFT JOIN teams t1 ON t1.id = m.team_a_id
+      LEFT JOIN teams t2 ON t2.id = m.team_b_id
+      WHERE m.bracket_id = $1
+      ORDER BY m.round_number ASC, m.match_no ASC, m.id ASC
       `,
       [bracket.id],
     );
@@ -1131,23 +1382,10 @@ bracketRouter.post(
         bracket_size: bracketSize,
         winner_rounds: winnerRounds,
         loser_rounds: loserMainRounds,
-        rounds_total: winnerRounds + loserTotalRounds,
+        rounds_total: roundsTotal,
         matches: allMatches,
-        round_map: {
-          winner_rounds: {
-            1: winnerRounds >= 3 ? "Tứ kết nhánh trên" : "Bán kết nhánh trên",
-            2: "Bán kết nhánh trên",
-            3: "Chung kết nhánh trên",
-          },
-          loser_rounds: {
-            [winnerRounds + 1]: "Vòng loại 1",
-            [winnerRounds + 2]: "Vòng loại 2",
-            [winnerRounds + 3]: "Tranh hạng 4",
-            [winnerRounds + 4]: "Tranh hạng 3",
-            [winnerRounds + 5]: "Chung kết tổng",
-          },
-        },
-        note: "Double-elimination được tạo trong 1 bracket duy nhất. Hỗ trợ 4/6/8 đội; với 6 đội sẽ auto-advance bye ở nhánh trên.",
+        round_map: roundMap,
+        note,
       },
     };
   },
