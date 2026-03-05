@@ -51,7 +51,14 @@ tournamentRouter.get(
         "SELECT * FROM rules WHERE tournament_id = $1 ORDER BY id",
         [tournament.id],
       );
-
+      const { rows: tourTeam } = await pool.query(
+        `SELECT tt.id, t.name, t.short_name, t.logo_url, t.team_color_hex, u.nickname, t.created_at
+     FROM tournament_teams tt
+     JOIN teams t ON t.id = tt.team_id
+     JOIN users u ON u.id = t.created_by
+     WHERE tt.tournament_id = $1`,
+        [tournament.id],
+      );
       const { rows: requirementRows } = await pool.query(
         `SELECT r.device, r.discord, rg1.name AS rank_min, rg2.name AS rank_max
        FROM requirements r
@@ -79,6 +86,7 @@ tournamentRouter.get(
         info: {
           ...tournament,
           registered_count,
+          registered: tourTeam,
           rule: rulesRows,
           requirement: requirementRows[0] || null,
           milestones: mRows,

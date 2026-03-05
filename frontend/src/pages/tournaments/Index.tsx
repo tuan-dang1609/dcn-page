@@ -3,23 +3,15 @@ import Navigation from "@/components/Navigation";
 import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
-import tournamentService from "@/services/tournaments";
+import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
 import { Outlet, useMatch } from "react-router-dom";
 import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+
 const Layout = () => {
   const isTournamentHome = Boolean(useMatch("/tournament/:game/:slug"));
   const { game, slug } = useParams();
-  const { data, isLoading } = useQuery({
-    queryKey: ["tournament", game, slug],
-    enabled: Boolean(game && slug),
-    queryFn: async () => {
-      const response = await tournamentService.getBySlug(game!, slug!);
-      return response.data;
-    },
-  });
+  const { tournament, isLoading } = useTournamentBySlug(game, slug);
 
-  const tournament = data?.info;
   return (
     <div className="min-h-screen bg-background">
       <div className="space-y-8">
@@ -39,7 +31,7 @@ const Layout = () => {
               </div>
             </div>
           ) : (
-            <Outlet />
+            <Outlet context={{ tournament, isLoading }} />
           )}
         </div>
       </div>

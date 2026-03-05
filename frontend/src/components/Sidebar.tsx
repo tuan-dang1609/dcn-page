@@ -25,7 +25,7 @@ const Sidebar = ({ tournament, isLoading }) => {
                 className="rounded-full"
                 style={{
                   padding: 3,
-                  background: `conic-gradient(hsl(var(--warning)) ${progressPercent}%, hsl(var(--muted)) ${progressPercent}% 100%)`,
+                  background: `conic-gradient(hsl(var(--primary)) ${progressPercent}%, hsl(var(--muted)) ${progressPercent}% 100%)`,
                 }}
               >
                 <div className="w-8 h-8 rounded-full bg-card flex items-center justify-center">
@@ -37,7 +37,7 @@ const Sidebar = ({ tournament, isLoading }) => {
                     />
                   ) : (
                     <div className="w-8 h-8 rounded-full bg-[#2b2b2b] flex items-center justify-center">
-                      <Check className="w-4 h-4 text-yellow-400" />
+                      <Check className="w-4 h-4 text-primary font-bold" />
                     </div>
                   )}
                 </div>

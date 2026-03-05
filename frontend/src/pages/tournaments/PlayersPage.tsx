@@ -1,18 +1,42 @@
-import { players, TOURNAMENT_LOGO } from "@/data/tournament";
+import { useOutletContext } from "react-router-dom";
+
+type PlayersOutletContext = {
+  tournament?: {
+    registered?: Array<{
+      id?: number | string;
+      name?: string;
+      logo_url?: string;
+      team_color_hex?: string;
+    }>;
+  };
+  isLoading?: boolean;
+};
 
 const PlayersPage = () => {
+  const { tournament, isLoading } = useOutletContext<PlayersOutletContext>();
+
+  const apiPlayersRaw = tournament?.registered ?? [];
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-heading">Người chơi</h2>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Đang tải người chơi...</p>
+      ) : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {players.map((player, i) => (
-          <div key={player} className="neo-box-sm bg-card p-4 flex items-center gap-3 hover:bg-muted/30 transition-colors">
-            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/20 text-primary font-bold text-sm">
-              {i + 1}
-            </div>
+        {apiPlayersRaw.map((participant, i) => (
+          <div
+            key={`${participant.id}-${participant.name}`}
+            className="neo-box-sm bg-card p-4 flex items-center gap-3 hover:bg-muted/30 transition-colors"
+            style={{ backgroundColor: participant.team_color_hex || "#2b2b2b" }}
+          >
             <div className="flex items-center gap-2">
-              <img src={TOURNAMENT_LOGO} alt="" className="w-5 h-5 rounded-sm" />
-              <span className="font-bold">{player}</span>
+              <img
+                src={participant.logo_url}
+                alt={participant.name}
+                className="w-5 h-5"
+              />
+              <span className="font-bold">{participant.name}</span>
             </div>
           </div>
         ))}

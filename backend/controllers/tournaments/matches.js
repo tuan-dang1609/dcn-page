@@ -203,10 +203,37 @@ matchRouter.get(
 
     const { rows } = await pool.query(
       `
-      SELECT *
-      FROM matches
-      WHERE bracket_id = $1
-      ORDER BY round_number ASC, match_no ASC, id ASC
+      SELECT m.id,
+             m.bracket_id,
+             m.round_number,
+             m.match_no,
+             m.team_a_id,
+             m.team_b_id,
+             m.seed_a,
+             m.seed_b,
+             m.score_a,
+             m.score_b,
+             m.winner_team_id,
+             m.status,
+             json_build_object(
+               'id', t1.id,
+               'name', t1.name,
+               'short_name', t1.short_name,
+               'logo_url', t1.logo_url,
+               'team_color_hex', t1.team_color_hex
+             ) AS team_a,
+             json_build_object(
+               'id', t2.id,
+               'name', t2.name,
+               'short_name', t2.short_name,
+               'logo_url', t2.logo_url,
+               'team_color_hex', t2.team_color_hex
+             ) AS team_b
+      FROM matches m
+      LEFT JOIN teams t1 ON t1.id = m.team_a_id
+      LEFT JOIN teams t2 ON t2.id = m.team_b_id
+      WHERE m.bracket_id = $1
+      ORDER BY m.round_number ASC, m.match_no ASC, m.id ASC
       `,
       [bracketId],
     );
