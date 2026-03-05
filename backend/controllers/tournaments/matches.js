@@ -113,6 +113,19 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
     return null;
   }
 
+  const { rows: roundOneCountRows } = await pool.query(
+    `
+    SELECT COUNT(*)::int AS total
+    FROM matches
+    WHERE bracket_id = $1 AND round_number = 1
+    `,
+    [updatedMatch.bracket_id],
+  );
+
+  const roundOneMatchCount = Number(roundOneCountRows[0]?.total ?? 0);
+  const winnerRounds =
+    roundOneMatchCount > 0 ? Math.max(1, Math.log2(roundOneMatchCount * 2)) : 1;
+
   const { rows: loserBracketRows } = await pool.query(
     `
     SELECT id
@@ -126,23 +139,49 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
     [bracket.tournament_id, bracket.format_id],
   );
 
-  if (loserBracketRows.length === 0) {
-    return null;
-  }
+  const loserBracketId = toNumber(loserBracketRows[0]?.id);
 
-  const loserBracketId = toNumber(loserBracketRows[0].id);
-  if (!loserBracketId) {
-    return null;
-  }
-
+  let targetBracketId = loserBracketId;
   let targetRound = 1;
   let targetMatchNo = Math.ceil(currentMatchNo / 2);
   let preferredSlot = currentMatchNo % 2 === 1 ? "A" : "B";
 
-  if (currentRound > 1) {
-    targetRound = Math.max(1, currentRound * 2 - 2);
-    targetMatchNo = currentMatchNo;
-    preferredSlot = "B";
+  if (loserBracketId) {
+    if (currentRound > 1) {
+      targetRound = Math.max(1, currentRound * 2 - 2);
+      targetMatchNo = currentMatchNo;
+      preferredSlot = "B";
+    }
+  } else {
+    // Single-bracket double elimination mode
+    if (currentRound > winnerRounds) {
+      return null;
+    }
+
+    targetBracketId = toNumber(updatedMatch.bracket_id);
+    const loserMainRounds = Math.max(1, 2 * (winnerRounds - 1));
+
+    let targetLoserRoundIndex = 1;
+
+    if (currentRound === 1) {
+      targetLoserRoundIndex = 1;
+      targetMatchNo = Math.ceil(currentMatchNo / 2);
+      preferredSlot = currentMatchNo % 2 === 1 ? "A" : "B";
+    } else if (currentRound < winnerRounds) {
+      targetLoserRoundIndex = Math.max(2, currentRound * 2 - 2);
+      targetMatchNo = currentMatchNo;
+      preferredSlot = "B";
+    } else {
+      targetLoserRoundIndex = loserMainRounds;
+      targetMatchNo = 1;
+      preferredSlot = "B";
+    }
+
+    targetRound = winnerRounds + targetLoserRoundIndex;
+  }
+
+  if (!targetBracketId) {
+    return null;
   }
 
   const { rows: targetRows } = await pool.query(
@@ -155,7 +194,7 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
     ORDER BY id ASC
     LIMIT 1
     `,
-    [loserBracketId, targetRound, targetMatchNo],
+    [targetBracketId, targetRound, targetMatchNo],
   );
 
   if (targetRows.length === 0) {

@@ -6,6 +6,7 @@ import {
   type Bracket,
 } from "@/api/tournaments/index";
 import SingleElimBracket from "@/components/BracketView";
+import DoubleElimBracket from "@/components/DoubleElimBracket";
 
 type BracketOutletContext = {
   tournament?: {
@@ -101,10 +102,15 @@ const BracketPage = () => {
           <SingleElimBracket bracketId={selectedBracketId} />
         ) : null}
 
-        {selectedBracket && selectedFormatId !== 1 ? (
+        {selectedFormatId === 2 ? (
+          <DoubleElimBracket bracketId={selectedBracketId} />
+        ) : null}
+
+        {selectedBracket && selectedFormatId !== 1 && selectedFormatId !== 2 ? (
           <p className="text-sm text-muted-foreground">
             Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ
-            hỗ trợ hiển thị Single Elimination (format_id = 1).
+            hỗ trợ hiển thị Single Elimination (format_id = 1) và Double
+            Elimination (format_id = 2).
           </p>
         ) : null}
       </div>
