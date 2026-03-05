@@ -32,6 +32,8 @@ const connectorPairs = [
   { from: [5, 6], to: 7 },
 ];
 
+const connectorPairs4 = [{ from: [1, 2], to: 3 }];
+
 interface PlayerRowProps {
   name: string;
   score: number | null;
@@ -136,6 +138,7 @@ const Connector = ({
 const SingleElimBracket = () => {
   const [hoveredPlayer, setHoveredPlayer] = useState<string | null>(null);
   const journeySet = useMemo(() => hoveredPlayer ? getPlayerJourney(hoveredPlayer, singleElimMatches) : null, [hoveredPlayer]);
+  const isFourTeam = singleElimMatches.length <= 3;
 
   const matchMap = useMemo(() => {
     const m: Record<number, Match> = {};
@@ -146,7 +149,7 @@ const SingleElimBracket = () => {
   const getConnState = (i: number): { activeFrom: "top" | "bottom" | null; hasOutput: boolean } => {
     if (!journeySet) return { activeFrom: null, hasOutput: false };
 
-    const pair = connectorPairs[i];
+    const pair = isFourTeam ? connectorPairs4[i] : connectorPairs[i];
     const topInPath = journeySet.has(pair.from[0]);
     const bottomInPath = journeySet.has(pair.from[1]);
     const activeFrom = topInPath ? "top" : bottomInPath ? "bottom" : null;
@@ -161,28 +164,61 @@ const SingleElimBracket = () => {
   const col2 = CARD_W + CONN_W;
   const col3 = 2 * CARD_W + CONN_W;
   const col4 = 2 * CARD_W + 2 * CONN_W;
-  const totalW = 3 * CARD_W + 2 * CONN_W;
+  const totalW = isFourTeam ? 2 * CARD_W + CONN_W : 3 * CARD_W + 2 * CONN_W;
+
+  const sfTops4 = [0, CARD_H + QF_PAIR_GAP];
+  const finalTop4 = (sfTops4[0] + sfTops4[1] + CARD_H) / 2 - CARD_H / 2;
+  const totalH4 = sfTops4[1] + CARD_H;
 
   // Connector exits from midpoint between two player rows = center of card
   const qfMids = qfTops.map(t => t + CARD_H / 2);
   const sfMids = sfTops.map(t => t + CARD_H / 2);
   const finalMid = finalTop + CARD_H / 2;
+  const sfMids4 = sfTops4.map(t => t + CARD_H / 2);
+  const finalMid4 = finalTop4 + CARD_H / 2;
+
+  if (isFourTeam) {
+    return (
+      <div className="relative" style={{ width: totalW, height: totalH4 + HEADER_H }}>
+        <div className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider" style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}>Bán kết</div>
+        <div className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider" style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}>Chung kết</div>
+
+        {[1, 2].map((id, i) => (
+          <div key={id} className="absolute" style={{ left: 0, top: sfTops4[i] + HEADER_H }}>
+            <MatchCard match={matchMap[id]} hoveredPlayer={hoveredPlayer} onHover={setHoveredPlayer} />
+          </div>
+        ))}
+
+        <div className="absolute" style={{ left: col1, width: CONN_W, top: 0, height: totalH4 + HEADER_H }}>
+          <Connector
+            y1={sfMids4[0]}
+            y2={sfMids4[1]}
+            outY={finalMid4}
+            hasHover={hoveredPlayer !== null}
+            activeFrom={getConnState(0).activeFrom}
+            hasOutput={getConnState(0).hasOutput}
+          />
+        </div>
+
+        <div className="absolute" style={{ left: col2, top: finalTop4 + HEADER_H }}>
+          <MatchCard match={matchMap[3]} hoveredPlayer={hoveredPlayer} onHover={setHoveredPlayer} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative" style={{ width: totalW, height: totalH + HEADER_H }}>
-      {/* Round labels */}
       <div className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider" style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}>Tứ kết</div>
       <div className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider" style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}>Bán kết</div>
       <div className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider" style={{ left: col4, width: CARD_W, textAlign: "center", top: 0 }}>Chung kết</div>
 
-      {/* QF */}
       {[1, 2, 3, 4].map((id, i) => (
         <div key={id} className="absolute" style={{ left: 0, top: qfTops[i] + HEADER_H }}>
           <MatchCard match={matchMap[id]} hoveredPlayer={hoveredPlayer} onHover={setHoveredPlayer} />
         </div>
       ))}
 
-      {/* QF→SF connectors */}
       <div className="absolute" style={{ left: col1, width: CONN_W, top: 0, height: totalH + HEADER_H }}>
         <Connector
           y1={qfMids[0]}
@@ -202,14 +238,12 @@ const SingleElimBracket = () => {
         />
       </div>
 
-      {/* SF */}
       {[5, 6].map((id, i) => (
         <div key={id} className="absolute" style={{ left: col2, top: sfTops[i] + HEADER_H }}>
           <MatchCard match={matchMap[id]} hoveredPlayer={hoveredPlayer} onHover={setHoveredPlayer} />
         </div>
       ))}
 
-      {/* SF→F connector */}
       <div className="absolute" style={{ left: col3, width: CONN_W, top: 0, height: totalH + HEADER_H }}>
         <Connector
           y1={sfMids[0]}
@@ -221,7 +255,6 @@ const SingleElimBracket = () => {
         />
       </div>
 
-      {/* Final */}
       <div className="absolute" style={{ left: col4, top: finalTop + HEADER_H }}>
         <MatchCard match={matchMap[7]} hoveredPlayer={hoveredPlayer} onHover={setHoveredPlayer} />
       </div>

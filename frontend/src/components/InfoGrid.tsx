@@ -98,12 +98,12 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
 
   return (
     <div>
-      <h2 className="text-2xl mb-4 font-heading">Thông tin</h2>
+      <h2 className="text-2xl mb-4 font-bold">Thông tin</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {infoItems.map((item) => (
           <div
             key={item.label}
-            className="neo-box bg-card p-4 flex items-center gap-4 neo-box-hover"
+            className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 hover:border-primary/30 transition-colors"
           >
             {item.imageUrl ? (
               <img
@@ -112,7 +112,7 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
                 className="w-12 h-12  object-cover"
               />
             ) : (
-              <div className={`${item.color} p-3 rounded-lg neo-box-sm`}>
+              <div className={`bg-primary/10 p-3 rounded-lg neo-box-sm`}>
                 <item.icon className="w-6 h-6 text-foreground" />
               </div>
             )}

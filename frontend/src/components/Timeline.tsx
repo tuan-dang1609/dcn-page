@@ -21,29 +21,23 @@ const Timeline = ({ tournament }) => {
 
   return (
     <div>
-      <h2 className="text-2xl mb-6 font-heading">Tiến Trình</h2>
+      <h2 className="text-2xl mb-6 font-bold">Tiến Trình</h2>
       <div className="space-y-0">
         {tournament?.milestones.map((event, index) => (
           <div key={index} className="relative flex gap-4">
-            {/* Line */}
             <div className="flex flex-col items-center">
-              <div className="bg-success rounded-full p-0.5 neo-box-sm z-10">
-                <CheckCircle2 className="w-5 h-5 text-success-foreground" />
+              <div className="bg-primary/10 border border-primary/30 rounded-full p-0.5 z-10">
+                <CheckCircle2 className="w-5 h-5 text-primary" />
               </div>
               {index < tournament?.milestones.length - 1 && (
-                <div className="w-0.5 bg-border flex-1 min-h-[40px]" />
+                <div className="w-px bg-border flex-1 min-h-[40px]" />
               )}
             </div>
-            {/* Content */}
             <div className="pb-6 flex-1">
-              <p className="text-xs text-muted-foreground  mb-1">
-                {formatDateTime(event.milestone_time)}
-              </p>
-              <h3 className="font-bold text-lg">{event.title}</h3>
+              <p className="text-xs text-muted-foreground mb-1">{formatDateTime(event.milestone_time)}</p>
+              <h3 className="font-semibold text-base">{event.title}</h3>
               {event.context && (
-                <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                  {event.context}
-                </p>
+                <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{event.context}</p>
               )}
             </div>
           </div>

@@ -15,7 +15,7 @@ export const players = [
 export const TOURNAMENT_LOGO = "https://placehold.co/20x20/1a1a2e/e0e0e0?text=⚔";
 
 // Single Elimination
-export const singleElimMatches: Match[] = [
+export const singleElimMatches8: Match[] = [
   { id: 1, p1: players[0], p2: players[1], s1: 3, s2: 1, winner: players[0] },
   { id: 2, p1: players[2], p2: players[3], s1: 0, s2: 3, winner: players[3] },
   { id: 3, p1: players[4], p2: players[5], s1: 3, s2: 2, winner: players[4] },
@@ -24,6 +24,18 @@ export const singleElimMatches: Match[] = [
   { id: 6, p1: players[4], p2: players[7], s1: 1, s2: 3, winner: players[7] },
   { id: 7, p1: players[0], p2: players[7], s1: null, s2: null, winner: null },
 ];
+
+export const singleElimMatches4: Match[] = [
+  { id: 1, p1: players[0], p2: players[1], s1: 3, s2: 1, winner: players[0] },
+  { id: 2, p1: players[2], p2: players[3], s1: 2, s2: 3, winner: players[3] },
+  { id: 3, p1: players[0], p2: players[3], s1: null, s2: null, winner: null },
+];
+
+export function getSingleElimMatchesByPlayerCount(playerCount: number): Match[] {
+  return playerCount <= 4 ? singleElimMatches4 : singleElimMatches8;
+}
+
+export const singleElimMatches = getSingleElimMatchesByPlayerCount(players.length);
 
 // Swiss bracket rounds
 export interface SwissMatch {
@@ -96,6 +108,17 @@ export function getPlayerJourney(player: string, matches: Match[]): Set<number> 
 
 export function getLeaderboard(matches: Match[]): { player: string; wins: number; losses: number; roundReached: string }[] {
   const stats: Record<string, { wins: number; losses: number; lastMatchId: number }> = {};
+  const matchCount = matches.length;
+  const roundReachedByMatchId = (matchId: number) => {
+    if (matchCount <= 3) {
+      if (matchId >= 3) return "Chung kết";
+      return "Bán kết";
+    }
+
+    if (matchId >= 7) return "Chung kết";
+    if (matchId >= 5) return "Bán kết";
+    return "Tứ kết";
+  };
   
   players.forEach(p => {
     stats[p] = { wins: 0, losses: 0, lastMatchId: 0 };
@@ -114,18 +137,12 @@ export function getLeaderboard(matches: Match[]): { player: string; wins: number
     stats[m.p2].lastMatchId = Math.max(stats[m.p2].lastMatchId, m.id);
   });
 
-  const getRound = (matchId: number) => {
-    if (matchId >= 7) return "Chung kết";
-    if (matchId >= 5) return "Bán kết";
-    return "Tứ kết";
-  };
-
   return Object.entries(stats)
     .map(([player, s]) => ({
       player,
       wins: s.wins,
       losses: s.losses,
-      roundReached: getRound(s.lastMatchId),
+      roundReached: roundReachedByMatchId(s.lastMatchId),
       _lastMatchId: s.lastMatchId,
     }))
     .sort((a, b) => {

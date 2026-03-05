@@ -1,35 +1,24 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300..700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Quicksand:wght@300..700&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 220 20% 10%;
-    --foreground: 0 0% 92%;
+    --background: 240 10% 5%;
+    --foreground: 40 10% 90%;
 
-    --card: 220 18% 14%;
-    --card-foreground: 0 0% 92%;
+    --card: 240 8% 10%;
+    --card-foreground: 40 10% 90%;
 
-    --popover: 220 18% 14%;
-    --popover-foreground: 0 0% 92%;
-
-    --primary: 50 100% 55%;
-    --primary-foreground: 0 0% 5%;
-
-    --secondary: 340 80% 60%;
-    --secondary-foreground: 0 0% 100%;
-
-    --muted: 220 15% 20%;
-    --muted-foreground: 220 10% 55%;
-
-    --accent: 195 90% 50%;
-    --accent-foreground: 0 0% 5%;
-
-    --destructive: 0 84% 55%;
-    --destructive-foreground: 0 0% 100%;
-
+    --popover: 240 8% 10%;
+    --popover-foreground: 40 10% 90%;
     --border: 220 15% 28%;
     --input: 220 15% 28%;
     --ring: 50 100% 55%;
@@ -41,74 +30,81 @@
     --neo-shadow-lg: 6px 6px 0px hsl(0 0% 0% / 0.5);
     --neo-border: 3px solid hsl(220 15% 28%);
     --neo-border-sm: 2px solid hsl(220 15% 28%);
+    --primary: 160 50% 45%;
+    --primary-foreground: 0 0% 100%;
 
-    --success: 145 70% 45%;
+    --secondary: 240 6% 18%;
+    --secondary-foreground: 40 10% 80%;
+
+    --muted: 240 6% 14%;
+    --muted-foreground: 240 5% 50%;
+
+    --accent: 160 50% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 60% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 6% 16%;
+    --input: 240 6% 16%;
+    --ring: 160 50% 45%;
+
+    --radius: 0.625rem;
+
+    --success: 160 50% 40%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 35 95% 55%;
-    --warning-foreground: 0 0% 5%;
+    --warning: 35 80% 55%;
+    --warning-foreground: 0 0% 100%;
 
-    --sidebar-background: 220 20% 10%;
-    --sidebar-foreground: 0 0% 92%;
-    --sidebar-primary: 50 100% 55%;
-    --sidebar-primary-foreground: 0 0% 5%;
-    --sidebar-accent: 195 90% 50%;
-    --sidebar-accent-foreground: 0 0% 5%;
-    --sidebar-border: 220 15% 28%;
-    --sidebar-ring: 50 100% 55%;
+    --sidebar-background: 240 10% 5%;
+    --sidebar-foreground: 40 10% 90%;
+    --sidebar-primary: 160 50% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 160 50% 45%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 240 6% 16%;
+    --sidebar-ring: 160 50% 45%;
   }
 }
+@layer utilities {
+  .neo-box {
+    border: var(--neo-border);
+    border-radius: var(--radius);
+  }
 
+  .neo-box-sm {
+    border: var(--neo-border-sm);
+
+    border-radius: var(--radius);
+  }
+
+  .neo-box-lg {
+    border: var(--neo-border);
+    border-radius: var(--radius);
+  }
+
+  .neo-box-hover {
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+}
 @layer base {
   * {
     @apply border-border;
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     @apply font-sans font-bold;
-  }
-}
-
-@layer utilities {
-  .neo-box {
-    border: var(--neo-border);
-    box-shadow: var(--neo-shadow);
-    border-radius: var(--radius);
-  }
-
-  .neo-box-sm {
-    border: var(--neo-border-sm);
-    box-shadow: var(--neo-shadow-sm);
-    border-radius: var(--radius);
-  }
-
-  .neo-box-lg {
-    border: var(--neo-border);
-    box-shadow: var(--neo-shadow-lg);
-    border-radius: var(--radius);
-  }
-
-  .neo-box-hover {
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-  }
-  .neo-box-hover:hover {
-    transform: translate(-2px, -2px);
-    box-shadow: var(--neo-shadow-lg);
-  }
-
-  .neo-btn {
-    border: var(--neo-border);
-    box-shadow: var(--neo-shadow);
-    border-radius: var(--radius);
-    font-weight: 700;
-    transition: transform 0.1s ease, box-shadow 0.1s ease;
-  }
-  .neo-btn:active {
-    transform: translate(2px, 2px);
-    box-shadow: none;
   }
 }
