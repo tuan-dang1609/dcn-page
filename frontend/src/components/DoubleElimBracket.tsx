@@ -703,6 +703,44 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     };
   }, [rounds, teamCount]);
 
+  const sixTeamSpecial = useMemo(() => {
+    if (teamCount !== 6 || rounds.length < 8) return null;
+
+    const byRound = new Map(rounds);
+    const r1 = (byRound.get(1) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r2 = (byRound.get(2) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r3 = (byRound.get(3) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r4 = (byRound.get(4) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r5 = (byRound.get(5) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r6 = (byRound.get(6) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r7 = (byRound.get(7) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r8 = (byRound.get(8) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+
+    if (
+      r1.length !== 2 ||
+      r2.length !== 2 ||
+      r3.length !== 1 ||
+      r4.length !== 1 ||
+      r5.length !== 1 ||
+      r6.length !== 1 ||
+      r7.length !== 1 ||
+      r8.length !== 1
+    ) {
+      return null;
+    }
+
+    return {
+      r1,
+      r2,
+      r3: r3[0],
+      r4: r4[0],
+      r5: r5[0],
+      r6: r6[0],
+      r7: r7[0],
+      r8: r8[0],
+    };
+  }, [rounds, teamCount]);
+
   const layout = useMemo(() => {
     if (!rounds.length) return null;
 
@@ -1220,6 +1258,349 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             ]}
             activeOutput={Boolean(
               journeySet && journeySet.has(eightTeamSpecial.r8.id),
+            )}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (sixTeamSpecial) {
+    const x1 = 0;
+    const x2 = x1 + CARD_W + 72;
+    const x3 = x2 + CARD_W + 72;
+    const x4 = x3 + CARD_W + 72;
+    const x5 = x4 + CARD_W + 72;
+
+    const y1A = 0;
+    const y1B = CARD_H + 40;
+
+    const y2A = y1A;
+    const y2B = y1B;
+    const y3 = (y2A + y2B + CARD_H) / 2 - CARD_H / 2;
+
+    const lowerBase = y1B + CARD_H + 120;
+    const y4 = lowerBase;
+    const y5 = y4;
+    const y6 = y5;
+    const y7 = y6;
+    const y8 = (y3 + y7 + CARD_H) / 2 - CARD_H / 2;
+
+    const totalW = x5 + CARD_W;
+    const totalH = y4 + CARD_H + HEADER_H + 24;
+
+    const c1A = y1A + HEADER_H + CARD_H / 2;
+    const c1B = y1B + HEADER_H + CARD_H / 2;
+    const c2A = y2A + HEADER_H + CARD_H / 2;
+    const c2B = y2B + HEADER_H + CARD_H / 2;
+    const c3 = y3 + HEADER_H + CARD_H / 2;
+    const c4 = y4 + HEADER_H + CARD_H / 2;
+    const c5 = y5 + HEADER_H + CARD_H / 2;
+    const c6 = y6 + HEADER_H + CARD_H / 2;
+    const c7 = y7 + HEADER_H + CARD_H / 2;
+    const c8 = y8 + HEADER_H + CARD_H / 2;
+
+    return (
+      <div className="space-y-3">
+        <ModeButtons mockMode={mockMode} setMockMode={setMockMode} />
+
+        <div className="relative" style={{ width: totalW, height: totalH }}>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
+          >
+            {getDoubleElimRoundTitle(
+              1,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
+          >
+            {getDoubleElimRoundTitle(
+              2,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
+          >
+            {getDoubleElimRoundTitle(
+              3,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{
+              left: x1,
+              width: CARD_W,
+              textAlign: "center",
+              top: y4 - 28 + HEADER_H,
+            }}
+          >
+            {getDoubleElimRoundTitle(
+              4,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{
+              left: x2,
+              width: CARD_W,
+              textAlign: "center",
+              top: y5 - 28 + HEADER_H,
+            }}
+          >
+            {getDoubleElimRoundTitle(
+              5,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{
+              left: x3,
+              width: CARD_W,
+              textAlign: "center",
+              top: y6 - 28 + HEADER_H,
+            }}
+          >
+            {getDoubleElimRoundTitle(
+              6,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{
+              left: x4,
+              width: CARD_W,
+              textAlign: "center",
+              top: y7 - 28 + HEADER_H,
+            }}
+          >
+            {getDoubleElimRoundTitle(
+              7,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+          <div
+            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            style={{
+              left: x5,
+              width: CARD_W,
+              textAlign: "center",
+              top: y8 - 28 + HEADER_H,
+            }}
+          >
+            {getDoubleElimRoundTitle(
+              8,
+              totalRounds,
+              firstRoundMatchCount,
+              teamCount,
+            )}
+          </div>
+
+          <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r1[0]}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={
+                !journeySet || journeySet.has(sixTeamSpecial.r1[0].id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r1[1]}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={
+                !journeySet || journeySet.has(sixTeamSpecial.r1[1].id)
+              }
+            />
+          </div>
+
+          <div className="absolute" style={{ left: x2, top: y2A + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r2[0]}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={
+                !journeySet || journeySet.has(sixTeamSpecial.r2[0].id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x2, top: y2B + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r2[1]}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={
+                !journeySet || journeySet.has(sixTeamSpecial.r2[1].id)
+              }
+            />
+          </div>
+
+          <div className="absolute" style={{ left: x4, top: y3 + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r3}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r3.id)}
+            />
+          </div>
+
+          <div className="absolute" style={{ left: x1, top: y4 + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r4}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r4.id)}
+            />
+          </div>
+          <div className="absolute" style={{ left: x2, top: y5 + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r5}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r5.id)}
+            />
+          </div>
+          <div className="absolute" style={{ left: x3, top: y6 + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r6}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r6.id)}
+            />
+          </div>
+          <div className="absolute" style={{ left: x4, top: y7 + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r7}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r7.id)}
+            />
+          </div>
+          <div className="absolute" style={{ left: x5, top: y8 + HEADER_H }}>
+            <MatchCard
+              match={sixTeamSpecial.r8}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+              isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r8.id)}
+            />
+          </div>
+
+          <ElbowConnector
+            fromX={x1 + CARD_W}
+            fromY={c1A}
+            toX={x2}
+            toY={c2A}
+            hasHover={hoveredPlayer !== null}
+            active={Boolean(
+              journeySet &&
+              journeySet.has(sixTeamSpecial.r1[0].id) &&
+              journeySet.has(sixTeamSpecial.r2[0].id),
+            )}
+          />
+          <ElbowConnector
+            fromX={x1 + CARD_W}
+            fromY={c1B}
+            toX={x2}
+            toY={c2B}
+            hasHover={hoveredPlayer !== null}
+            active={Boolean(
+              journeySet &&
+              journeySet.has(sixTeamSpecial.r1[1].id) &&
+              journeySet.has(sixTeamSpecial.r2[1].id),
+            )}
+          />
+
+          <MergeConnector
+            fromX={x2 + CARD_W}
+            fromYs={[c2A, c2B]}
+            toX={x4}
+            toY={c3}
+            hasHover={hoveredPlayer !== null}
+            activeFrom={[
+              Boolean(journeySet && journeySet.has(sixTeamSpecial.r2[0].id)),
+              Boolean(journeySet && journeySet.has(sixTeamSpecial.r2[1].id)),
+            ]}
+            activeOutput={Boolean(
+              journeySet && journeySet.has(sixTeamSpecial.r3.id),
+            )}
+          />
+
+          <ElbowConnector
+            fromX={x1 + CARD_W}
+            fromY={c4}
+            toX={x2}
+            toY={c5}
+            hasHover={hoveredPlayer !== null}
+            active={Boolean(
+              journeySet &&
+              journeySet.has(sixTeamSpecial.r4.id) &&
+              journeySet.has(sixTeamSpecial.r5.id),
+            )}
+          />
+          <ElbowConnector
+            fromX={x2 + CARD_W}
+            fromY={c5}
+            toX={x3}
+            toY={c6}
+            hasHover={hoveredPlayer !== null}
+            active={Boolean(
+              journeySet &&
+              journeySet.has(sixTeamSpecial.r5.id) &&
+              journeySet.has(sixTeamSpecial.r6.id),
+            )}
+          />
+          <ElbowConnector
+            fromX={x3 + CARD_W}
+            fromY={c6}
+            toX={x4}
+            toY={c7}
+            hasHover={hoveredPlayer !== null}
+            active={Boolean(
+              journeySet &&
+              journeySet.has(sixTeamSpecial.r6.id) &&
+              journeySet.has(sixTeamSpecial.r7.id),
+            )}
+          />
+
+          <MergeConnector
+            fromX={x4 + CARD_W}
+            fromYs={[c3, c7]}
+            toX={x5}
+            toY={c8}
+            hasHover={hoveredPlayer !== null}
+            activeFrom={[
+              Boolean(journeySet && journeySet.has(sixTeamSpecial.r3.id)),
+              Boolean(journeySet && journeySet.has(sixTeamSpecial.r7.id)),
+            ]}
+            activeOutput={Boolean(
+              journeySet && journeySet.has(sixTeamSpecial.r8.id),
             )}
           />
         </div>

@@ -109,11 +109,11 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
               <img
                 src={item.imageUrl}
                 alt={`${item.label} icon`}
-                className="w-12 h-12  object-cover"
+                className="w-10 h-10  object-cover"
               />
             ) : (
-              <div className={`bg-primary/10 p-3 rounded-lg neo-box-sm`}>
-                <item.icon className="w-6 h-6 text-foreground" />
+              <div className={` p-1 rounded-lg`}>
+                <item.icon className="w-8 h-8 text-foreground" />
               </div>
             )}
 
