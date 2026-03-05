@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import {
@@ -18,6 +18,20 @@ const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toBranchLabel = (index: number) => {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const base = alphabet.length;
+  let value = index;
+  let result = "";
+
+  do {
+    result = alphabet[value % base] + result;
+    value = Math.floor(value / base) - 1;
+  } while (value >= 0);
+
+  return `Nhánh ${result}`;
 };
 
 const BracketPage = () => {
@@ -57,6 +71,38 @@ const BracketPage = () => {
   const selectedBracketId = selectedBracket?.id ?? null;
   const selectedFormatId = toNumber(selectedBracket?.format_id);
 
+  const bracketGroups = useMemo(() => {
+    const order: string[] = [];
+    const grouped = new Map<string, typeof brackets>();
+
+    brackets.forEach((bracket) => {
+      const name = (bracket.name || "").trim();
+      const formatPart = toNumber(bracket.format_id) ?? 0;
+      const key = name
+        ? `__group_${formatPart}_${name.toLowerCase()}`
+        : `__single_${bracket.id}`;
+
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+        order.push(key);
+      }
+
+      grouped.get(key)!.push(bracket);
+    });
+
+    return order.map((key) => {
+      const items = [...(grouped.get(key) ?? [])].sort((a, b) => a.id - b.id);
+      const title = (items[0]?.name || "").trim();
+
+      return {
+        key,
+        items,
+        isDuplicate: !key.startsWith("__single_") && items.length > 1,
+        title,
+      };
+    });
+  }, [brackets]);
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-heading">Nhánh đấu</h2>
@@ -74,21 +120,55 @@ const BracketPage = () => {
       ) : null}
 
       {/* Sub-tabs */}
-      <div className="flex gap-2">
-        {brackets.map((bracket) => {
-          const isActive = (activeBracketId ?? brackets[0]?.id) === bracket.id;
+      <div className="flex flex-wrap gap-2">
+        {bracketGroups.map((group) => {
+          if (!group.isDuplicate) {
+            const bracket = group.items[0];
+            const isActive = (activeBracketId ?? brackets[0]?.id) === bracket.id;
+            return (
+              <button
+                key={bracket.id}
+                onClick={() => setActiveBracketId(bracket.id)}
+                className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${
+                  isActive
+                    ? "bg-primary text-primary-foreground neo-box-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {bracket.name || `Bracket ${bracket.id}`}
+              </button>
+            );
+          }
+
           return (
-            <button
-              key={bracket.id}
-              onClick={() => setActiveBracketId(bracket.id)}
-              className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${
-                isActive
-                  ? "bg-primary text-primary-foreground neo-box-sm"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              }`}
+            <div
+              key={group.key}
+              className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/40"
             >
-              {bracket.name || `Bracket ${bracket.id}`}
-            </button>
+              <span className="text-xs font-bold text-muted-foreground">
+                {group.title}
+              </span>
+              <div className="flex items-center gap-1">
+                {group.items.map((bracket, index) => {
+                  const isActive =
+                    (activeBracketId ?? brackets[0]?.id) === bracket.id;
+
+                  return (
+                    <button
+                      key={bracket.id}
+                      onClick={() => setActiveBracketId(bracket.id)}
+                      className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                        isActive
+                          ? "bg-primary text-primary-foreground neo-box-sm"
+                          : "bg-muted text-muted-foreground hover:bg-muted/80"
+                      }`}
+                    >
+                      {toBranchLabel(index)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </div>
