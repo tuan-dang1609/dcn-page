@@ -23,7 +23,10 @@ tournamentRouter.get(
     try {
       const { rows: tRows } = await pool.query(
         `SELECT t.id, t.name, g.short_name, g.name AS game_name, g.icon_game_url, f.name AS format, t.banner_url, t.season, t.date_start,
-              t.date_end, t.register_start, t.register_end, t.created_by, t.max_player_per_team, t.max_participate
+          t.date_end, t.register_start, t.register_end,
+          COALESCE(t.check_in_start, t.register_start) AS check_in_start,
+          COALESCE(t.check_in_end, t.register_end) AS check_in_end,
+          t.created_by, t.max_player_per_team, t.max_participate
        FROM tournaments t
        JOIN games g ON t.game_id = g.id
        JOIN formats f ON f.id = t.format_id
@@ -52,7 +55,21 @@ tournamentRouter.get(
         [tournament.id],
       );
       const { rows: tourTeam } = await pool.query(
-        `SELECT tt.id, t.name, t.short_name, t.logo_url, t.team_color_hex, u.nickname, t.created_at
+        `SELECT
+           tt.id,
+           tt.team_id,
+           tt.tournament_id,
+           t.name,
+           t.short_name,
+           t.logo_url,
+           t.team_color_hex,
+           u.nickname,
+           t.created_at,
+           COALESCE(
+             (to_jsonb(tt)->>'is_checked_in')::boolean,
+             (to_jsonb(tt)->>'isCheckedIn')::boolean,
+             false
+           ) AS "isCheckedIn"
      FROM tournament_teams tt
      JOIN teams t ON t.id = tt.team_id
      JOIN users u ON u.id = t.created_by
@@ -97,7 +114,7 @@ tournamentRouter.get(
       set.status = 500;
       return {
         status: "error",
-        error: { code: "INTERNAL_ERROR", message: "Database error" },
+        error: { code: "INTERNAL_ERROR" },
       };
     }
   },
@@ -154,6 +171,8 @@ tournamentRouter.post(
       date_end,
       register_start,
       register_end,
+      check_in_start,
+      check_in_end,
       max_player_per_team,
       max_participate,
     } = body ?? {};
@@ -161,8 +180,8 @@ tournamentRouter.post(
     const slug = slugify(name);
 
     const ctesql = `INSERT INTO tournaments (name, slug, game_id, banner_url, season, date_start,
-    date_end, register_start, register_end, created_by, max_player_per_team, max_participate)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`;
+    date_end, register_start, register_end, check_in_start, check_in_end, created_by, max_player_per_team, max_participate)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`;
 
     const { rows } = await pool.query(ctesql, [
       name,
@@ -174,6 +193,8 @@ tournamentRouter.post(
       date_end,
       register_start,
       register_end,
+      check_in_start ?? register_start,
+      check_in_end ?? register_end,
       userId,
       max_player_per_team,
       max_participate,
@@ -230,6 +251,16 @@ tournamentRouter.post(
                   format: "date-time",
                   example: "2026-02-28T15:00:00.000Z",
                 },
+                check_in_start: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2026-02-28T12:00:00.000Z",
+                },
+                check_in_end: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2026-02-28T15:00:00.000Z",
+                },
                 max_player_per_team: { type: "integer", example: 5 },
                 max_participate: { type: "integer", example: 64 },
               },
@@ -280,6 +311,8 @@ tournamentRouter.patch(
       date_end,
       register_start,
       register_end,
+      check_in_start,
+      check_in_end,
       max_player_per_team,
       max_participate,
     } = body ?? {};
@@ -288,8 +321,9 @@ tournamentRouter.patch(
 
     const ctesql = `UPDATE tournaments
     SET name = $1, slug = $2, game_id = $3, banner_url = $4, season = $5, date_start = $6,
-        date_end = $7, register_start = $8, register_end = $9, max_player_per_team = $10, max_participate = $11
-    WHERE id = $12
+      date_end = $7, register_start = $8, register_end = $9, check_in_start = $10, check_in_end = $11,
+      max_player_per_team = $12, max_participate = $13
+    WHERE id = $14
     RETURNING *`;
 
     const { rows } = await pool.query(ctesql, [
@@ -302,6 +336,8 @@ tournamentRouter.patch(
       date_end,
       register_start,
       register_end,
+      check_in_start ?? register_start,
+      check_in_end ?? register_end,
       max_player_per_team,
       max_participate,
       id,
@@ -344,6 +380,16 @@ tournamentRouter.patch(
                   example: "2026-05-20T08:00:00.000Z",
                 },
                 register_end: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2026-05-31T15:00:00.000Z",
+                },
+                check_in_start: {
+                  type: "string",
+                  format: "date-time",
+                  example: "2026-05-31T12:00:00.000Z",
+                },
+                check_in_end: {
                   type: "string",
                   format: "date-time",
                   example: "2026-05-31T15:00:00.000Z",

@@ -10,11 +10,11 @@ import { useParams } from "react-router-dom";
 const Layout = () => {
   const isTournamentHome = Boolean(useMatch("/tournament/:game/:slug"));
   const { game, slug } = useParams();
-  const { tournament, isLoading } = useTournamentBySlug(game, slug);
+  const { tournament, isLoading, refetch } = useTournamentBySlug(game, slug);
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="space-y-8">
+      <div className="space-y-8 mb-10">
         <HeroBanner tournament={tournament} />
         <div className="px-4 md:px-8">
           <Navigation />
@@ -31,7 +31,7 @@ const Layout = () => {
               </div>
             </div>
           ) : (
-            <Outlet context={{ tournament, isLoading }} />
+            <Outlet context={{ tournament, isLoading, refetch }} />
           )}
         </div>
       </div>

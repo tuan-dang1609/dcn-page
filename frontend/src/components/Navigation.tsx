@@ -15,7 +15,7 @@ const Navigation = () => {
   const links = [
     { to: basePath, label: "Tổng quan" },
     { to: `${basePath}/bracket`, label: "Nhánh đấu" },
-    { to: `${basePath}/participants`, label: "Người chơi" },
+    { to: `${basePath}/participants`, label: "Danh sách" },
     { to: `${basePath}/leaderboard`, label: "BXH" },
     { to: `${basePath}/rule`, label: "Luật" },
   ];

@@ -7,6 +7,8 @@ export interface TournamentPayload {
   date_end?: string;
   register_start?: string;
   register_end?: string;
+  check_in_start?: string;
+  check_in_end?: string;
   max_player_per_team?: number;
   max_participate?: number;
 }
@@ -22,9 +24,22 @@ export interface Tournament {
 export interface TournamentBySlugResponse {
   status: "success" | "error";
   info?: Tournament & {
+    register_start?: string;
+    register_end?: string;
+    check_in_start?: string;
+    check_in_end?: string;
     users?: Array<{ id?: number | string; username?: string }>;
     players?: Array<{ id?: number | string; username?: string }>;
     participants?: Array<{ id?: number | string; username?: string }>;
+    registered?: Array<{
+      id?: number | string;
+      team_id?: number | string;
+      name?: string;
+      short_name?: string;
+      logo_url?: string;
+      team_color_hex?: string;
+      isCheckedIn?: boolean;
+    }>;
     registered_count?: number;
     requirement?: {
       rank_min?: string;

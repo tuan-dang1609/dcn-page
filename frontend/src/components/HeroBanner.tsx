@@ -10,6 +10,8 @@ interface HeroBannerProps {
     banner_url?: string;
     id?: number | string;
     max_player_per_team?: number | string;
+    register_start?: string;
+    register_end?: string;
   } | null;
 }
 
@@ -18,6 +20,15 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [regOpen, setRegOpen] = useState(false);
+
+  const now = Date.now();
+  const registerStartMs = Number(new Date(tournament?.register_start ?? ""));
+  const registerEndMs = Number(new Date(tournament?.register_end ?? ""));
+  const isRegistrationOpen =
+    Number.isFinite(registerStartMs) &&
+    Number.isFinite(registerEndMs) &&
+    now >= registerStartMs &&
+    now <= registerEndMs;
 
   const handleLoginClick = () => {
     const returnTo = location.pathname + location.search;
@@ -41,7 +52,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
             <span className="inline-block bg-primary/10 text-primary border border-primary/20 backdrop-blur-sm px-3 py-1 text-xs sm:text-xs md:text-sm font-semibold tracking-widest uppercase rounded-full mb-3">
               KẾT THÚC • MON, 01 SEPT 2025, 20:30 GMT+7
             </span>
-            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold leading-tight mb-2 max-w-[720px] mx-auto md:mx-0">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold leading-tight mb-2 max-w-[720px] mx-auto md:mx-0">
               TFT Set 15 – KO Coliseum
             </h1>
             <p className="text-sm sm:text-sm md:text-base text-muted-foreground">
@@ -62,24 +73,26 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                   </div>
                   <span className="text-sm font-semibold">{user.nickname}</span>
                 </div>
-                <Button
-                  size="sm"
-                  onClick={() => setRegOpen(true)}
-                  className="gap-1.5"
-                  variant={isRegistered ? "outline" : "default"}
-                >
-                  {isRegistered ? (
-                    <>
-                      <RefreshCw className="w-4 h-4" />
-                      <span className="hidden sm:inline">Cập nhật</span>
-                    </>
-                  ) : (
-                    <>
-                      <Trophy className="w-4 h-4" />
-                      <span className="hidden sm:inline">Đăng ký giải</span>
-                    </>
-                  )}
-                </Button>
+                {isRegistrationOpen ? (
+                  <Button
+                    size="sm"
+                    onClick={() => setRegOpen(true)}
+                    className="gap-1.5"
+                    variant={isRegistered ? "outline" : "default"}
+                  >
+                    {isRegistered ? (
+                      <>
+                        <RefreshCw className="w-4 h-4" />
+                        <span className="hidden sm:inline">Cập nhật</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trophy className="w-4 h-4" />
+                        <span className="hidden sm:inline">Đăng ký giải</span>
+                      </>
+                    )}
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   variant="ghost"
