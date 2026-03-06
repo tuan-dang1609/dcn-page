@@ -3,6 +3,7 @@ import Navigation from "@/components/Navigation";
 import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
+import UserMenu from "@/components/UserMenu";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
 import { Outlet, useMatch } from "react-router-dom";
 import { useParams } from "react-router-dom";
@@ -15,7 +16,12 @@ const Layout = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="space-y-8">
-        <HeroBanner tournament={tournament} />
+        <div className="relative">
+          <HeroBanner tournament={tournament} />
+          <div className="absolute top-4 right-4 md:top-6 md:right-8 z-10">
+            <UserMenu />
+          </div>
+        </div>
         <div className="px-4 md:px-8">
           <Navigation />
         </div>

@@ -1,9 +1,9 @@
-import React, {
+import {
   createContext,
   useContext,
-  useState,
   useEffect,
-  ReactNode,
+  useState,
+  type ReactNode,
 } from "react";
 import axios from "axios";
 import { setTournamentToken } from "@/api/tournaments";
@@ -33,7 +33,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isRegistered: boolean;
-  setIsRegistered: (v: boolean) => void;
+  setIsRegistered: (value: boolean) => void;
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
   refreshUser: () => Promise<void>;
