@@ -4,26 +4,80 @@ import { pool } from "../utils/db.js";
 
 const usersRouter = new Elysia({ name: "Users" });
 const TAG = "Users";
+
+usersRouter.get(
+  "/",
+  async ({ query, set }) => {
+    const q = String(query?.q ?? "").trim();
+
+    if (!q) {
+      const { rows } = await pool.query(
+        `SELECT id, username, nickname, profile_picture, team_id
+         FROM users
+         ORDER BY username ASC`,
+      );
+
+      set.status = 200;
+      return { users: rows };
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, username, nickname, profile_picture, team_id
+       FROM users
+       WHERE username ILIKE $1 OR nickname ILIKE $1
+       ORDER BY username ASC
+       LIMIT 50`,
+      [`%${q}%`],
+    );
+
+    set.status = 200;
+    return { users: rows };
+  },
+  {
+    tags: [TAG],
+    summary: "List users",
+  },
+);
+
 usersRouter.post(
   "/",
   async ({ body, set }) => {
-    const { username, nickname, password } = body ?? {};
+    try {
+      const { username, nickname, password, logo_url, profile_picture } =
+        body ?? {};
 
-    if (!username || !password || username.length < 3 || password.length < 3) {
-      set.status = 400;
-      return { error: "username or password must be over 3 characters long" };
+      if (
+        !username ||
+        !password ||
+        username.length < 3 ||
+        password.length < 3
+      ) {
+        set.status = 400;
+        return {
+          error: "username or password must be over 3 characters long",
+        };
+      }
+
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+      const avatarUrl = profile_picture ?? logo_url ?? null;
+
+      const { rows } = await pool.query(
+        "INSERT INTO users(nickname,username,password_hash,profile_picture) VALUES ($1,$2,$3,$4) RETURNING id, nickname, username, profile_picture",
+        [nickname ?? null, username, passwordHash, avatarUrl],
+      );
+
+      set.status = 201;
+      return rows;
+    } catch (error) {
+      if (error?.code === "23505") {
+        set.status = 409;
+        return { error: "username already exists" };
+      }
+
+      set.status = 500;
+      return { error: error?.message || "internal server error" };
     }
-
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
-
-    const { rows } = await pool.query(
-      "INSERT INTO users(nickname,username,password_hash) VALUES ($1,$2,$3) RETURNING nickname, username",
-      [nickname ?? null, username, passwordHash],
-    );
-
-    set.status = 201;
-    return rows;
   },
   {
     tags: [TAG],
@@ -40,6 +94,11 @@ usersRouter.post(
                 username: { type: "string", example: "Beacon" },
                 nickname: { type: "string", example: "Béo Cần" },
                 password: { type: "string", example: "123456" },
+                logo_url: {
+                  type: "string",
+                  example:
+                    "https://<project>.supabase.co/storage/v1/object/public/avatars/users/abc.png",
+                },
               },
             },
           },

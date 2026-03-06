@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,11 @@ const LoginPage = () => {
   const [searchParams] = useSearchParams();
 
   const returnTo = searchParams.get("returnTo") || "/";
+
+  useEffect(() => {
+    const initialUsername = searchParams.get("username");
+    if (initialUsername) setUsername(initialUsername);
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +91,12 @@ const LoginPage = () => {
           </form>
           <p className="text-center text-muted-foreground text-xs mt-4">
             Đăng nhập để có thể đăng ký tham gia giải đấu
+          </p>
+          <p className="text-center text-muted-foreground text-xs mt-2">
+            Chưa có tài khoản?{" "}
+            <Link to="/register" className="text-primary hover:underline">
+              Đăng ký ngay
+            </Link>
           </p>
         </div>
       </div>

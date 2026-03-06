@@ -10,6 +10,7 @@ const LeaderboardPage = lazy(
 const RulePage = lazy(() => import("@/pages/tournaments/RulePage"));
 const NotFound = lazy(() => import("@/pages/tournaments/NotFound"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
+const SignupPage = lazy(() => import("@/pages/SignupPage"));
 const PageFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
     Đang tải...
@@ -36,6 +37,10 @@ export const Router = () => {
     {
       path: "/login",
       element: withSuspense(<LoginPage />),
+    },
+    {
+      path: "/register",
+      element: withSuspense(<SignupPage />),
     },
     { path: "*", element: withSuspense(<NotFound />) },
   ]);

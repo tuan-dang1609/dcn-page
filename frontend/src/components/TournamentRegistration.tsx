@@ -18,8 +18,13 @@ import {
   Check,
   Shield,
   AlertCircle,
+  Upload,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import {
+  deleteImageFromSupabase,
+  uploadImageToSupabase,
+} from "@/lib/supabaseUpload";
 
 interface TeamMember {
   id: number;
@@ -43,6 +48,24 @@ interface TournamentTeamRow {
 interface TournamentTeamPlayersResponse {
   players?: Array<{
     user_id: number | string;
+  }>;
+}
+
+interface AvailableUser {
+  id: number;
+  username: string;
+  nickname?: string | null;
+  profile_picture: string | null;
+  team_id: number | null;
+}
+
+interface UsersListResponse {
+  users?: Array<{
+    id: number | string;
+    username: string;
+    nickname?: string | null;
+    profile_picture: string | null;
+    team_id: number | string | null;
   }>;
 }
 
@@ -73,9 +96,13 @@ const TournamentRegistration = ({
   requiredPlayerCount,
 }: Props) => {
   const { user, token, setIsRegistered, refreshUser } = useAuth();
-  const [step, setStep] = useState<"team" | "members" | "create-team">("team");
+  const [step, setStep] = useState<
+    "team" | "members" | "create-team" | "edit-team" | "team-members"
+  >("team");
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [tournamentTeamId, setTournamentTeamId] = useState<number | null>(null);
@@ -87,27 +114,39 @@ const TournamentRegistration = ({
     logo_url: "",
     team_color_hex: "#4F46E5",
   });
+  const [editTeam, setEditTeam] = useState({
+    name: "",
+    short_name: "",
+    logo_url: "",
+    team_color_hex: "#4F46E5",
+  });
+  const [teamLogoFile, setTeamLogoFile] = useState<File | null>(null);
+  const [editTeamLogoFile, setEditTeamLogoFile] = useState<File | null>(null);
+  const [createMemberIds, setCreateMemberIds] = useState<number[]>([]);
+  const [teamMemberIds, setTeamMemberIds] = useState<number[]>([]);
 
-  if (!user) return null;
+  const currentTeamId = user?.team_id ?? null;
+  const hasTeam = currentTeamId !== null && currentTeamId !== undefined;
+  const userId = Number(user?.id);
+  const roleId = Number(user?.role_id);
+  const teamOwnerId = Number(user?.team?.created_by);
 
-  const hasTeam = !!user.team_id;
-  const userId = Number(user.id);
-  const roleId = Number(user.role_id);
-  const teamOwnerId = Number(user.team?.created_by);
-
-  const teamMemberCount = teamMembers.length;
   const minPlayersRequired = Math.max(1, Number(requiredPlayerCount) || 5);
+  const maxPlayersAllowed = minPlayersRequired + 2;
   const hasEnoughPlayersForTournament =
     selectedMembers.length >= minPlayersRequired;
-  const hasValidSelectedCount =
-    selectedMembers.length === teamMemberCount ||
-    selectedMembers.length === teamMemberCount + 2;
+  const hasValidSelectedCount = selectedMembers.length <= maxPlayersAllowed;
 
   // Rule: cần có team, và (role_id = 4 hoặc là người tạo team)
   const canRegister =
     !hasTeam ||
     roleId === 4 ||
     (Number.isFinite(teamOwnerId) && teamOwnerId === userId);
+
+  const canManageTeam =
+    Number.isFinite(teamOwnerId) && teamOwnerId === userId
+      ? true
+      : [1, 2, 3].includes(roleId);
 
   const authHeaders = token
     ? {
@@ -121,6 +160,27 @@ const TournamentRegistration = ({
     );
   };
 
+  const toggleCreateMember = (id: number) => {
+    setCreateMemberIds((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
+    );
+  };
+
+  const toggleTeamMember = (id: number) => {
+    setTeamMemberIds((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
+    );
+  };
+
+  const canAssignUserToCurrentTeam = (candidate: AvailableUser) => {
+    if (candidate.id === userId) return false;
+    if (!hasTeam) return candidate.team_id === null;
+    return (
+      candidate.team_id === null ||
+      Number(candidate.team_id) === Number(currentTeamId)
+    );
+  };
+
   const loadTeamMembers = async () => {
     if (!hasTeam) {
       setTeamMembers([]);
@@ -130,7 +190,7 @@ const TournamentRegistration = ({
     setLoadingMembers(true);
     try {
       const response = await axios.get<TeamDetailsResponse>(
-        `${API_BASE}/api/teams/${user.team_id}`,
+        `${API_BASE}/api/teams/${currentTeamId}`,
       );
 
       const members = Array.isArray(response.data?.members)
@@ -142,10 +202,39 @@ const TournamentRegistration = ({
         : [];
 
       setTeamMembers(members);
+      setTeamMemberIds(members.map((member) => member.id));
     } catch {
       setTeamMembers([]);
+      setTeamMemberIds([]);
     } finally {
       setLoadingMembers(false);
+    }
+  };
+
+  const loadAvailableUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const response = await axios.get<UsersListResponse>(
+        `${API_BASE}/api/users`,
+      );
+      const users = Array.isArray(response.data?.users)
+        ? response.data.users.map((u) => ({
+            id: Number(u.id),
+            username: u.username,
+            nickname: u.nickname ?? null,
+            profile_picture: u.profile_picture ?? null,
+            team_id:
+              u.team_id === null || u.team_id === undefined
+                ? null
+                : Number(u.team_id),
+          }))
+        : [];
+
+      setAvailableUsers(users.filter((u) => Number.isFinite(u.id)));
+    } catch {
+      setAvailableUsers([]);
+    } finally {
+      setLoadingUsers(false);
     }
   };
 
@@ -160,7 +249,7 @@ const TournamentRegistration = ({
       ? response.data.teams
       : [];
     const found = teams.find(
-      (team) => Number(team.team_id) === Number(user.team_id),
+      (team) => Number(team.team_id) === Number(currentTeamId),
     );
 
     return found ? Number(found.id) : null;
@@ -184,7 +273,31 @@ const TournamentRegistration = ({
     if (!open || !hasTeam) return;
 
     void loadTeamMembers();
-  }, [open, hasTeam, user.team_id]);
+  }, [open, hasTeam, currentTeamId]);
+
+  useEffect(() => {
+    if (!open || !user) return;
+
+    void loadAvailableUsers();
+  }, [open, userId]);
+
+  useEffect(() => {
+    if (!open || !hasTeam || !user?.team) return;
+
+    setEditTeam({
+      name: user.team.name ?? "",
+      short_name: user.team.short_name ?? "",
+      logo_url: user.team.logo_url ?? "",
+      team_color_hex: user.team.team_color_hex ?? "#4F46E5",
+    });
+  }, [
+    open,
+    hasTeam,
+    user?.team?.name,
+    user?.team?.short_name,
+    user?.team?.logo_url,
+    user?.team?.team_color_hex,
+  ]);
 
   useEffect(() => {
     if (!open || !hasTeam || !tournamentId) return;
@@ -211,7 +324,7 @@ const TournamentRegistration = ({
     };
 
     void resolveRegisteredStatus();
-  }, [open, hasTeam, tournamentId, user.team_id, setIsRegistered]);
+  }, [open, hasTeam, tournamentId, currentTeamId, setIsRegistered]);
 
   const handleConfirmTeam = async () => {
     setStep("members");
@@ -231,11 +344,42 @@ const TournamentRegistration = ({
 
     setSubmitting(true);
     try {
-      await axios.post(`${API_BASE}/api/teams`, newTeam, {
-        headers: authHeaders,
-      });
+      let nextLogoUrl = newTeam.logo_url.trim();
+
+      if (teamLogoFile) {
+        nextLogoUrl = await uploadImageToSupabase(teamLogoFile);
+      }
+
+      const createResponse = await axios.post(
+        `${API_BASE}/api/teams`,
+        {
+          ...newTeam,
+          logo_url: nextLogoUrl || null,
+        },
+        {
+          headers: authHeaders,
+        },
+      );
+
+      const createdTeamId = Number(
+        createResponse.data?.team_id ?? createResponse.data?.id,
+      );
+
+      if (Number.isFinite(createdTeamId) && createMemberIds.length > 0) {
+        await axios.patch(
+          `${API_BASE}/api/teams/${createdTeamId}`,
+          {
+            user_ids: createMemberIds,
+          },
+          {
+            headers: authHeaders,
+          },
+        );
+      }
 
       await refreshUser();
+      setTeamLogoFile(null);
+      setCreateMemberIds([]);
 
       toast({
         title: "Tạo team thành công!",
@@ -247,6 +391,156 @@ const TournamentRegistration = ({
       toast({
         title: "Tạo team thất bại",
         description: getApiErrorMessage(error, "Không thể tạo team mới."),
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleTeamLogoFileChange = (file: File | null) => {
+    setTeamLogoFile(file);
+  };
+
+  const handleEditTeamLogoFileChange = (file: File | null) => {
+    setEditTeamLogoFile(file);
+  };
+
+  const handleUpdateTeam = async () => {
+    if (!canManageTeam) {
+      toast({
+        title: "Không có quyền",
+        description: "Bạn không có quyền chỉnh sửa thông tin đội.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (
+      !authHeaders ||
+      !hasTeam ||
+      currentTeamId === null ||
+      currentTeamId === undefined
+    ) {
+      toast({
+        title: "Thiếu thông tin",
+        description: "Không xác định được đội để cập nhật.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!editTeam.name.trim() || !editTeam.short_name.trim()) return;
+
+    setSubmitting(true);
+    let uploadedLogoUrl: string | null = null;
+    try {
+      let nextLogoUrl = editTeam.logo_url.trim();
+      const previousLogoUrl = (user?.team?.logo_url ?? "").trim();
+
+      if (editTeamLogoFile) {
+        nextLogoUrl = await uploadImageToSupabase(editTeamLogoFile);
+        uploadedLogoUrl = nextLogoUrl;
+      }
+
+      await axios.put(
+        `${API_BASE}/api/teams/${currentTeamId}`,
+        {
+          ...editTeam,
+          logo_url: nextLogoUrl || null,
+        },
+        { headers: authHeaders },
+      );
+
+      if (previousLogoUrl && nextLogoUrl && previousLogoUrl !== nextLogoUrl) {
+        try {
+          await deleteImageFromSupabase(previousLogoUrl);
+        } catch (deleteError) {
+          console.warn("Could not delete previous team logo:", deleteError);
+        }
+      }
+
+      await refreshUser();
+      await loadTeamMembers();
+      setEditTeamLogoFile(null);
+
+      toast({
+        title: "Cập nhật đội thành công",
+        description: "Thông tin đội đã được cập nhật.",
+      });
+
+      setStep("team");
+    } catch (error) {
+      toast({
+        title: "Cập nhật đội thất bại",
+        description: getApiErrorMessage(error, "Không thể cập nhật đội."),
+        variant: "destructive",
+      });
+
+      // If upload succeeded but update API failed, remove the newly uploaded file
+      // to avoid leaving orphan files in storage.
+      if (uploadedLogoUrl) {
+        try {
+          await deleteImageFromSupabase(uploadedLogoUrl);
+        } catch (deleteError) {
+          console.warn("Could not cleanup uploaded team logo:", deleteError);
+        }
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleUpdateTeamMembers = async () => {
+    if (!canManageTeam) {
+      toast({
+        title: "Không có quyền",
+        description: "Bạn không có quyền chỉnh sửa thành viên đội.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (
+      !authHeaders ||
+      !hasTeam ||
+      currentTeamId === null ||
+      currentTeamId === undefined
+    ) {
+      toast({
+        title: "Thiếu thông tin",
+        description: "Không xác định được đội để cập nhật thành viên.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await axios.patch(
+        `${API_BASE}/api/teams/${currentTeamId}`,
+        {
+          user_ids: teamMemberIds,
+        },
+        { headers: authHeaders },
+      );
+
+      await refreshUser();
+      await loadTeamMembers();
+
+      toast({
+        title: "Cập nhật thành viên thành công",
+        description: "Danh sách thành viên đội đã được cập nhật.",
+      });
+
+      setStep("team");
+    } catch (error) {
+      toast({
+        title: "Cập nhật thành viên thất bại",
+        description: getApiErrorMessage(
+          error,
+          "Không thể cập nhật thành viên đội.",
+        ),
         variant: "destructive",
       });
     } finally {
@@ -269,8 +563,7 @@ const TournamentRegistration = ({
     if (!hasValidSelectedCount) {
       toast({
         title: "Số lượng thành viên chưa hợp lệ",
-        description:
-          "Danh sách đăng ký phải bằng hoặc thêm 2 người so với số người trong đội.",
+        description: `Danh sách đăng ký tối đa ${maxPlayersAllowed} người (min ${minPlayersRequired}).`,
         variant: "destructive",
       });
       return;
@@ -385,7 +678,7 @@ const TournamentRegistration = ({
     setSubmitting(true);
     try {
       await axios.delete(
-        `${API_BASE}/api/tournaments/teams/${tournamentId}/${user.team_id}`,
+        `${API_BASE}/api/tournaments/teams/${tournamentId}/${currentTeamId}`,
         {
           headers: authHeaders,
         },
@@ -421,9 +714,16 @@ const TournamentRegistration = ({
       setStep("team");
       setSelectedMembers([]);
       setTournamentTeamId(null);
+      setCreateMemberIds([]);
+      setTeamMemberIds([]);
+      setTeamLogoFile(null);
+      setEditTeamLogoFile(null);
     }
     onOpenChange(v);
   };
+
+  // Keep hook order stable: guard only after all hooks are declared.
+  if (!user) return null;
 
   // Not allowed when user already has a team but lacks permission by rule
   if (hasTeam && !canRegister) {
@@ -455,7 +755,10 @@ const TournamentRegistration = ({
         <div className="flex items-center gap-2 mb-2">
           <div
             className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full transition-colors ${
-              step === "team" || step === "create-team"
+              step === "team" ||
+              step === "create-team" ||
+              step === "edit-team" ||
+              step === "team-members"
                 ? "bg-primary/15 text-primary"
                 : "bg-muted text-muted-foreground"
             }`}
@@ -513,6 +816,27 @@ const TournamentRegistration = ({
                   Tiếp tục
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setStep("edit-team")}
+                    disabled={submitting || !canManageTeam}
+                  >
+                    Cập nhật đội
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setStep("team-members")}
+                    disabled={submitting || !canManageTeam}
+                  >
+                    Quản lý thành viên đội
+                  </Button>
+                </div>
+                {!canManageTeam && (
+                  <p className="text-xs text-muted-foreground">
+                    Bạn có thể đăng ký giải nhưng không có quyền chỉnh sửa đội.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-4 text-center py-4">
@@ -559,7 +883,28 @@ const TournamentRegistration = ({
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">Logo URL</label>
+                <label className="text-sm font-medium">Logo đội</label>
+                <label className="flex items-center justify-center gap-2 border border-dashed border-border rounded-md py-3 cursor-pointer hover:bg-muted/30 transition-colors">
+                  <Upload className="w-4 h-4" />
+                  <span className="text-sm">
+                    {teamLogoFile
+                      ? teamLogoFile.name
+                      : "Chọn ảnh để upload lên Supabase"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) =>
+                      handleTeamLogoFileChange(e.target.files?.[0] ?? null)
+                    }
+                  />
+                </label>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">
+                  Hoặc nhập Logo URL
+                </label>
                 <Input
                   value={newTeam.logo_url}
                   onChange={(e) =>
@@ -568,6 +913,39 @@ const TournamentRegistration = ({
                   placeholder="https://..."
                   className="bg-muted/50"
                 />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Thêm thành viên vào đội (riêng)
+                </label>
+                <div className="max-h-44 overflow-y-auto rounded-md border border-border p-2 space-y-2 bg-muted/20">
+                  {loadingUsers ? (
+                    <p className="text-xs text-muted-foreground">
+                      Đang tải người dùng...
+                    </p>
+                  ) : (
+                    availableUsers.map((candidate) => {
+                      const disabled = !canAssignUserToCurrentTeam(candidate);
+                      const checked = createMemberIds.includes(candidate.id);
+
+                      return (
+                        <label
+                          key={`create-member-${candidate.id}`}
+                          className={`flex items-center gap-2 rounded-md px-2 py-1.5 border ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"} ${checked ? "border-primary bg-primary/5" : "border-border bg-background"}`}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            disabled={disabled}
+                            onCheckedChange={() =>
+                              !disabled && toggleCreateMember(candidate.id)
+                            }
+                          />
+                          <span className="text-sm">{candidate.username}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Màu team</label>
@@ -619,6 +997,185 @@ const TournamentRegistration = ({
           </>
         )}
 
+        {step === "edit-team" && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Cập nhật đội</DialogTitle>
+              <DialogDescription>
+                Chỉnh sửa thông tin đội của bạn (Bước 1)
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Tên team</label>
+                <Input
+                  value={editTeam.name}
+                  onChange={(e) =>
+                    setEditTeam((p) => ({ ...p, name: e.target.value }))
+                  }
+                  className="bg-muted/50"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Tên viết tắt</label>
+                <Input
+                  value={editTeam.short_name}
+                  onChange={(e) =>
+                    setEditTeam((p) => ({ ...p, short_name: e.target.value }))
+                  }
+                  maxLength={5}
+                  className="bg-muted/50"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Logo đội</label>
+                <label className="flex items-center justify-center gap-2 border border-dashed border-border rounded-md py-3 cursor-pointer hover:bg-muted/30 transition-colors">
+                  <Upload className="w-4 h-4" />
+                  <span className="text-sm">
+                    {editTeamLogoFile
+                      ? editTeamLogoFile.name
+                      : "Chọn ảnh để upload lên Supabase"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) =>
+                      handleEditTeamLogoFileChange(e.target.files?.[0] ?? null)
+                    }
+                  />
+                </label>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">
+                  Hoặc nhập Logo URL
+                </label>
+                <Input
+                  value={editTeam.logo_url}
+                  onChange={(e) =>
+                    setEditTeam((p) => ({ ...p, logo_url: e.target.value }))
+                  }
+                  className="bg-muted/50"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Màu team</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="color"
+                    value={editTeam.team_color_hex}
+                    onChange={(e) =>
+                      setEditTeam((p) => ({
+                        ...p,
+                        team_color_hex: e.target.value,
+                      }))
+                    }
+                    className="w-10 h-10 rounded-lg border border-border cursor-pointer bg-transparent"
+                  />
+                  <Input
+                    value={editTeam.team_color_hex}
+                    onChange={(e) =>
+                      setEditTeam((p) => ({
+                        ...p,
+                        team_color_hex: e.target.value,
+                      }))
+                    }
+                    className="bg-muted/50 flex-1"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setStep("team")}
+                  className="flex-1"
+                >
+                  Quay lại
+                </Button>
+                <Button
+                  onClick={handleUpdateTeam}
+                  disabled={
+                    submitting ||
+                    !editTeam.name.trim() ||
+                    !editTeam.short_name.trim()
+                  }
+                  className="flex-1"
+                >
+                  {submitting ? "Đang lưu..." : "Lưu đội"}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {step === "team-members" && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Quản lý thành viên đội</DialogTitle>
+              <DialogDescription>
+                Thêm hoặc xóa thành viên đội riêng tại Bước 1
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+              {loadingUsers ? (
+                <div className="text-sm text-muted-foreground py-4 text-center">
+                  Đang tải danh sách người dùng...
+                </div>
+              ) : (
+                availableUsers.map((candidate) => {
+                  const disabled = !canAssignUserToCurrentTeam(candidate);
+                  const checked = teamMemberIds.includes(candidate.id);
+
+                  return (
+                    <label
+                      key={`team-member-${candidate.id}`}
+                      className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                        disabled
+                          ? "opacity-50 cursor-not-allowed"
+                          : "cursor-pointer"
+                      } ${
+                        checked
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-muted/30 hover:bg-muted/50"
+                      }`}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        disabled={disabled}
+                        onCheckedChange={() =>
+                          !disabled && toggleTeamMember(candidate.id)
+                        }
+                      />
+                      <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold uppercase">
+                        {candidate.username[0]}
+                      </div>
+                      <span className="font-medium text-sm">
+                        {candidate.username}
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setStep("team")}
+                className="flex-1"
+              >
+                Quay lại
+              </Button>
+              <Button
+                onClick={handleUpdateTeamMembers}
+                disabled={submitting}
+                className="flex-1"
+              >
+                {submitting ? "Đang lưu..." : "Lưu thành viên"}
+              </Button>
+            </div>
+          </>
+        )}
+
         {step === "members" && (
           <>
             <DialogHeader>
@@ -629,9 +1186,8 @@ const TournamentRegistration = ({
             </DialogHeader>
             <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
               <p className="text-xs text-muted-foreground">
-                Điều kiện: tối thiểu {minPlayersRequired} người, và tổng số đăng
-                ký phải bằng hoặc thêm 2 người so với số người trong đội hiện
-                tại.
+                Điều kiện: chọn từ {minPlayersRequired} đến {maxPlayersAllowed}
+                người.
               </p>
               {loadingMembers ? (
                 <div className="text-sm text-muted-foreground py-4 text-center">
