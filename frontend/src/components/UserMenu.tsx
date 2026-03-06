@@ -38,14 +38,22 @@ const UserMenu = () => {
     );
   }
 
-  const initials = user.name
-    ? user.name
+  const displayName =
+    (user as any)?.nickname ||
+    (user as any)?.name ||
+    (user as any)?.username ||
+    "User";
+  const displayUsername =
+    (user as any)?.username || (user as any)?.nickname || "user";
+
+  const initials = displayName
+    ? displayName
         .split(" ")
         .map((n) => n[0])
         .join("")
         .toUpperCase()
         .slice(0, 2)
-    : user.username.slice(0, 2).toUpperCase();
+    : "US";
 
   return (
     <DropdownMenu>
@@ -61,9 +69,9 @@ const UserMenu = () => {
       <DropdownMenuContent className="w-56" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-bold leading-none">{user.name}</p>
+            <p className="text-sm font-bold leading-none">{displayName}</p>
             <p className="text-xs leading-none text-muted-foreground">
-              @{user.username}
+              @{displayUsername}
             </p>
           </div>
         </DropdownMenuLabel>
@@ -73,7 +81,10 @@ const UserMenu = () => {
           <span>Trang cá nhân</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-destructive">
+        <DropdownMenuItem
+          onClick={handleLogout}
+          className="cursor-pointer text-destructive"
+        >
           <LogOut className="mr-2 h-4 w-4" />
           <span>Đăng xuất</span>
         </DropdownMenuItem>
