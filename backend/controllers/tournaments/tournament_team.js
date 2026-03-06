@@ -11,7 +11,7 @@ teamTourRoute.get(
     const tournamentId = Number(params.tournament_id);
 
     const { rows: tourTeam } = await pool.query(
-      `SELECT tt.id, t.name, t.short_name, t.logo_url, t.team_color_hex, u.nickname, t.created_at AS created_by
+      `SELECT tt.id, tt.team_id, t.name, t.short_name, t.logo_url, t.team_color_hex, u.nickname, t.created_at AS created_by
      FROM tournament_teams tt
      JOIN teams t ON t.id = tt.team_id
      JOIN users u ON u.id = t.created_by
@@ -57,15 +57,34 @@ teamTourRoute.post(
       return { message: "Bạn cần đăng nhập để đăng ký đội vào giải đấu" };
     }
 
-    const allowedRoleIds = new Set([1, 2, 3, 4]);
     const roleId = Number(user.role_id);
     const teamId = Number(user.team_id);
 
-    if (!teamId || !allowedRoleIds.has(roleId)) {
+    if (!Number.isFinite(teamId) || teamId <= 0) {
       set.status = 401;
       return {
+        message: "Bạn cần có đội để có thể đăng ký giải đấu",
+      };
+    }
+
+    const { rows: teamRows } = await pool.query(
+      "SELECT created_by FROM teams WHERE id = $1",
+      [teamId],
+    );
+
+    if (teamRows.length === 0) {
+      set.status = 404;
+      return { message: "Không tìm thấy đội của bạn" };
+    }
+
+    const isCaptain = roleId === 4;
+    const isTeamOwner = Number(teamRows[0].created_by) === Number(user.id);
+
+    if (!isCaptain && !isTeamOwner) {
+      set.status = 403;
+      return {
         message:
-          "Bạn cần vào đội và làm đội trưởng đội đó để có thể đăng ký giải đấu",
+          "Không đủ quyền đăng ký. Cần role_id = 4 hoặc là người tạo đội.",
       };
     }
 
@@ -122,8 +141,14 @@ teamTourRoute.delete(
 
     const isStaff = new Set([1, 2, 3]).has(roleId);
     const isCaptainOfTeam = roleId === 4 && myTeamId === targetTeamId;
+    const { rows: teamRows } = await pool.query(
+      "SELECT created_by FROM teams WHERE id = $1",
+      [targetTeamId],
+    );
+    const isTeamOwner =
+      teamRows.length > 0 && Number(teamRows[0].created_by) === Number(user.id);
 
-    if (!isStaff && !isCaptainOfTeam) {
+    if (!isStaff && !isCaptainOfTeam && !isTeamOwner) {
       set.status = 401;
       return {
         message:

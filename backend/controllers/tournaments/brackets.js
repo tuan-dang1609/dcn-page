@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { randomInt } from "node:crypto";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
 
@@ -462,27 +463,136 @@ const generateCompactSixTeamDoubleEliminationMatches = async ({
   };
 };
 
+const shuffleArray = (items) => {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
+const SWISS_STAGE_TEMPLATES = {
+  8: [
+    { label: "0-0", wins: 0, losses: 0, matches: 4 },
+    { label: "1-0", wins: 1, losses: 0, matches: 2 },
+    { label: "0-1", wins: 0, losses: 1, matches: 2 },
+    { label: "1-1", wins: 1, losses: 1, matches: 2 },
+  ],
+  16: [
+    { label: "0-0", wins: 0, losses: 0, matches: 8 },
+    { label: "1-0", wins: 1, losses: 0, matches: 4 },
+    { label: "0-1", wins: 0, losses: 1, matches: 4 },
+    { label: "2-0", wins: 2, losses: 0, matches: 2 },
+    { label: "0-2", wins: 0, losses: 2, matches: 2 },
+    { label: "1-1", wins: 1, losses: 1, matches: 4 },
+    { label: "2-1", wins: 2, losses: 1, matches: 3 },
+    { label: "1-2", wins: 1, losses: 2, matches: 3 },
+    { label: "2-2", wins: 2, losses: 2, matches: 3 },
+  ],
+};
+
+const getSwissStageTemplate = (teamCount) =>
+  SWISS_STAGE_TEMPLATES[teamCount] ?? null;
+
+const getSwissQualificationRules = (teamCount) => {
+  if (teamCount === 8) {
+    return {
+      advance_wins: 2,
+      eliminate_losses: 2,
+    };
+  }
+
+  if (teamCount === 16) {
+    return {
+      advance_wins: 3,
+      eliminate_losses: 3,
+    };
+  }
+
+  const fallback = Math.max(1, Math.ceil(Math.log2(Math.max(2, teamCount))));
+  return {
+    advance_wins: fallback,
+    eliminate_losses: fallback,
+  };
+};
+
+const SWISS_PAIR_PREREQUISITE_LABELS = {
+  8: {
+    "1-0": ["0-0"],
+    "0-1": ["0-0"],
+    "1-1": ["1-0", "0-1"],
+  },
+  16: {
+    "1-0": ["0-0"],
+    "0-1": ["0-0"],
+    "2-0": ["1-0"],
+    "0-2": ["0-1"],
+    "1-1": ["1-0", "0-1"],
+    "2-1": ["2-0", "1-1"],
+    "1-2": ["1-1", "0-2"],
+    "2-2": ["2-1", "1-2"],
+  },
+};
+
+const getSwissRequiredRoundsForPairing = ({
+  teamCount,
+  targetRound,
+  targetStage,
+  swissTemplate,
+}) => {
+  if (!targetRound || targetRound <= 1) {
+    return [];
+  }
+
+  const prerequisitesByLabel =
+    SWISS_PAIR_PREREQUISITE_LABELS[teamCount] ?? null;
+  if (!prerequisitesByLabel) {
+    return Array.from({ length: targetRound - 1 }, (_, index) => index + 1);
+  }
+
+  const requiredLabels = prerequisitesByLabel[targetStage?.label] ?? null;
+  if (!Array.isArray(requiredLabels) || requiredLabels.length === 0) {
+    return Array.from({ length: targetRound - 1 }, (_, index) => index + 1);
+  }
+
+  const labelToRound = new Map(
+    swissTemplate.map((stage, index) => [stage.label, index + 1]),
+  );
+
+  return requiredLabels
+    .map((label) => Number(labelToRound.get(label)))
+    .filter((roundNumber) => Number.isFinite(roundNumber));
+};
+
 const generateSwissMatches = async ({
   bracketId,
   tournamentId,
   teamIds,
-  rounds,
   bestOf,
 }) => {
-  const sortedTeamIds = [...teamIds];
-  const teamCount = sortedTeamIds.length;
-  const pairPerRound = Math.floor(teamCount / 2);
+  const swissTemplate = getSwissStageTemplate(teamIds.length);
 
-  for (let round = 1; round <= rounds; round += 1) {
-    for (let matchNo = 1; matchNo <= pairPerRound; matchNo += 1) {
+  if (!swissTemplate) {
+    throw new Error(
+      "Swiss generate hiện chỉ hỗ trợ 8 hoặc 16 đội với template chuẩn",
+    );
+  }
+
+  const shuffledTeamIds = shuffleArray(teamIds);
+
+  for (let roundIndex = 0; roundIndex < swissTemplate.length; roundIndex += 1) {
+    const stage = swissTemplate[roundIndex];
+    const roundNumber = roundIndex + 1;
+
+    for (let matchNo = 1; matchNo <= stage.matches; matchNo += 1) {
       let teamAId = null;
       let teamBId = null;
 
-      if (round === 1) {
-        const firstIndex = matchNo - 1;
-        const secondIndex = firstIndex + pairPerRound;
-        teamAId = sortedTeamIds[firstIndex] ?? null;
-        teamBId = sortedTeamIds[secondIndex] ?? null;
+      if (roundNumber === 1) {
+        const start = (matchNo - 1) * 2;
+        teamAId = shuffledTeamIds[start] ?? null;
+        teamBId = shuffledTeamIds[start + 1] ?? null;
       }
 
       await pool.query(
@@ -502,7 +612,7 @@ const generateSwissMatches = async ({
         [
           bracketId,
           tournamentId,
-          round,
+          roundNumber,
           matchNo,
           teamAId,
           teamBId,
@@ -511,34 +621,6 @@ const generateSwissMatches = async ({
         ],
       );
     }
-  }
-
-  if (teamCount % 2 === 1) {
-    await pool.query(
-      `
-      INSERT INTO matches (
-        bracket_id,
-        tournament_id,
-        round_number,
-        match_no,
-        team_a_id,
-        team_b_id,
-        score_a,
-        score_b,
-        best_of,
-        winner_team_id,
-        status
-      )
-      VALUES ($1,$2,1,$3,$4,NULL,1,0,$5,$4,'completed')
-      `,
-      [
-        bracketId,
-        tournamentId,
-        pairPerRound + 1,
-        sortedTeamIds[teamCount - 1],
-        bestOf,
-      ],
-    );
   }
 };
 
@@ -556,25 +638,6 @@ const compareSwissStandingDesc = (teamAId, teamBId, standingsByTeam) => {
 
   if ((standingB.buchholz ?? 0) !== (standingA.buchholz ?? 0)) {
     return (standingB.buchholz ?? 0) - (standingA.buchholz ?? 0);
-  }
-
-  return teamAId - teamBId;
-};
-
-const compareSwissStandingAsc = (teamAId, teamBId, standingsByTeam) => {
-  const standingA = standingsByTeam.get(teamAId) ?? {};
-  const standingB = standingsByTeam.get(teamBId) ?? {};
-
-  if ((standingA.points ?? 0) !== (standingB.points ?? 0)) {
-    return (standingA.points ?? 0) - (standingB.points ?? 0);
-  }
-
-  if ((standingA.byeCount ?? 0) !== (standingB.byeCount ?? 0)) {
-    return (standingA.byeCount ?? 0) - (standingB.byeCount ?? 0);
-  }
-
-  if ((standingA.buchholz ?? 0) !== (standingB.buchholz ?? 0)) {
-    return (standingA.buchholz ?? 0) - (standingB.buchholz ?? 0);
   }
 
   return teamAId - teamBId;
@@ -629,6 +692,10 @@ const buildSwissStandings = ({ teamIds, matches, targetRound }) => {
   for (const match of matches) {
     const roundNumber = toNumber(match?.round_number);
     if (roundNumber === null || roundNumber >= targetRound) {
+      continue;
+    }
+
+    if (!isSwissMatchResolved(match)) {
       continue;
     }
 
@@ -713,56 +780,56 @@ const buildSwissStandings = ({ teamIds, matches, targetRound }) => {
   return { standingsByTeam, playedOpponents };
 };
 
-const pickSwissByeTeam = ({ orderedTeamIds, standingsByTeam }) => {
-  const neverHadBye = orderedTeamIds.filter(
-    (teamId) => Number(standingsByTeam.get(teamId)?.byeCount ?? 0) === 0,
-  );
-  const candidatePool = neverHadBye.length ? neverHadBye : orderedTeamIds;
-  const sorted = [...candidatePool].sort((a, b) =>
-    compareSwissStandingAsc(a, b, standingsByTeam),
-  );
-  return sorted[0] ?? null;
+const buildSwissTeamStatuses = ({ standingsByTeam, qualificationRules }) => {
+  const advanceWins = Number(qualificationRules?.advance_wins ?? 0);
+  const eliminateLosses = Number(qualificationRules?.eliminate_losses ?? 0);
+
+  const statuses = [...standingsByTeam.values()].map((standing) => {
+    const wins = Number(standing?.wins ?? 0);
+    const losses = Number(standing?.losses ?? 0);
+
+    let swiss_status = "pending";
+    if (wins >= advanceWins) swiss_status = "advanced";
+    else if (losses >= eliminateLosses) swiss_status = "eliminated";
+
+    return {
+      ...standing,
+      swiss_status,
+    };
+  });
+
+  return {
+    statuses,
+    advancedTeamIds: statuses
+      .filter((item) => item.swiss_status === "advanced")
+      .map((item) => Number(item.team_id)),
+    eliminatedTeamIds: statuses
+      .filter((item) => item.swiss_status === "eliminated")
+      .map((item) => Number(item.team_id)),
+  };
 };
 
-const findSwissPairsNoRematch = ({
-  orderedTeamIds,
-  standingsByTeam,
-  playedOpponents,
-}) => {
+const findSwissPairsNoRematch = ({ orderedTeamIds, playedOpponents }) => {
   const solve = (remainingTeamIds) => {
     if (remainingTeamIds.length === 0) {
       return [];
     }
 
     const firstTeamId = remainingTeamIds[0];
-    const candidates = remainingTeamIds
-      .slice(1)
-      .map((teamId) => ({
-        teamId,
-        pointGap: Math.abs(
-          Number(standingsByTeam.get(firstTeamId)?.points ?? 0) -
-            Number(standingsByTeam.get(teamId)?.points ?? 0),
-        ),
-      }))
-      .sort((a, b) => {
-        if (a.pointGap !== b.pointGap) {
-          return a.pointGap - b.pointGap;
-        }
-        return compareSwissStandingDesc(a.teamId, b.teamId, standingsByTeam);
-      });
+    const candidates = shuffleArray(remainingTeamIds.slice(1));
 
-    for (const candidate of candidates) {
-      if (playedOpponents.get(firstTeamId)?.has(candidate.teamId)) {
+    for (const candidateTeamId of candidates) {
+      if (playedOpponents.get(firstTeamId)?.has(candidateTeamId)) {
         continue;
       }
 
       const nextRemaining = remainingTeamIds.filter(
-        (teamId) => teamId !== firstTeamId && teamId !== candidate.teamId,
+        (teamId) => teamId !== firstTeamId && teamId !== candidateTeamId,
       );
 
       const tailPairs = solve(nextRemaining);
       if (tailPairs !== null) {
-        return [[firstTeamId, candidate.teamId], ...tailPairs];
+        return [[firstTeamId, candidateTeamId], ...tailPairs];
       }
     }
 
@@ -770,6 +837,53 @@ const findSwissPairsNoRematch = ({
   };
 
   return solve(orderedTeamIds);
+};
+
+const normalizePairKey = (pair) => {
+  const a = Number(pair?.[0]);
+  const b = Number(pair?.[1]);
+  const min = Math.min(a, b);
+  const max = Math.max(a, b);
+  return `${min}-${max}`;
+};
+
+const normalizePairsSignature = (pairs) =>
+  pairs
+    .map(normalizePairKey)
+    .sort((a, b) => a.localeCompare(b))
+    .join("|");
+
+const findRandomSwissPairsNoRematch = ({
+  teamIds,
+  playedOpponents,
+  maxAttempts = 160,
+}) => {
+  const uniqueSolutions = new Map();
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const randomizedTeamIds = shuffleArray(teamIds);
+    const candidate = findSwissPairsNoRematch({
+      orderedTeamIds: randomizedTeamIds,
+      playedOpponents,
+    });
+
+    if (!candidate || candidate.length * 2 !== teamIds.length) {
+      continue;
+    }
+
+    const signature = normalizePairsSignature(candidate);
+    if (!uniqueSolutions.has(signature)) {
+      uniqueSolutions.set(signature, candidate);
+    }
+  }
+
+  const solutions = [...uniqueSolutions.values()];
+  if (!solutions.length) {
+    return null;
+  }
+
+  const randomSolutionIndex = randomInt(solutions.length);
+  return solutions[randomSolutionIndex];
 };
 
 const generateRoundRobinMatches = async ({
@@ -1150,14 +1264,13 @@ bracketRouter.post(
       "Double-elimination được tạo trong 1 bracket duy nhất. Hỗ trợ 4/6/8 đội; với 6 đội sẽ auto-advance bye ở nhánh trên.";
 
     if (teamIds.length === 6) {
-      const compactSixResult = await generateCompactSixTeamDoubleEliminationMatches(
-        {
+      const compactSixResult =
+        await generateCompactSixTeamDoubleEliminationMatches({
           bracketId: Number(bracket.id),
           tournamentId,
           teamIds,
           bestOf,
-        },
-      );
+        });
 
       bracketSize = Number(compactSixResult?.bracketSize ?? 6);
       winnerRounds = Number(compactSixResult?.winnerRounds ?? 3);
@@ -1479,9 +1592,17 @@ bracketRouter.post(
       return { error: "Cần tối thiểu 2 đội để tạo swiss" };
     }
 
-    const rounds =
-      toNumber(body?.rounds) ??
-      Math.max(1, Math.ceil(Math.log2(teamIds.length)));
+    const swissTemplate = getSwissStageTemplate(teamIds.length);
+    if (!swissTemplate) {
+      set.status = 400;
+      return {
+        error:
+          "Swiss template hiện chỉ hỗ trợ 8 hoặc 16 đội để tạo đúng sườn nhánh thắng-thua.",
+      };
+    }
+
+    const qualificationRules = getSwissQualificationRules(teamIds.length);
+
     const bestOf = toNumber(body?.best_of) ?? 1;
 
     const bracket = await createBracketRecord({
@@ -1496,7 +1617,6 @@ bracketRouter.post(
       bracketId: Number(bracket.id),
       tournamentId,
       teamIds,
-      rounds,
       bestOf,
     });
 
@@ -1516,8 +1636,10 @@ bracketRouter.post(
       data: {
         bracket_id: Number(bracket.id),
         tournament_id: tournamentId,
-        rounds,
+        rounds: swissTemplate.length,
         participants: teamIds.length,
+        qualification_rules: qualificationRules,
+        stage_template: swissTemplate,
         matches,
       },
     };
@@ -1550,7 +1672,6 @@ bracketRouter.post(
                   items: { type: "integer" },
                   example: [11, 22, 17, 21, 31, 32, 33, 34],
                 },
-                rounds: { type: "integer", example: 3 },
                 best_of: { type: "integer", example: 1 },
                 name: { type: "string", example: "Swiss Stage" },
                 stage: { type: "string", example: "main" },
@@ -1637,33 +1758,46 @@ bracketRouter.post(
       return { error: "Swiss cần tối thiểu 2 đội" };
     }
 
+    const swissTemplate = getSwissStageTemplate(teamIds.length);
+    if (!swissTemplate) {
+      set.status = 400;
+      return {
+        error:
+          "Bracket Swiss này không dùng template 8/16 đội nên không thể auto-pair theo nhánh score.",
+      };
+    }
+
+    const qualificationRules = getSwissQualificationRules(teamIds.length);
+
+    const maxTemplateRound = swissTemplate.length;
+
     const requestedRound = toNumber(body?.round_number);
     let targetRound = requestedRound;
 
     if (targetRound === null) {
-      const roundNumbers = [
-        ...new Set(
-          allMatches
-            .map((match) => toNumber(match.round_number))
-            .filter(Number.isFinite),
-        ),
-      ].sort((a, b) => a - b);
+      targetRound = null;
+      for (
+        let roundNumber = 2;
+        roundNumber <= maxTemplateRound;
+        roundNumber += 1
+      ) {
+        const roundMatches = allMatches.filter(
+          (match) => toNumber(match.round_number) === roundNumber,
+        );
+        const hasEmptySlot = roundMatches.some(
+          (match) =>
+            toNumber(match.team_a_id) === null &&
+            toNumber(match.team_b_id) === null,
+        );
 
-      targetRound =
-        roundNumbers.find((roundNumber) => {
-          if (roundNumber <= 1) return false;
-          const roundMatches = allMatches.filter(
-            (match) => toNumber(match.round_number) === roundNumber,
-          );
-          return roundMatches.some(
-            (match) =>
-              toNumber(match.team_a_id) === null &&
-              toNumber(match.team_b_id) === null,
-          );
-        }) ?? null;
+        if (hasEmptySlot) {
+          targetRound = roundNumber;
+          break;
+        }
+      }
     }
 
-    if (!targetRound || targetRound <= 1) {
+    if (!targetRound || targetRound <= 1 || targetRound > maxTemplateRound) {
       set.status = 400;
       return {
         error:
@@ -1671,23 +1805,41 @@ bracketRouter.post(
       };
     }
 
-    const previousRoundMatches = allMatches.filter(
-      (match) => toNumber(match.round_number) === targetRound - 1,
-    );
-
-    if (!previousRoundMatches.length) {
+    const targetStage = swissTemplate[targetRound - 1];
+    if (!targetStage) {
       set.status = 400;
-      return { error: `Không có dữ liệu round ${targetRound - 1} để tính cặp` };
+      return { error: "Round Swiss không tồn tại trong template hiện tại" };
     }
 
-    const unresolvedPreviousRound = previousRoundMatches.find(
-      (match) => !isSwissMatchResolved(match),
-    );
+    const prerequisiteRounds = getSwissRequiredRoundsForPairing({
+      teamCount: teamIds.length,
+      targetRound,
+      targetStage,
+      swissTemplate,
+    });
+    const prerequisiteRoundSet = new Set(prerequisiteRounds);
 
-    if (unresolvedPreviousRound) {
+    const unresolvedEarlierMatches = allMatches.filter((match) => {
+      const roundNumber = toNumber(match.round_number);
+      const hasTwoTeams =
+        toNumber(match.team_a_id) !== null &&
+        toNumber(match.team_b_id) !== null;
+
+      if (
+        !roundNumber ||
+        !prerequisiteRoundSet.has(roundNumber) ||
+        !hasTwoTeams
+      ) {
+        return false;
+      }
+
+      return !isSwissMatchResolved(match);
+    });
+
+    if (unresolvedEarlierMatches.length > 0) {
       set.status = 400;
       return {
-        error: `Round ${targetRound - 1} chưa hoàn tất, không thể pair round ${targetRound}`,
+        error: `Còn round trước chưa hoàn tất, không thể pair round ${targetRound}`,
       };
     }
 
@@ -1697,37 +1849,48 @@ bracketRouter.post(
       targetRound,
     });
 
-    const orderedTeamIds = [...teamIds].sort((a, b) =>
-      compareSwissStandingDesc(a, b, standingsByTeam),
+    const swissClassification = buildSwissTeamStatuses({
+      standingsByTeam,
+      qualificationRules,
+    });
+    const statusByTeam = new Map(
+      swissClassification.statuses.map((item) => [
+        Number(item.team_id),
+        item.swiss_status,
+      ]),
     );
 
-    let byeTeamId = null;
-    let teamIdsForPairing = [...orderedTeamIds];
-    if (teamIdsForPairing.length % 2 === 1) {
-      byeTeamId = pickSwissByeTeam({
-        orderedTeamIds: teamIdsForPairing,
-        standingsByTeam,
-      });
-      teamIdsForPairing = teamIdsForPairing.filter(
-        (teamId) => teamId !== byeTeamId,
+    const expectedParticipants = targetStage.matches * 2;
+    const eligibleTeamIds = teamIds.filter((teamId) => {
+      const standing = standingsByTeam.get(teamId);
+      const status = statusByTeam.get(Number(teamId)) ?? "pending";
+      return (
+        Number(standing?.wins ?? 0) === targetStage.wins &&
+        Number(standing?.losses ?? 0) === targetStage.losses &&
+        status === "pending"
       );
-    }
-
-    const pairs = findSwissPairsNoRematch({
-      orderedTeamIds: teamIdsForPairing,
-      standingsByTeam,
-      playedOpponents,
     });
 
-    if (!pairs) {
+    if (eligibleTeamIds.length !== expectedParticipants) {
       set.status = 400;
       return {
-        error:
-          "Không thể xếp cặp round này mà vẫn đảm bảo không rematch. Giảm số round hoặc điều chỉnh kết quả trước đó.",
+        error: `Round ${targetRound} (${targetStage.label}) cần ${expectedParticipants} đội nhưng hiện có ${eligibleTeamIds.length}. Hãy kiểm tra kết quả các round trước.`,
       };
     }
 
-    const pairPerRound = Math.floor(teamIds.length / 2);
+    const pairs = findRandomSwissPairsNoRematch({
+      teamIds: eligibleTeamIds,
+      playedOpponents,
+    });
+
+    if (!pairs || pairs.length !== targetStage.matches) {
+      set.status = 400;
+      return {
+        error:
+          "Không thể xếp cặp round này mà vẫn đảm bảo random và không rematch.",
+      };
+    }
+
     const sourceBestOf =
       toNumber(body?.best_of) ?? toNumber(allMatches[0]?.best_of) ?? 1;
 
@@ -1785,10 +1948,10 @@ bracketRouter.post(
       };
     }
 
-    if (targetRoundRows.length < pairPerRound) {
+    if (targetRoundRows.length < targetStage.matches) {
       for (
         let matchNo = targetRoundRows.length + 1;
-        matchNo <= pairPerRound;
+        matchNo <= targetStage.matches;
         matchNo += 1
       ) {
         await pool.query(
@@ -1826,10 +1989,10 @@ bracketRouter.post(
     );
 
     const usablePairMatches = targetRoundMatches.filter(
-      (match) => toNumber(match.match_no) <= pairPerRound,
+      (match) => toNumber(match.match_no) <= targetStage.matches,
     );
 
-    if (usablePairMatches.length < pairPerRound) {
+    if (usablePairMatches.length < targetStage.matches) {
       set.status = 500;
       return { error: "Không đủ match slot để cập nhật pairing" };
     }
@@ -1852,8 +2015,10 @@ bracketRouter.post(
       );
     }
 
-    for (let index = 0; index < pairs.length; index += 1) {
-      const [teamAId, teamBId] = pairs[index];
+    const randomizedPairs = shuffleArray(pairs);
+
+    for (let index = 0; index < randomizedPairs.length; index += 1) {
+      const [teamAId, teamBId] = randomizedPairs[index];
       const targetMatch = usablePairMatches[index];
 
       await pool.query(
@@ -1869,56 +2034,6 @@ bracketRouter.post(
         `,
         [teamAId, teamBId, targetMatch.id],
       );
-    }
-
-    if (byeTeamId !== null) {
-      const byeMatchNo = pairPerRound + 1;
-      const existingByeMatch = targetRoundMatches.find(
-        (match) => toNumber(match.match_no) === byeMatchNo,
-      );
-
-      if (existingByeMatch) {
-        await pool.query(
-          `
-          UPDATE matches
-          SET team_a_id = $1,
-              team_b_id = NULL,
-              score_a = 1,
-              score_b = 0,
-              winner_team_id = $1,
-              status = 'completed'
-          WHERE id = $2
-          `,
-          [byeTeamId, existingByeMatch.id],
-        );
-      } else {
-        await pool.query(
-          `
-          INSERT INTO matches (
-            bracket_id,
-            tournament_id,
-            round_number,
-            match_no,
-            team_a_id,
-            team_b_id,
-            score_a,
-            score_b,
-            best_of,
-            winner_team_id,
-            status
-          )
-          VALUES ($1,$2,$3,$4,$5,NULL,1,0,$6,$5,'completed')
-          `,
-          [
-            bracketId,
-            tournamentId,
-            targetRound,
-            byeMatchNo,
-            byeTeamId,
-            sourceBestOf,
-          ],
-        );
-      }
     }
 
     const { rows: pairedRoundMatches } = await pool.query(
@@ -1938,11 +2053,14 @@ bracketRouter.post(
         bracket_id: bracketId,
         tournament_id: tournamentId,
         round: targetRound,
-        bye_team_id: byeTeamId,
-        pairs,
-        standings: [...standingsByTeam.values()].sort((a, b) =>
+        stage_label: targetStage.label,
+        qualification_rules: qualificationRules,
+        pairs: randomizedPairs,
+        standings: swissClassification.statuses.sort((a, b) =>
           compareSwissStandingDesc(a.team_id, b.team_id, standingsByTeam),
         ),
+        advanced_team_ids: swissClassification.advancedTeamIds,
+        eliminated_team_ids: swissClassification.eliminatedTeamIds,
         matches: pairedRoundMatches,
       },
     };

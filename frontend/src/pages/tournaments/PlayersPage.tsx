@@ -27,14 +27,13 @@ const PlayersPage = () => {
         {apiPlayersRaw.map((participant, i) => (
           <div
             key={`${participant.id}-${participant.name}`}
-            className="neo-box-sm bg-card p-4 flex items-center gap-3 hover:bg-muted/30 transition-colors"
-            style={{ backgroundColor: participant.team_color_hex || "#2b2b2b" }}
+            className="neo-box-sm bg-card p-3 flex items-center gap-3 hover:bg-muted/30 transition-colors"
           >
             <div className="flex items-center gap-2">
               <img
                 src={participant.logo_url}
                 alt={participant.name}
-                className="w-5 h-5"
+                className="w-8 h-8"
               />
               <span className="font-bold">{participant.name}</span>
             </div>

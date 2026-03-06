@@ -6,7 +6,6 @@ import {
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
 import { TOURNAMENT_LOGO } from "@/data/tournament";
-import { getMockDoubleElimMatches } from "@/components/double-elim/mockApi";
 import { getDoubleElimRoundTitle } from "@/components/double-elim/roundLabels";
 
 type DoubleElimBracketProps = {
@@ -60,44 +59,6 @@ const getTeamLabel = (
 ) => {
   if (!teamId) return "TBD";
   return teamNameById[teamId] || `${teamId}`;
-};
-
-const ModeButtons = ({
-  mockMode,
-  setMockMode,
-}: {
-  mockMode: "off" | "6" | "8";
-  setMockMode: (mode: "off" | "6" | "8") => void;
-}) => {
-  const buttonClass = (active: boolean) =>
-    `px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-      active
-        ? "bg-primary text-primary-foreground neo-box-sm"
-        : "bg-muted text-muted-foreground hover:bg-muted/80"
-    }`;
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <button
-        onClick={() => setMockMode("off")}
-        className={buttonClass(mockMode === "off")}
-      >
-        Dữ liệu thật
-      </button>
-      <button
-        onClick={() => setMockMode("6")}
-        className={buttonClass(mockMode === "6")}
-      >
-        Mock 6 đội
-      </button>
-      <button
-        onClick={() => setMockMode("8")}
-        className={buttonClass(mockMode === "8")}
-      >
-        Mock 8 đội
-      </button>
-    </div>
-  );
 };
 
 const PlayerRow = ({
@@ -365,7 +326,7 @@ const ElbowConnector = ({
       <path
         d={path}
         fill="none"
-        stroke="hsl(var(--border))"
+        stroke="white"
         strokeWidth={2}
         opacity={hasHover ? 0.25 : 1}
       />
@@ -431,7 +392,7 @@ const MergeConnector = ({
           y1={y}
           x2={midX}
           y2={y}
-          stroke="hsl(var(--border))"
+          stroke="white"
           strokeWidth={2}
           opacity={hasHover ? 0.25 : 1}
         />
@@ -442,7 +403,7 @@ const MergeConnector = ({
         y1={Math.min(...normFromYs)}
         x2={midX}
         y2={Math.max(...normFromYs)}
-        stroke="hsl(var(--border))"
+        stroke="white"
         strokeWidth={2}
         opacity={hasHover ? 0.25 : 1}
       />
@@ -451,7 +412,7 @@ const MergeConnector = ({
         y1={normToY}
         x2={eX}
         y2={normToY}
-        stroke="hsl(var(--border))"
+        stroke="white"
         strokeWidth={2}
         opacity={hasHover ? 0.25 : 1}
       />
@@ -507,16 +468,10 @@ const getSegmentRange = (
 const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   const { tournament } = useOutletContext<BracketOutletContext>();
   const [hoveredPlayer, setHoveredPlayer] = useState<string | null>(null);
-  const [mockMode, setMockMode] = useState<"off" | "6" | "8">("off");
 
   const registeredTeams = tournament?.registered ?? [];
   const actualTeamCount = registeredTeams.length;
-
-  const selectedMockTeamCount =
-    mockMode === "6" ? 6 : mockMode === "8" ? 8 : null;
-  const useMockDoubleElim = selectedMockTeamCount !== null;
-
-  const teamCount = selectedMockTeamCount ?? actualTeamCount;
+  const teamCount = actualTeamCount;
 
   const teamNameById = useMemo(() => {
     const map: Record<number, string> = {};
@@ -529,29 +484,15 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   }, [registeredTeams]);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: [
-      "double-bracket-matches",
-      bracketId,
-      actualTeamCount,
-      useMockDoubleElim,
-      selectedMockTeamCount,
-    ],
-    enabled: Boolean(bracketId) || useMockDoubleElim,
+    queryKey: ["double-bracket-matches", bracketId, actualTeamCount],
+    enabled: Boolean(bracketId),
     queryFn: async () => {
-      if (useMockDoubleElim) {
-        return getMockDoubleElimMatches({
-          bracketId: bracketId ?? 999,
-          teamCount: selectedMockTeamCount ?? 8,
-          registeredTeams,
-        });
-      }
-
       if (!bracketId) return [] as ApiMatch[];
       const response = await getMatchesByBracketId(bracketId);
       return response.data?.data ?? [];
     },
-    staleTime: useMockDoubleElim ? Number.POSITIVE_INFINITY : 0,
-    refetchOnMount: useMockDoubleElim ? false : true,
+    staleTime: 0,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
@@ -679,7 +620,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   }, [rounds]);
 
   const eightTeamSpecial = useMemo(() => {
-    const likelyEightTeamBracket = inferredTeamCount >= 7 || mockMode === "8";
+    const likelyEightTeamBracket = inferredTeamCount >= 7;
     if (!likelyEightTeamBracket) return null;
     if (rounds.length < 8) return null;
 
@@ -716,11 +657,10 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       r7: r7[0],
       r8: r8[0],
     };
-  }, [rounds, inferredTeamCount, mockMode]);
+  }, [rounds, inferredTeamCount]);
 
   const sixTeamSpecial = useMemo(() => {
-    const likelySixTeamBracket =
-      mockMode === "6" || (inferredTeamCount > 0 && inferredTeamCount <= 6);
+    const likelySixTeamBracket = inferredTeamCount > 0 && inferredTeamCount <= 6;
     if (!likelySixTeamBracket) return null;
     if (rounds.length < 7) return null;
 
@@ -754,7 +694,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       r6: r6[0],
       r7: r7[0],
     };
-  }, [rounds, inferredTeamCount, mockMode]);
+  }, [rounds, inferredTeamCount]);
 
   const layout = useMemo(() => {
     if (!rounds.length) return null;
@@ -809,25 +749,11 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   }
 
   if (isError) {
-    return (
-      <div className="space-y-3">
-        <ModeButtons mockMode={mockMode} setMockMode={setMockMode} />
-        <p className="text-sm text-destructive">
-          Không tải được dữ liệu double elimination.
-        </p>
-      </div>
-    );
+    return <p className="text-sm text-destructive">Không tải được dữ liệu double elimination.</p>;
   }
 
   if (!rounds.length) {
-    return (
-      <div className="space-y-3">
-        <ModeButtons mockMode={mockMode} setMockMode={setMockMode} />
-        <p className="text-sm text-muted-foreground">
-          Chưa có match trong bracket này.
-        </p>
-      </div>
-    );
+    return <p className="text-sm text-muted-foreground">Chưa có match trong bracket này.</p>;
   }
 
   const totalRounds = rounds.length;
@@ -880,41 +806,24 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
 
     return (
       <div className="space-y-3">
-        <ModeButtons mockMode={mockMode} setMockMode={setMockMode} />
-
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
-            {getDoubleElimRoundTitle(
-              1,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
-            {getDoubleElimRoundTitle(
-              2,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
             style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
           >
-            {getDoubleElimRoundTitle(
-              3,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 8)}
           </div>
 
           <div
@@ -926,12 +835,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y4A - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              4,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -942,12 +846,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y5A - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              5,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(5, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -958,12 +857,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y6 - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              6,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -974,12 +868,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y7 - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              7,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -990,12 +879,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y8 - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              8,
-              totalRounds,
-              firstRoundMatchCount,
-              8,
-            )}
+            {getDoubleElimRoundTitle(8, totalRounds, firstRoundMatchCount, 8)}
           </div>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
@@ -1317,41 +1201,24 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
 
     return (
       <div className="space-y-3">
-        <ModeButtons mockMode={mockMode} setMockMode={setMockMode} />
-
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
-            {getDoubleElimRoundTitle(
-              1,
-              totalRounds,
-              firstRoundMatchCount,
-              6,
-            )}
+            {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
-            {getDoubleElimRoundTitle(
-              2,
-              totalRounds,
-              firstRoundMatchCount,
-              6,
-            )}
+            {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
             style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
           >
-            {getDoubleElimRoundTitle(
-              3,
-              totalRounds,
-              firstRoundMatchCount,
-              6,
-            )}
+            {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 6)}
           </div>
 
           <div
@@ -1363,12 +1230,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y4A - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              4,
-              totalRounds,
-              firstRoundMatchCount,
-              6,
-            )}
+            {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -1379,12 +1241,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y7 - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              7,
-              totalRounds,
-              firstRoundMatchCount,
-              6,
-            )}
+            {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -1395,12 +1252,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y6 - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              6,
-              totalRounds,
-              firstRoundMatchCount,
-              6,
-            )}
+            {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -1411,12 +1263,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
               top: y5 - 28 + HEADER_H,
             }}
           >
-            {getDoubleElimRoundTitle(
-              5,
-              totalRounds,
-              firstRoundMatchCount,
-              6,
-            )}
+            {getDoubleElimRoundTitle(5, totalRounds, firstRoundMatchCount, 6)}
           </div>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
@@ -1631,8 +1478,6 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
 
     return (
       <div className="space-y-3">
-        <ModeButtons mockMode={mockMode} setMockMode={setMockMode} />
-
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
             className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
@@ -1826,7 +1671,6 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
 
   return (
     <div className="space-y-3">
-      <ModeButtons mockMode={mockMode} setMockMode={setMockMode} />
       <div
         className="relative"
         style={{ width: layout.totalW, height: layout.totalH }}

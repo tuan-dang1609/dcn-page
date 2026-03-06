@@ -9,7 +9,7 @@ const LeaderboardPage = lazy(
 );
 const RulePage = lazy(() => import("@/pages/tournaments/RulePage"));
 const NotFound = lazy(() => import("@/pages/tournaments/NotFound"));
-
+const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const PageFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
     Đang tải...
@@ -28,10 +28,14 @@ export const Router = () => {
       children: [
         { path: "bracket", element: withSuspense(<BracketPage />) },
         { path: "bracket/:matchId", element: withSuspense(<BracketPage />) },
-        { path: "players", element: withSuspense(<PlayersPage />) },
+        { path: "participants", element: withSuspense(<PlayersPage />) },
         { path: "leaderboard", element: withSuspense(<LeaderboardPage />) },
         { path: "rule", element: withSuspense(<RulePage />) },
       ],
+    },
+    {
+      path: "/login",
+      element: withSuspense(<LoginPage />),
     },
     { path: "*", element: withSuspense(<NotFound />) },
   ]);

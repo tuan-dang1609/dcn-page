@@ -75,7 +75,7 @@ usersRouter.get(
 
     if (team_id !== null) {
       const { rows: team_user_info } = await pool.query(
-        `SELECT t.name, t.short_name, t.logo_url, t.team_color_hex, u.nickname AS created_by, t.created_at
+        `SELECT t.name, t.short_name, t.logo_url, t.team_color_hex, u.nickname AS created_by_name,t.created_by, t.created_at
        FROM teams t
        INNER JOIN users u ON u.id = t.created_by
        WHERE t.id = $1`,

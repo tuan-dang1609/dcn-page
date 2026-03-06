@@ -1,4 +1,5 @@
 import { ExternalLink, Check } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const Sidebar = ({ tournament, isLoading }) => {
   const profilePicture = tournament?.created_by?.profile_picture;
@@ -15,33 +16,27 @@ const Sidebar = ({ tournament, isLoading }) => {
       <div className="neo-box bg-card p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold">Người chơi</h3>
-          <button className="text-secondary font-bold text-sm hover:underline">
-            XEM TẤT CẢ
-          </button>
+          <Link to="participants">
+            <button className=" font-bold text-sm hover:underline">
+              XEM TẤT CẢ
+            </button>
+          </Link>
         </div>
-            <div className="neo-box-sm bg-background p-4 flex items-center gap-3">
-              {/* Circular progress ring with centered avatar/check */}
-              <div
-                className="rounded-full"
-                style={{
-                  padding: 3,
-                  background: `conic-gradient(hsl(var(--primary)) ${progressPercent}%, hsl(var(--muted)) ${progressPercent}% 100%)`,
-                }}
-              >
-                <div className="w-8 h-8 rounded-full bg-card flex items-center justify-center">
-                  {profilePicture ? (
-                    <img
-                      src={profilePicture}
-                      alt="Player avatar"
-                      className="w-6 h-6 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-[#2b2b2b] flex items-center justify-center">
-                      <Check className="w-4 h-4 text-primary font-bold" />
-                    </div>
-                  )}
-                </div>
+        <div className="neo-box-sm bg-background p-4 flex items-center gap-3">
+          {/* Circular progress ring with centered avatar/check */}
+          <div
+            className="rounded-full"
+            style={{
+              padding: 3,
+              background: `conic-gradient(hsl(var(--primary)) ${progressPercent}%, hsl(var(--muted)) ${progressPercent}% 100%)`,
+            }}
+          >
+            <div className="w-8 h-8 rounded-full bg-card flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full bg-[#2b2b2b] flex items-center justify-center">
+                <Check className="w-4 h-4 text-primary font-bold" />
               </div>
+            </div>
+          </div>
           <span className="font-bold text-lg">
             {isLoading
               ? "..."
@@ -88,13 +83,19 @@ const Sidebar = ({ tournament, isLoading }) => {
         <div className="space-y-0 divide-y divide-border">
           <div className="flex justify-between items-center py-3">
             <span className="text-muted-foreground text-sm">Facebook</span>
-            <a href="#" className="font-semibold text-primary text-sm flex items-center gap-1 hover:underline">
+            <a
+              href="#"
+              className="font-semibold text-primary text-sm flex items-center gap-1 hover:underline"
+            >
               Dong Chuyen Nghiep <ExternalLink className="w-3 h-3" />
             </a>
           </div>
           <div className="flex justify-between items-center py-3">
             <span className="text-muted-foreground text-sm">Discord</span>
-            <a href="#" className="font-semibold text-primary text-sm flex items-center gap-1 hover:underline">
+            <a
+              href="#"
+              className="font-semibold text-primary text-sm flex items-center gap-1 hover:underline"
+            >
               THPT Phú Nhuận <ExternalLink className="w-3 h-3" />
             </a>
           </div>
@@ -110,15 +111,17 @@ const Sidebar = ({ tournament, isLoading }) => {
             { place: "🥉 3rd", prize: "1 Slot GF" },
             { place: "4th", prize: "1 Slot GF" },
           ].map((item) => (
-            <div key={item.place} className="bg-muted/30 border border-border rounded-lg p-3 flex justify-between items-center">
+            <div
+              key={item.place}
+              className="bg-muted/30 border border-border rounded-lg p-3 flex justify-between items-center"
+            >
               <span className="font-semibold text-sm">{item.place}</span>
-              <span className="font-semibold text-primary text-sm">{item.prize}</span>
+              <span className="font-semibold text-primary text-sm">
+                {item.prize}
+              </span>
             </div>
           ))}
         </div>
-    
-        
-        
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import {
 } from "@/api/tournaments/index";
 import SingleElimBracket from "@/components/BracketView";
 import DoubleElimBracket from "@/components/DoubleElimBracket";
+import SwissBracket from "@/components/SwissBracket";
 
 type BracketOutletContext = {
   tournament?: {
@@ -70,6 +71,10 @@ const BracketPage = () => {
     brackets.find((bracket) => bracket.id === activeBracketId) ?? brackets[0];
   const selectedBracketId = selectedBracket?.id ?? null;
   const selectedFormatId = toNumber(selectedBracket?.format_id);
+  const selectedFormatType = String(
+    selectedBracket?.format_type || "",
+  ).toLowerCase();
+  const isSwissBracket = selectedFormatType === "swiss";
 
   const bracketGroups = useMemo(() => {
     const order: string[] = [];
@@ -124,7 +129,8 @@ const BracketPage = () => {
         {bracketGroups.map((group) => {
           if (!group.isDuplicate) {
             const bracket = group.items[0];
-            const isActive = (activeBracketId ?? brackets[0]?.id) === bracket.id;
+            const isActive =
+              (activeBracketId ?? brackets[0]?.id) === bracket.id;
             return (
               <button
                 key={bracket.id}
@@ -173,27 +179,35 @@ const BracketPage = () => {
         })}
       </div>
 
-      <div className="neo-box bg-card p-6 overflow-x-auto">
-        {!isLoading && !brackets.length ? (
-          <p className="text-sm text-muted-foreground">Chưa có bracket nào.</p>
-        ) : null}
+      {!isLoading && !brackets.length ? (
+        <p className="text-md text-center text-foreground font-bold">
+          Hiện giải đấu chưa bắt đầu, vui lòng quay lại sau.
+        </p>
+      ) : (
+        <div className="neo-box bg-card p-6 overflow-x-auto">
+          {selectedFormatId === 1 ? (
+            <SingleElimBracket bracketId={selectedBracketId} />
+          ) : null}
 
-        {selectedFormatId === 1 ? (
-          <SingleElimBracket bracketId={selectedBracketId} />
-        ) : null}
+          {selectedFormatId === 2 ? (
+            <DoubleElimBracket bracketId={selectedBracketId} />
+          ) : null}
 
-        {selectedFormatId === 2 ? (
-          <DoubleElimBracket bracketId={selectedBracketId} />
-        ) : null}
+          {isSwissBracket ? (
+            <SwissBracket bracketId={selectedBracketId} />
+          ) : null}
 
-        {selectedBracket && selectedFormatId !== 1 && selectedFormatId !== 2 ? (
-          <p className="text-sm text-muted-foreground">
-            Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ
-            hỗ trợ hiển thị Single Elimination (format_id = 1) và Double
-            Elimination (format_id = 2).
-          </p>
-        ) : null}
-      </div>
+          {selectedBracket &&
+          selectedFormatId !== 1 &&
+          selectedFormatId !== 2 &&
+          !isSwissBracket ? (
+            <p className="text-sm text-muted-foreground">
+              Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ
+              hỗ trợ hiển thị Single Elimination, Double Elimination và Swiss.
+            </p>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 };

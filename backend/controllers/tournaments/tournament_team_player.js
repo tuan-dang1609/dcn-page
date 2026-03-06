@@ -4,6 +4,12 @@ import middleware from "../../utils/middleware.js";
 const playerTourRoute = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Tournament Team Players";
 
+const validateRegisteredCount = (selectedCount, teamCount) =>
+  selectedCount === teamCount || selectedCount === teamCount + 2;
+
+const validateMinPlayers = (selectedCount, minPlayers) =>
+  selectedCount >= Math.max(1, Number(minPlayers) || 1);
+
 playerTourRoute.get(
   "/:tournament_team_id",
   async ({ params, set }) => {
@@ -82,6 +88,7 @@ playerTourRoute.post(
       `
       SELECT tt.team_id, tt.tournament_id,
              t.created_by AS tournament_owner,
+              t.max_player_per_team,
              tm.created_by AS team_owner
       FROM tournament_teams tt
       JOIN tournaments t ON t.id = tt.tournament_id
@@ -125,6 +132,27 @@ playerTourRoute.post(
     if (validUsers.length !== userIds.length) {
       set.status = 400;
       return { error: "Một số user không thuộc team này" };
+    }
+
+    const { rows: memberCountRows } = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM users WHERE team_id = $1",
+      [teamInfo.team_id],
+    );
+    const teamMemberCount = memberCountRows[0]?.total ?? 0;
+
+    if (!validateRegisteredCount(userIds.length, teamMemberCount)) {
+      set.status = 400;
+      return {
+        error:
+          "Số người đăng ký phải bằng hoặc thêm 2 người so với số người trong đội",
+      };
+    }
+
+    if (!validateMinPlayers(userIds.length, teamInfo.max_player_per_team)) {
+      set.status = 400;
+      return {
+        error: `Giải đấu yêu cầu tối thiểu ${teamInfo.max_player_per_team} người đăng ký`,
+      };
     }
 
     const userPlaceholders = userIds
@@ -220,6 +248,7 @@ playerTourRoute.patch(
       `
       SELECT tt.team_id, tt.tournament_id,
              t.created_by AS tournament_owner,
+              t.max_player_per_team,
              tm.created_by AS team_owner
       FROM tournament_teams tt
       JOIN tournaments t ON t.id = tt.tournament_id
@@ -248,13 +277,11 @@ playerTourRoute.patch(
     }
 
     if (userIds.length === 0) {
-      await pool.query(
-        "DELETE FROM tournament_team_players WHERE tournament_team_id = $1",
-        [tournamentTeamId],
-      );
-
-      set.status = 200;
-      return { message: "Cập nhật thành công: đã xóa toàn bộ người chơi" };
+      set.status = 400;
+      return {
+        error:
+          "Số người đăng ký phải bằng hoặc thêm 2 người so với số người trong đội",
+      };
     }
 
     const userIdPlaceholders = userIds
@@ -268,6 +295,27 @@ playerTourRoute.patch(
     if (validUsers.length !== userIds.length) {
       set.status = 400;
       return { error: "Một số user không thuộc team này" };
+    }
+
+    const { rows: memberCountRows } = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM users WHERE team_id = $1",
+      [teamInfo.team_id],
+    );
+    const teamMemberCount = memberCountRows[0]?.total ?? 0;
+
+    if (!validateRegisteredCount(userIds.length, teamMemberCount)) {
+      set.status = 400;
+      return {
+        error:
+          "Số người đăng ký phải bằng hoặc thêm 2 người so với số người trong đội",
+      };
+    }
+
+    if (!validateMinPlayers(userIds.length, teamInfo.max_player_per_team)) {
+      set.status = 400;
+      return {
+        error: `Giải đấu yêu cầu tối thiểu ${teamInfo.max_player_per_team} người đăng ký`,
+      };
     }
 
     await pool.query(
