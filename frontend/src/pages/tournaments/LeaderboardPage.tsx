@@ -56,17 +56,6 @@ const LeaderboardPage = () => {
     <div className="space-y-6">
       <h2 className="text-2xl font-heading">Bảng xếp hạng</h2>
 
-      {rankingBracketId ? (
-        <p className="text-xs text-muted-foreground">
-          Đang tính điểm theo bracket chỉ định: #{rankingBracketId}
-        </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          Chưa chỉ định bracket tính điểm, hệ thống đang tổng hợp từ toàn bộ
-          bracket của giải.
-        </p>
-      )}
-
       {isTournamentLoading || isLoading ? (
         <p className="text-sm text-muted-foreground">
           Đang tải bảng xếp hạng...
@@ -85,30 +74,39 @@ const LeaderboardPage = () => {
         </p>
       ) : null}
 
-      <div className="neo-box bg-card overflow-hidden">
-        <Table>
+      <div className="neo-box bg-card overflow-x-auto">
+        <Table className="min-w-[680px]">
           <TableHeader>
             <TableRow className="border-border">
-              <TableHead className="w-24 text-center">Hạng</TableHead>
-              <TableHead>Đội</TableHead>
-              <TableHead className="text-center">Thắng</TableHead>
-              <TableHead className="text-center">Thua</TableHead>
-              <TableHead className="text-center">Điểm</TableHead>
+              <TableHead className="w-24 text-center whitespace-nowrap">
+                Hạng
+              </TableHead>
+              <TableHead className="min-w-[260px] whitespace-nowrap">
+                Đội
+              </TableHead>
+              <TableHead className="w-20 text-center whitespace-nowrap">
+                Thắng
+              </TableHead>
+              <TableHead className="w-20 text-center whitespace-nowrap">
+                Thua
+              </TableHead>
+              <TableHead className="w-28 text-center whitespace-nowrap">
+                Điểm Thưởng
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {leaderboard.map((row: TournamentTeamResult) => {
-              const medal = toMedal(row.placement_label);
-              const placementText = row.placement_label ?? "Tam tinh";
+              const placementText = row.placement_label ?? "-";
               return (
                 <TableRow
                   key={`${row.tournament_id}-${row.team_id}`}
                   className="border-border/50 hover:bg-muted/30"
                 >
                   <TableCell className="text-center font-bold text-base">
-                    {medal ? `${medal} ${placementText}` : placementText}
+                    {` ${placementText}`}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <div className="flex items-center gap-2">
                       <img
                         src={
@@ -116,20 +114,20 @@ const LeaderboardPage = () => {
                           "https://dongchuyennghiep.vercel.app/image/waiting.png"
                         }
                         alt=""
-                        className="w-10 h-10 object-cover"
+                        className="w-10 h-10 object-cover shrink-0"
                       />
-                      <span className="font-bold">
+                      <span className="font-bold whitespace-nowrap">
                         {row.name || row.short_name || `Team ${row.team_id}`}
                       </span>
                     </div>
                   </TableCell>
-                  <TableCell className="text-center font-bold text-primary">
+                  <TableCell className="text-center font-bold text-primary whitespace-nowrap">
                     {row.wins}
                   </TableCell>
-                  <TableCell className="text-center font-bold text-error">
+                  <TableCell className="text-center font-bold text-error whitespace-nowrap">
                     {row.losses}
                   </TableCell>
-                  <TableCell className="text-center font-semibold text-foreground">
+                  <TableCell className="text-center font-semibold text-foreground whitespace-nowrap">
                     {row.points}
                   </TableCell>
                 </TableRow>

@@ -14,7 +14,9 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <RouterProvider router={router} />
+        <div className="pb-8 md:pb-10">
+          <RouterProvider router={router} />
+        </div>
       </TooltipProvider>
     </AuthProvider>
   </QueryClientProvider>
