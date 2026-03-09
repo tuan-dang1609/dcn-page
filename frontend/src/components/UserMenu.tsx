@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { User, LogOut } from "lucide-react";
 import {
@@ -15,6 +16,7 @@ import LoginDialog from "./LoginDialog";
 import { toast } from "sonner";
 
 const UserMenu = () => {
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
 
@@ -76,7 +78,10 @@ const UserMenu = () => {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer">
+        <DropdownMenuItem
+          className="cursor-pointer"
+          onClick={() => navigate("/profile")}
+        >
           <User className="mr-2 h-4 w-4" />
           <span>Trang cá nhân</span>
         </DropdownMenuItem>

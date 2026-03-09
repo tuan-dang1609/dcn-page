@@ -184,7 +184,7 @@ const BracketPage = () => {
           Hiện giải đấu chưa bắt đầu, vui lòng quay lại sau.
         </p>
       ) : (
-        <div className="neo-box bg-card p-6 overflow-x-auto">
+        <div className="p-6 overflow-x-auto">
           {selectedFormatId === 1 ? (
             <SingleElimBracket bracketId={selectedBracketId} />
           ) : null}

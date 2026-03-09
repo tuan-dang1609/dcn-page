@@ -16,8 +16,31 @@ import playerTourRoute from "./controllers/tournaments/tournament_team_player.js
 import matchRouter from "./controllers/tournaments/matches.js";
 import bracketRouter from "./controllers/tournaments/brackets.js";
 
+const serializeQuery = (query = {}) => {
+  const params = new URLSearchParams();
+
+  Object.entries(query).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item !== undefined && item !== null) {
+          params.append(key, String(item));
+        }
+      });
+      return;
+    }
+
+    params.append(key, String(value));
+  });
+
+  return params.toString();
+};
+
 const allowedOrigins = [
   "http://localhost:8080",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
   "http://127.0.0.1:3000",
   "http://localhost:3001",
   "http://127.0.0.1:3001",
@@ -32,6 +55,15 @@ const buildCorsHeaders = (origin) => ({
 });
 
 const app = new Elysia()
+  // Legacy Riot callback support for existing Riot Portal redirect registrations.
+  .get("/oauth2-callback", ({ query, request }) => {
+    const queryString = serializeQuery(query);
+    const nextPath = queryString
+      ? `/api/users/riot/callback?${queryString}`
+      : "/api/users/riot/callback";
+
+    return Response.redirect(new URL(nextPath, request.url).toString(), 302);
+  })
   .onRequest(({ request, set }) => {
     const origin = request.headers.get("origin");
 

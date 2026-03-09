@@ -13,7 +13,7 @@ const Sidebar = ({ tournament, isLoading }) => {
   return (
     <div className="space-y-6">
       {/* Players */}
-      <div className="neo-box bg-card p-5">
+      <div className="rounded-lg bg-card p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold">Người chơi</h3>
           <Link to="participants">
@@ -22,7 +22,7 @@ const Sidebar = ({ tournament, isLoading }) => {
             </button>
           </Link>
         </div>
-        <div className="neo-box-sm bg-background p-4 flex items-center gap-3">
+        <div className="bg-background p-4 flex items-center gap-3">
           {/* Circular progress ring with centered avatar/check */}
           <div
             className="rounded-full"
@@ -46,7 +46,7 @@ const Sidebar = ({ tournament, isLoading }) => {
       </div>
 
       {/* Requirements */}
-      <div className="neo-box bg-card p-5">
+      <div className="rounded-lg bg-card p-5">
         <h3 className="text-xl font-heading mb-4">Yêu cầu</h3>
         <div className="space-y-0 divide-y-2 divide-border">
           <div className="flex justify-between py-3">

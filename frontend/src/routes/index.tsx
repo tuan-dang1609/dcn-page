@@ -11,6 +11,10 @@ const RulePage = lazy(() => import("@/pages/tournaments/RulePage"));
 const NotFound = lazy(() => import("@/pages/tournaments/NotFound"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const SignupPage = lazy(() => import("@/pages/SignupPage"));
+const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
+const ScoreControlPage = lazy(() => import("@/pages/ScoreControlPage"));
+const TournamentSetupPage = lazy(() => import("@/pages/TournamentSetupPage"));
+const BracketSetupPage = lazy(() => import("@/pages/BracketSetupPage"));
 const PageFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
     Đang tải...
@@ -41,6 +45,22 @@ export const Router = () => {
     {
       path: "/register",
       element: withSuspense(<SignupPage />),
+    },
+    {
+      path: "/profile",
+      element: withSuspense(<ProfilePage />),
+    },
+    {
+      path: "/ops/score-control",
+      element: withSuspense(<ScoreControlPage />),
+    },
+    {
+      path: "/ops/tournament-setup",
+      element: withSuspense(<TournamentSetupPage />),
+    },
+    {
+      path: "/ops/bracket-setup",
+      element: withSuspense(<BracketSetupPage />),
     },
     { path: "*", element: withSuspense(<NotFound />) },
   ]);

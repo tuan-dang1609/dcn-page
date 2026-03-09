@@ -93,6 +93,161 @@ export const updateTournament = (
   payload: Partial<TournamentPayload>,
 ) => axios.patch(`${tournamentsBaseUrl}/${id}`, payload, getAuthConfig());
 
+export interface MilestonePayload {
+  id?: number;
+  title: string;
+  context: string;
+  milestone_time?: string | null;
+}
+
+export const createMilestones = (
+  tournamentId: number | string,
+  payload: MilestonePayload[] | { milestones: MilestonePayload[] },
+) =>
+  axios.post(
+    `${tournamentsBaseUrl}/milestones/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export const syncMilestones = (
+  tournamentId: number | string,
+  payload: MilestonePayload[] | { milestones: MilestonePayload[] },
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/milestones/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export interface RulePayload {
+  id?: number;
+  title: string;
+  content: string;
+}
+
+export const createRules = (
+  tournamentId: number | string,
+  payload: RulePayload[] | { rules: RulePayload[] },
+) =>
+  axios.post(
+    `${tournamentsBaseUrl}/rules/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export const syncRules = (
+  tournamentId: number | string,
+  payload: RulePayload[] | { rules: RulePayload[] },
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/rules/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export interface RequirementPayload {
+  rank_min: number;
+  rank_max: number;
+  devices?: string[];
+  discord?: boolean;
+}
+
+export interface RankGame {
+  id: number;
+  name: string;
+}
+
+export const getRankGames = () =>
+  axios.get<DataEnvelope<RankGame[]>>(`${tournamentsBaseUrl}/requirements/ranks`);
+
+export const createRequirements = (
+  tournamentId: number | string,
+  payload: RequirementPayload,
+) =>
+  axios.post(
+    `${tournamentsBaseUrl}/requirements/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export const updateRequirements = (
+  tournamentId: number | string,
+  payload: Partial<RequirementPayload>,
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/requirements/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export type BracketType =
+  | "single-elimination"
+  | "double-elimination"
+  | "swiss"
+  | "round-robin";
+
+export interface GenerateBracketPayload {
+  format_id: number;
+  team_ids?: number[];
+  best_of?: number;
+  name?: string;
+  stage?: string;
+  status?: string;
+}
+
+const bracketGeneratePathByType: Record<BracketType, string> = {
+  "single-elimination": "single-elimination/generate",
+  "double-elimination": "double-elimination/generate",
+  swiss: "swiss/generate",
+  "round-robin": "round-robin/generate",
+};
+
+export const generateBracket = (
+  tournamentId: number | string,
+  type: BracketType,
+  payload: GenerateBracketPayload,
+) =>
+  axios.post(
+    `${tournamentsBaseUrl}/brackets/${tournamentId}/${bracketGeneratePathByType[type]}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export interface UpdateMatchScorePayload {
+  score_a: number;
+  score_b: number;
+  winner_team_id?: number | null;
+  status?: string;
+  propagate_winner?: boolean;
+  propagate_loser?: boolean;
+}
+
+export const updateMatchScore = (
+  matchId: number | string,
+  payload: UpdateMatchScorePayload,
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/matches/matches/${matchId}/score`,
+    payload,
+    getAuthConfig(),
+  );
+
+export interface PairSwissNextRoundPayload {
+  round_number?: number;
+}
+
+export const pairSwissNextRound = (
+  tournamentId: number | string,
+  bracketId: number | string,
+  payload?: PairSwissNextRoundPayload,
+) =>
+  axios.post(
+    `${tournamentsBaseUrl}/brackets/${tournamentId}/swiss/${bracketId}/pair-next-round`,
+    payload ?? {},
+    getAuthConfig(),
+  );
+
 export type {
   Bracket,
   DataEnvelope,
