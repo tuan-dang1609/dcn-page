@@ -1,16 +1,22 @@
+import { useEffect } from "react";
 import HeroBanner from "@/components/HeroBanner";
 import Navigation from "@/components/Navigation";
 import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
-import { Outlet, useMatch } from "react-router-dom";
-import { useParams } from "react-router-dom";
+import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
 
 const Layout = () => {
   const isTournamentHome = Boolean(useMatch("/tournament/:game/:slug"));
   const { game, slug } = useParams();
   const { tournament, isLoading, refetch } = useTournamentBySlug(game, slug);
+  const location = useLocation();
+
+  useEffect(() => {
+    // Ensure we start at the top when navigating inside tournament pages
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen bg-background">
