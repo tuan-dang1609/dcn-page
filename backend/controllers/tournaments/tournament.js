@@ -1,9 +1,60 @@
 import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
+import {
+  ensureRankingTables,
+  getTournamentRankingBracketId,
+  recalculateTournamentResults,
+  setTournamentRankingBracketId,
+} from "../../utils/tournamentRanking.js";
 
 const tournamentRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Tournaments";
+const allowedRoleIds = new Set([1, 2, 3]);
+
+const parseJsonIfNeeded = (value) => {
+  if (value === null || value === undefined) return {};
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+const ensureTournamentManagePermission = async (user, tournamentId, set) => {
+  const userId = Number(user?.id);
+  const roleId = Number(user?.role_id);
+
+  if (!userId) {
+    set.status = 401;
+    return { ok: false, error: { error: "Unauthorized" } };
+  }
+
+  const { rows } = await pool.query(
+    "SELECT id, created_by FROM tournaments WHERE id = $1",
+    [tournamentId],
+  );
+
+  if (rows.length === 0) {
+    set.status = 404;
+    return { ok: false, error: { error: "Tournament not found" } };
+  }
+
+  const isOwner = userId === Number(rows[0].created_by);
+  if (!isOwner && !allowedRoleIds.has(roleId)) {
+    set.status = 403;
+    return {
+      ok: false,
+      error: { error: "Bạn không có quyền thao tác giải đấu này" },
+    };
+  }
+
+  return { ok: true };
+};
 
 function slugify(s) {
   return String(s || "")
@@ -143,6 +194,254 @@ tournamentRouter.get(
 );
 
 tournamentRouter.get(
+  "/:tournament_id/ranking-bracket",
+  async ({ params, set }) => {
+    const tournamentId = Number(params.tournament_id);
+
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      set.status = 400;
+      return { error: "tournament_id không hợp lệ" };
+    }
+
+    await ensureRankingTables();
+
+    const rankingBracketId = await getTournamentRankingBracketId(tournamentId);
+
+    if (!rankingBracketId) {
+      set.status = 200;
+      return {
+        data: {
+          tournament_id: tournamentId,
+          ranking_bracket_id: null,
+        },
+      };
+    }
+
+    const { rows: bracketRows } = await pool.query(
+      `
+      SELECT id, tournament_id, name, stage, status, format_id
+      FROM brackets
+      WHERE id = $1 AND tournament_id = $2
+      LIMIT 1
+      `,
+      [rankingBracketId, tournamentId],
+    );
+
+    const bracket = bracketRows[0] ?? null;
+
+    set.status = 200;
+    return {
+      data: {
+        tournament_id: tournamentId,
+        ranking_bracket_id: rankingBracketId,
+        bracket,
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Get designated bracket used for tournament ranking",
+  },
+);
+
+tournamentRouter.patch(
+  "/:tournament_id/ranking-bracket",
+  async ({ params, body, set, user }) => {
+    const tournamentId = Number(params.tournament_id);
+
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      set.status = 400;
+      return { error: "tournament_id không hợp lệ" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      tournamentId,
+      set,
+    );
+
+    if (!permission.ok) return permission.error;
+
+    const bracketId = body?.bracket_id;
+
+    try {
+      const selectedBracketId = await setTournamentRankingBracketId({
+        tournamentId,
+        bracketId,
+      });
+
+      const recalculated = await recalculateTournamentResults(tournamentId);
+
+      set.status = 200;
+      return {
+        message: selectedBracketId
+          ? "Da cap nhat bracket tinh diem"
+          : "Da go bo bracket tinh diem (fallback ve tat ca bracket)",
+        data: {
+          tournament_id: tournamentId,
+          ranking_bracket_id: selectedBracketId,
+          recalculated,
+        },
+      };
+    } catch (error) {
+      set.status = 400;
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Khong the cap nhat bracket tinh diem",
+      };
+    }
+  },
+  {
+    tags: [TAG],
+    summary: "Set designated bracket used for tournament ranking",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+tournamentRouter.get(
+  "/:tournament_id/results",
+  async ({ params, set }) => {
+    const tournamentId = Number(params.tournament_id);
+
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      set.status = 400;
+      return { error: "tournament_id không hợp lệ" };
+    }
+
+    await ensureRankingTables();
+    const recalculated = await recalculateTournamentResults(tournamentId);
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        r.tournament_id,
+        r.team_id,
+        r.placement,
+        r.placement_end,
+        r.placement_label,
+        r.points,
+        r.wins,
+        r.losses,
+        r.is_final,
+        r.calculated_at,
+        t.name,
+        t.short_name,
+        t.logo_url,
+        t.team_color_hex
+      FROM tournament_team_results r
+      JOIN teams t ON t.id = r.team_id
+      WHERE r.tournament_id = $1
+      ORDER BY r.wins DESC, r.losses ASC, r.placement ASC NULLS LAST, r.points DESC, t.id ASC
+      `,
+      [tournamentId],
+    );
+
+    set.status = 200;
+    return {
+      ranking_bracket_id: recalculated.ranking_bracket_id ?? null,
+      data: rows,
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Get tournament team results (placement + points)",
+  },
+);
+
+tournamentRouter.get(
+  "/:tournament_id/achievements",
+  async ({ params, set }) => {
+    const tournamentId = Number(params.tournament_id);
+
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      set.status = 400;
+      return { error: "tournament_id không hợp lệ" };
+    }
+
+    await ensureRankingTables();
+    const recalculated = await recalculateTournamentResults(tournamentId);
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        a.tournament_id,
+        a.team_id,
+        r.placement,
+        r.placement_end,
+        r.placement_label,
+        a.code,
+        a.title,
+        a.description,
+        a.meta,
+        a.created_at,
+        t.name,
+        t.short_name,
+        t.logo_url,
+        t.team_color_hex
+      FROM tournament_team_achievements a
+      LEFT JOIN tournament_team_results r
+        ON r.tournament_id = a.tournament_id
+       AND r.team_id = a.team_id
+      JOIN teams t ON t.id = a.team_id
+      WHERE a.tournament_id = $1
+      ORDER BY r.placement ASC NULLS LAST, t.id ASC, a.code ASC
+      `,
+      [tournamentId],
+    );
+
+    const normalizedRows = rows.map((row) => ({
+      ...row,
+      meta: parseJsonIfNeeded(row.meta),
+    }));
+
+    set.status = 200;
+    return {
+      ranking_bracket_id: recalculated.ranking_bracket_id ?? null,
+      data: normalizedRows,
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Get tournament team achievements",
+  },
+);
+
+tournamentRouter.post(
+  "/:tournament_id/recalculate-results",
+  async ({ params, set, user }) => {
+    const tournamentId = Number(params.tournament_id);
+
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      set.status = 400;
+      return { error: "tournament_id không hợp lệ" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      tournamentId,
+      set,
+    );
+
+    if (!permission.ok) return permission.error;
+
+    const recalculated = await recalculateTournamentResults(tournamentId);
+
+    set.status = 200;
+    return {
+      message: "Recalculate ket qua giai dau thanh cong",
+      data: recalculated,
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Recalculate tournament placements, points and achievements",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+tournamentRouter.get(
   "/",
   async ({ set }) => {
     const { rows } = await pool.query("SELECT * FROM tournaments");
@@ -273,11 +572,11 @@ tournamentRouter.post(
 );
 
 tournamentRouter.patch(
-  "/:id",
+  "/:tournament_id",
   async ({ params, body, set, user }) => {
     const userId = Number(user?.id);
     const roleId = Number(user?.role_id);
-    const id = Number(params.id);
+    const id = Number(params.tournament_id);
 
     if (!userId) {
       set.status = 401;

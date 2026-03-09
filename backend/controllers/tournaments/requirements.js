@@ -255,7 +255,13 @@ requirementRouter.patch(
         VALUES ($1, $2, $3::text[], $4, $5)
         RETURNING *
         `,
-        [rank_min, rank_max, deviceLiteral, parsedDiscord.value ?? false, tournamentId],
+        [
+          rank_min,
+          rank_max,
+          deviceLiteral,
+          parsedDiscord.value ?? false,
+          tournamentId,
+        ],
       );
 
       set.status = 201;

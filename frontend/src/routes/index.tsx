@@ -43,7 +43,7 @@ const routes = [
     element: withSuspense(<LoginPage />),
   },
   {
-    path: "/series/:id",
+    path: "/series/:slug",
     element: withSuspense(<SeriesPage />),
   },
   {

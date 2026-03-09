@@ -20,7 +20,7 @@ const Layout = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="space-y-8 mb-10">
+      <div className="space-y-8">
         <HeroBanner tournament={tournament} />
         <div className="px-4 md:px-8 mb-10">
           <Navigation />

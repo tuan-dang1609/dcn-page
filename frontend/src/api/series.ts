@@ -55,6 +55,7 @@ export interface SeriesParticipatingTeamResponse {
 
 export interface SeriesInfoResponse {
   id: string | number;
+  slug?: string;
   name: string;
   description?: string;
   totalprize?: string | number;
@@ -68,5 +69,30 @@ export interface SeriesByIdResponse {
   info?: SeriesInfoResponse;
 }
 
+export interface SeriesLeaderboardEntry {
+  placement: number;
+  series_id: number;
+  team_id: number;
+  total_points: number;
+  tournaments_played: number;
+  updated_at: string;
+  name?: string;
+  short_name?: string;
+  logo_url?: string;
+  team_color_hex?: string;
+}
+
+export interface SeriesLeaderboardResponse {
+  status: "success" | "error";
+  info?: {
+    series_id: number;
+    series_slug?: string;
+    leaderboard: SeriesLeaderboardEntry[];
+  };
+}
+
 export const getSeriesById = (id: number | string) =>
   axios.get<SeriesByIdResponse>(`${seriesBaseUrl}/${id}`);
+
+export const getSeriesLeaderboard = (slug: number | string) =>
+  axios.get<SeriesLeaderboardResponse>(`${seriesBaseUrl}/${slug}/leaderboard`);

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Calendar,
   Users,
@@ -130,7 +130,13 @@ const mapApiTeamToUi = (item: SeriesParticipatingTeamResponse): UiTeam => ({
 });
 
 /* ── Tournament Card ── */
-const TournamentCard = ({ t }: { t: UiTournament }) => {
+const TournamentCard = ({
+  t,
+  seriesSlug,
+}: {
+  t: UiTournament;
+  seriesSlug?: string;
+}) => {
   const status = statusMap[t.status];
   const now = Date.now();
   const start = t.startDate ? new Date(t.startDate).getTime() : NaN;
@@ -146,6 +152,7 @@ const TournamentCard = ({ t }: { t: UiTournament }) => {
   return (
     <Link
       to={`/tournament/${t.short_name}/${t.slug}`}
+      state={seriesSlug ? { fromSeriesSlug: seriesSlug } : undefined}
       className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-primary/30 transition-all duration-300 flex flex-col"
     >
       {/* Image */}
@@ -241,12 +248,21 @@ const TournamentCard = ({ t }: { t: UiTournament }) => {
 
 /* ── Main Page ── */
 const SeriesPage = () => {
-  const { id } = useParams<{ id?: string }>();
-  const seriesId = id ?? "1";
-  const { series, isLoading, error } = useSeriesById(seriesId);
+  const { slug } = useParams<{ slug?: string }>();
+  const seriesSlug = slug ?? "";
+  const navigate = useNavigate();
+  const { series, isLoading, error } = useSeriesById(seriesSlug);
 
   const [activeFilter, setActiveFilter] = useState("Tất cả");
   const [search, setSearch] = useState("");
+
+  const canonicalSeriesSlug = series?.slug ?? seriesSlug;
+
+  useEffect(() => {
+    if (series?.slug && series?.slug !== seriesSlug) {
+      navigate(`/series/${series.slug}`, { replace: true });
+    }
+  }, [navigate, series?.slug, seriesSlug]);
 
   const apiTournaments = useMemo(
     () => (series?.all_tournaments ?? []).map(mapApiTournamentToUi),
@@ -341,7 +357,7 @@ const SeriesPage = () => {
           </p>
           <p className="text-sm text-muted-foreground">
             Vui long thu lai sau hoac kiem tra ket noi API `/api/series/
-            {seriesId}`.
+            {seriesSlug}`.
           </p>
         </div>
       </div>
@@ -472,7 +488,11 @@ const SeriesPage = () => {
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 reveal-stagger visible">
               {ongoing.map((t) => (
-                <TournamentCard key={t.id} t={t} />
+                <TournamentCard
+                  key={t.id}
+                  t={t}
+                  seriesSlug={canonicalSeriesSlug}
+                />
               ))}
             </div>
           </Section>
@@ -483,7 +503,11 @@ const SeriesPage = () => {
             <h2 className="text-lg font-bold mb-6">Sắp diễn ra</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 reveal-stagger visible">
               {upcoming.map((t) => (
-                <TournamentCard key={t.id} t={t} />
+                <TournamentCard
+                  key={t.id}
+                  t={t}
+                  seriesSlug={canonicalSeriesSlug}
+                />
               ))}
             </div>
           </Section>
@@ -494,7 +518,11 @@ const SeriesPage = () => {
             <h2 className="text-lg font-bold mb-6">Đã kết thúc</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 reveal-stagger visible">
               {completed.map((t) => (
-                <TournamentCard key={t.id} t={t} />
+                <TournamentCard
+                  key={t.id}
+                  t={t}
+                  seriesSlug={canonicalSeriesSlug}
+                />
               ))}
             </div>
           </Section>

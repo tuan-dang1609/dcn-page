@@ -1,6 +1,8 @@
 import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
+import logger from "../../utils/logger.js";
+import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
 
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Matches";
@@ -157,8 +159,7 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
     .join(",");
 
   const isCompactSixSingleBracket =
-    !loserBracketId &&
-    roundShape === "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+    !loserBracketId && roundShape === "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
 
   let targetBracketId = loserBracketId;
   let targetRound = 1;
@@ -447,6 +448,22 @@ matchRouter.patch(
       });
     }
 
+    let rankingSync = { ok: true };
+    try {
+      await recalculateTournamentResults(Number(match.tournament_id));
+    } catch (error) {
+      logger.error("[ranking-sync] Failed to recalculate tournament results", {
+        tournament_id: Number(match.tournament_id),
+        match_id: matchId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      rankingSync = {
+        ok: false,
+        error:
+          "Score da cap nhat, nhung khong dong bo duoc bang xep hang tu dong",
+      };
+    }
+
     set.status = 200;
     return {
       message: "Cập nhật điểm trận đấu thành công",
@@ -454,6 +471,7 @@ matchRouter.patch(
         match: updatedMatch,
         next_match: nextMatch,
         loser_next_match: loserNextMatch,
+        ranking_sync: rankingSync,
       },
     };
   },

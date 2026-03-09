@@ -24,12 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
 const allowedRoleIds = new Set([1, 2, 3]);
-const stepLabels = [
-  "Giải đấu",
-  "Milestones",
-  "Rules",
-  "Requirements",
-] as const;
+const stepLabels = ["Giải đấu", "Milestones", "Rules", "Requirements"] as const;
 
 type StepIndex = 1 | 2 | 3 | 4;
 
@@ -92,7 +87,9 @@ const TournamentSetupPage = () => {
   const { user, token, isLoading } = useAuth();
 
   const [step, setStep] = useState<StepIndex>(1);
-  const [completedSteps, setCompletedSteps] = useState<Record<StepIndex, boolean>>({
+  const [completedSteps, setCompletedSteps] = useState<
+    Record<StepIndex, boolean>
+  >({
     1: false,
     2: false,
     3: false,
@@ -150,9 +147,12 @@ const TournamentSetupPage = () => {
     if (isLoading) return;
 
     if (!user || !token) {
-      navigate(`/login?returnTo=${encodeURIComponent("/ops/tournament-setup")}`, {
-        replace: true,
-      });
+      navigate(
+        `/login?returnTo=${encodeURIComponent("/ops/tournament-setup")}`,
+        {
+          replace: true,
+        },
+      );
       return;
     }
 
@@ -296,13 +296,21 @@ const TournamentSetupPage = () => {
           ? { date_end: toGmt7OffsetDateTime(tournamentForm.date_end) }
           : {}),
         ...(toGmt7OffsetDateTime(tournamentForm.register_start)
-          ? { register_start: toGmt7OffsetDateTime(tournamentForm.register_start) }
+          ? {
+              register_start: toGmt7OffsetDateTime(
+                tournamentForm.register_start,
+              ),
+            }
           : {}),
         ...(toGmt7OffsetDateTime(tournamentForm.register_end)
           ? { register_end: toGmt7OffsetDateTime(tournamentForm.register_end) }
           : {}),
         ...(toGmt7OffsetDateTime(tournamentForm.check_in_start)
-          ? { check_in_start: toGmt7OffsetDateTime(tournamentForm.check_in_start) }
+          ? {
+              check_in_start: toGmt7OffsetDateTime(
+                tournamentForm.check_in_start,
+              ),
+            }
           : {}),
         ...(toGmt7OffsetDateTime(tournamentForm.check_in_end)
           ? { check_in_end: toGmt7OffsetDateTime(tournamentForm.check_in_end) }
@@ -330,7 +338,10 @@ const TournamentSetupPage = () => {
       }
 
       if (savedTournament?.slug) {
-        setTournamentForm((prev) => ({ ...prev, name: savedTournament.name || prev.name }));
+        setTournamentForm((prev) => ({
+          ...prev,
+          name: savedTournament.name || prev.name,
+        }));
       }
 
       setBannerFile(null);
@@ -573,7 +584,9 @@ const TournamentSetupPage = () => {
         {step === 1 ? (
           <section className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Bước 1: Tạo/Cập nhật giải đấu</h2>
+              <h2 className="text-lg font-semibold">
+                Bước 1: Tạo/Cập nhật giải đấu
+              </h2>
               <select
                 value={tournamentMode}
                 onChange={(event) =>
@@ -595,14 +608,19 @@ const TournamentSetupPage = () => {
               />
               <Input
                 value={workflowTournamentId}
-                onChange={(event) => setWorkflowTournamentId(event.target.value)}
+                onChange={(event) =>
+                  setWorkflowTournamentId(event.target.value)
+                }
                 placeholder="ID dùng cho các bước sau"
                 inputMode="numeric"
               />
               <Input
                 value={tournamentForm.game_id}
                 onChange={(event) =>
-                  setTournamentForm((prev) => ({ ...prev, game_id: event.target.value }))
+                  setTournamentForm((prev) => ({
+                    ...prev,
+                    game_id: event.target.value,
+                  }))
                 }
                 placeholder="game_id"
                 inputMode="numeric"
@@ -610,14 +628,20 @@ const TournamentSetupPage = () => {
               <Input
                 value={tournamentForm.name}
                 onChange={(event) =>
-                  setTournamentForm((prev) => ({ ...prev, name: event.target.value }))
+                  setTournamentForm((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
                 }
                 placeholder="Tên giải đấu"
               />
               <Input
                 value={tournamentForm.season}
                 onChange={(event) =>
-                  setTournamentForm((prev) => ({ ...prev, season: event.target.value }))
+                  setTournamentForm((prev) => ({
+                    ...prev,
+                    season: event.target.value,
+                  }))
                 }
                 placeholder="season (vd: 2026-S1)"
               />
@@ -632,7 +656,9 @@ const TournamentSetupPage = () => {
                 placeholder="game slug preview (valorant/tft...)"
               />
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Date start (GMT+7)</label>
+                <label className="text-xs text-muted-foreground">
+                  Date start (GMT+7)
+                </label>
                 <Input
                   type="datetime-local"
                   step={60}
@@ -641,12 +667,17 @@ const TournamentSetupPage = () => {
                   onFocus={openDateTimePicker}
                   onClick={openDateTimePicker}
                   onChange={(event) =>
-                    setTournamentForm((prev) => ({ ...prev, date_start: event.target.value }))
+                    setTournamentForm((prev) => ({
+                      ...prev,
+                      date_start: event.target.value,
+                    }))
                   }
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Date end (GMT+7)</label>
+                <label className="text-xs text-muted-foreground">
+                  Date end (GMT+7)
+                </label>
                 <Input
                   type="datetime-local"
                   step={60}
@@ -655,12 +686,17 @@ const TournamentSetupPage = () => {
                   onFocus={openDateTimePicker}
                   onClick={openDateTimePicker}
                   onChange={(event) =>
-                    setTournamentForm((prev) => ({ ...prev, date_end: event.target.value }))
+                    setTournamentForm((prev) => ({
+                      ...prev,
+                      date_end: event.target.value,
+                    }))
                   }
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Register start (GMT+7)</label>
+                <label className="text-xs text-muted-foreground">
+                  Register start (GMT+7)
+                </label>
                 <Input
                   type="datetime-local"
                   step={60}
@@ -677,7 +713,9 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Register end (GMT+7)</label>
+                <label className="text-xs text-muted-foreground">
+                  Register end (GMT+7)
+                </label>
                 <Input
                   type="datetime-local"
                   step={60}
@@ -694,7 +732,9 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Check-in start (GMT+7)</label>
+                <label className="text-xs text-muted-foreground">
+                  Check-in start (GMT+7)
+                </label>
                 <Input
                   type="datetime-local"
                   step={60}
@@ -711,7 +751,9 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Check-in end (GMT+7)</label>
+                <label className="text-xs text-muted-foreground">
+                  Check-in end (GMT+7)
+                </label>
                 <Input
                   type="datetime-local"
                   step={60}
@@ -764,7 +806,9 @@ const TournamentSetupPage = () => {
                   type="file"
                   className="hidden"
                   accept="image/*"
-                  onChange={(event) => setBannerFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) =>
+                    setBannerFile(event.target.files?.[0] ?? null)
+                  }
                 />
               </label>
             </div>
@@ -778,7 +822,9 @@ const TournamentSetupPage = () => {
                   className="w-full max-h-64 rounded-md object-cover border border-border"
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">Chưa có banner preview.</p>
+                <p className="text-sm text-muted-foreground">
+                  Chưa có banner preview.
+                </p>
               )}
 
               {previewPath ? (
@@ -789,7 +835,9 @@ const TournamentSetupPage = () => {
                     type="button"
                     variant="outline"
                     className="gap-2"
-                    onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
+                    onClick={() =>
+                      window.open(previewUrl, "_blank", "noopener,noreferrer")
+                    }
                   >
                     <Eye className="h-4 w-4" />
                     Xem web trước
@@ -834,14 +882,21 @@ const TournamentSetupPage = () => {
                 }
                 className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="patch">PATCH /api/tournaments/milestones/:id</option>
-                <option value="post">POST /api/tournaments/milestones/:id</option>
+                <option value="patch">
+                  PATCH /api/tournaments/milestones/:id
+                </option>
+                <option value="post">
+                  POST /api/tournaments/milestones/:id
+                </option>
               </select>
             </div>
 
             <div className="space-y-3">
               {milestones.map((item, index) => (
-                <div key={index} className="rounded-md border border-border p-3 space-y-2">
+                <div
+                  key={index}
+                  className="rounded-md border border-border p-3 space-y-2"
+                >
                   <div className="grid gap-2 md:grid-cols-3">
                     <Input
                       value={item.id ?? ""}
@@ -849,7 +904,9 @@ const TournamentSetupPage = () => {
                       onChange={(event) =>
                         setMilestones((prev) =>
                           prev.map((row, rowIndex) =>
-                            rowIndex === index ? { ...row, id: event.target.value } : row,
+                            rowIndex === index
+                              ? { ...row, id: event.target.value }
+                              : row,
                           ),
                         )
                       }
@@ -907,7 +964,9 @@ const TournamentSetupPage = () => {
                     variant="outline"
                     className="gap-2"
                     onClick={() =>
-                      setMilestones((prev) => prev.filter((_, rowIndex) => rowIndex !== index))
+                      setMilestones((prev) =>
+                        prev.filter((_, rowIndex) => rowIndex !== index),
+                      )
                     }
                     disabled={milestones.length <= 1}
                   >
@@ -934,7 +993,11 @@ const TournamentSetupPage = () => {
                 Thêm milestone
               </Button>
 
-              <Button type="button" onClick={handleSubmitMilestones} disabled={submitting}>
+              <Button
+                type="button"
+                onClick={handleSubmitMilestones}
+                disabled={submitting}
+              >
                 Lưu bước 2
               </Button>
             </div>
@@ -947,7 +1010,9 @@ const TournamentSetupPage = () => {
               <h2 className="text-lg font-semibold">Bước 3: Rules</h2>
               <select
                 value={ruleMode}
-                onChange={(event) => setRuleMode(event.target.value as "post" | "patch")}
+                onChange={(event) =>
+                  setRuleMode(event.target.value as "post" | "patch")
+                }
                 className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="patch">PATCH /api/tournaments/rules/:id</option>
@@ -957,14 +1022,19 @@ const TournamentSetupPage = () => {
 
             <div className="space-y-3">
               {rules.map((item, index) => (
-                <div key={index} className="rounded-md border border-border p-3 space-y-2">
+                <div
+                  key={index}
+                  className="rounded-md border border-border p-3 space-y-2"
+                >
                   <div className="grid gap-2 md:grid-cols-2">
                     <Input
                       value={item.id ?? ""}
                       onChange={(event) =>
                         setRules((prev) =>
                           prev.map((row, rowIndex) =>
-                            rowIndex === index ? { ...row, id: event.target.value } : row,
+                            rowIndex === index
+                              ? { ...row, id: event.target.value }
+                              : row,
                           ),
                         )
                       }
@@ -1003,7 +1073,11 @@ const TournamentSetupPage = () => {
                     type="button"
                     variant="outline"
                     className="gap-2"
-                    onClick={() => setRules((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}
+                    onClick={() =>
+                      setRules((prev) =>
+                        prev.filter((_, rowIndex) => rowIndex !== index),
+                      )
+                    }
                     disabled={rules.length <= 1}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -1017,13 +1091,19 @@ const TournamentSetupPage = () => {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setRules((prev) => [...prev, { title: "", content: "" }])}
+                onClick={() =>
+                  setRules((prev) => [...prev, { title: "", content: "" }])
+                }
                 className="gap-2"
               >
                 <Plus className="h-4 w-4" />
                 Thêm rule
               </Button>
-              <Button type="button" onClick={handleSubmitRules} disabled={submitting}>
+              <Button
+                type="button"
+                onClick={handleSubmitRules}
+                disabled={submitting}
+              >
                 Lưu bước 3
               </Button>
             </div>
@@ -1041,14 +1121,20 @@ const TournamentSetupPage = () => {
                 }
                 className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               >
-                <option value="patch">PATCH /api/tournaments/requirements/:id</option>
-                <option value="post">POST /api/tournaments/requirements/:id</option>
+                <option value="patch">
+                  PATCH /api/tournaments/requirements/:id
+                </option>
+                <option value="post">
+                  POST /api/tournaments/requirements/:id
+                </option>
               </select>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Rank tối thiểu</label>
+                <label className="text-xs text-muted-foreground">
+                  Rank tối thiểu
+                </label>
                 <select
                   value={requirements.rank_min}
                   onChange={(event) =>
@@ -1068,7 +1154,9 @@ const TournamentSetupPage = () => {
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Rank tối đa</label>
+                <label className="text-xs text-muted-foreground">
+                  Rank tối đa
+                </label>
                 <select
                   value={requirements.rank_max}
                   onChange={(event) =>
@@ -1090,12 +1178,17 @@ const TournamentSetupPage = () => {
               <Input
                 value={requirements.devices_csv}
                 onChange={(event) =>
-                  setRequirements((prev) => ({ ...prev, devices_csv: event.target.value }))
+                  setRequirements((prev) => ({
+                    ...prev,
+                    devices_csv: event.target.value,
+                  }))
                 }
                 placeholder="devices, ngăn cách bởi dấu phẩy"
               />
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Yêu cầu vào Discord</label>
+                <label className="text-xs text-muted-foreground">
+                  Yêu cầu vào Discord
+                </label>
                 <select
                   value={requirements.discord_required}
                   onChange={(event) =>
@@ -1114,8 +1207,8 @@ const TournamentSetupPage = () => {
 
             {rankOptions.length === 0 ? (
               <p className="text-xs text-amber-600">
-                Chưa tải được danh sách rank từ `rank_game`. Vui lòng kiểm tra API
-                `/api/tournaments/requirements/ranks`.
+                Chưa tải được danh sách rank từ `rank_game`. Vui lòng kiểm tra
+                API `/api/tournaments/requirements/ranks`.
               </p>
             ) : null}
 

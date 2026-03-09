@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogIn, LogOut, Trophy, User, RefreshCw } from "lucide-react";
+import { ArrowLeft, LogIn, LogOut, Trophy, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import TournamentRegistration from "@/components/TournamentRegistration";
 
@@ -21,6 +21,12 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   const location = useLocation();
   const [regOpen, setRegOpen] = useState(false);
 
+  const fromSeriesSlug =
+    (location.state as { fromSeriesSlug?: string } | null)?.fromSeriesSlug ??
+    null;
+  const normalizedSeriesSlug =
+    fromSeriesSlug && /^\d+$/.test(fromSeriesSlug) ? null : fromSeriesSlug;
+
   const now = Date.now();
   const registerStartMs = Number(new Date(tournament?.register_start ?? ""));
   const registerEndMs = Number(new Date(tournament?.register_end ?? ""));
@@ -35,9 +41,31 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     navigate(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   };
 
+  const handleBackToSeries = () => {
+    if (normalizedSeriesSlug) {
+      navigate(`/series/${normalizedSeriesSlug}`);
+      return;
+    }
+
+    navigate("/series/dcn_series");
+  };
+
   return (
     <>
       <div className="relative w-full h-[350px] md:h-[420px] overflow-hidden bg-muted">
+        <div className="absolute left-4 top-4 z-20">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleBackToSeries}
+            className="gap-1.5"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Về series
+          </Button>
+        </div>
+
         <div
           className="absolute inset-0 bg-cover bg-center scale-105"
           style={{ backgroundImage: `url(${tournament?.banner_url})` }}

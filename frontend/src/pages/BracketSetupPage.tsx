@@ -50,7 +50,9 @@ const BracketSetupPage = () => {
     swiss_round: "",
   });
 
-  const [generatedBracketId, setGeneratedBracketId] = useState<number | null>(null);
+  const [generatedBracketId, setGeneratedBracketId] = useState<number | null>(
+    null,
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const roleId = Number(user?.role_id);
@@ -204,7 +206,10 @@ const BracketSetupPage = () => {
             <select
               value={form.type}
               onChange={(event) =>
-                setForm((prev) => ({ ...prev, type: event.target.value as BracketType }))
+                setForm((prev) => ({
+                  ...prev,
+                  type: event.target.value as BracketType,
+                }))
               }
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
             >
@@ -262,7 +267,11 @@ const BracketSetupPage = () => {
           />
 
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={handleGenerateBracket} disabled={submitting}>
+            <Button
+              type="button"
+              onClick={handleGenerateBracket}
+              disabled={submitting}
+            >
               {submitting ? "Đang tạo..." : "Tạo bracket"}
             </Button>
           </div>
@@ -274,7 +283,10 @@ const BracketSetupPage = () => {
                 <Input
                   value={form.swiss_round}
                   onChange={(event) =>
-                    setForm((prev) => ({ ...prev, swiss_round: event.target.value }))
+                    setForm((prev) => ({
+                      ...prev,
+                      swiss_round: event.target.value,
+                    }))
                   }
                   placeholder="round_number (để trống = auto)"
                   className="w-72"

@@ -248,6 +248,101 @@ export const pairSwissNextRound = (
     getAuthConfig(),
   );
 
+export interface TournamentTeamResult {
+  tournament_id: number;
+  team_id: number;
+  placement: number | null;
+  placement_end?: number | null;
+  placement_label?: string | null;
+  points: number;
+  wins: number;
+  losses: number;
+  is_final: boolean;
+  calculated_at: string;
+  name?: string;
+  short_name?: string;
+  logo_url?: string;
+  team_color_hex?: string;
+}
+
+export interface TournamentTeamAchievement {
+  tournament_id: number;
+  team_id: number;
+  placement?: number | null;
+  placement_end?: number | null;
+  placement_label?: string | null;
+  code: string;
+  title: string;
+  description?: string;
+  meta?: Record<string, unknown>;
+  created_at: string;
+  name?: string;
+  short_name?: string;
+  logo_url?: string;
+  team_color_hex?: string;
+}
+
+export interface TournamentRankingBracketInfo {
+  tournament_id: number;
+  ranking_bracket_id: number | null;
+  bracket?: {
+    id: number;
+    tournament_id: number;
+    name?: string;
+    stage?: string;
+    status?: string;
+    format_id?: number;
+  } | null;
+}
+
+export interface RankingBracketEnvelope {
+  data: TournamentRankingBracketInfo;
+}
+
+export interface TournamentResultEnvelope {
+  ranking_bracket_id?: number | null;
+  data: TournamentTeamResult[];
+}
+
+export interface TournamentAchievementEnvelope {
+  ranking_bracket_id?: number | null;
+  data: TournamentTeamAchievement[];
+}
+
+export const getTournamentResults = (tournamentId: number | string) =>
+  axios.get<TournamentResultEnvelope>(
+    `${tournamentsBaseUrl}/${tournamentId}/results`,
+  );
+
+export const getTournamentAchievements = (tournamentId: number | string) =>
+  axios.get<TournamentAchievementEnvelope>(
+    `${tournamentsBaseUrl}/${tournamentId}/achievements`,
+  );
+
+export const getTournamentRankingBracket = (tournamentId: number | string) =>
+  axios.get<RankingBracketEnvelope>(
+    `${tournamentsBaseUrl}/${tournamentId}/ranking-bracket`,
+  );
+
+export const setTournamentRankingBracket = (
+  tournamentId: number | string,
+  bracketId: number | null,
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/${tournamentId}/ranking-bracket`,
+    { bracket_id: bracketId },
+    getAuthConfig(),
+  );
+
+export const recalculateTournamentResultsById = (
+  tournamentId: number | string,
+) =>
+  axios.post(
+    `${tournamentsBaseUrl}/${tournamentId}/recalculate-results`,
+    {},
+    getAuthConfig(),
+  );
+
 export type {
   Bracket,
   DataEnvelope,

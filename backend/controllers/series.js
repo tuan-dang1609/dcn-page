@@ -1,11 +1,87 @@
 import { Elysia } from "elysia";
 import { pool } from "../utils/db.js";
 import middleware from "../utils/middleware.js";
+import {
+  ensureDefaultSeriesPointRules,
+  ensureRankingTables,
+  recalculateTournamentResults,
+} from "../utils/tournamentRanking.js";
 
 const seriesRouter = new Elysia({ name: "Series" }).derive(
   middleware.deriveAuthContext,
 );
 const TAG = "Series";
+
+seriesRouter.get(
+  "/:slug/leaderboard",
+  async ({ params, set }) => {
+    const slug = params.slug;
+
+    const { rows: seriesRows } = await pool.query(
+      `SELECT * FROM series WHERE slug = $1 OR id::text = $1 LIMIT 1`,
+      [slug],
+    );
+
+    if (!seriesRows[0]) {
+      set.status = 404;
+      return { error: "series not found" };
+    }
+
+    const series = seriesRows[0];
+    const seriesId = Number(series.id);
+
+    await ensureRankingTables();
+    await ensureDefaultSeriesPointRules(seriesId);
+
+    const { rows: tournamentRows } = await pool.query(
+      "SELECT id FROM tournaments WHERE series_id = $1",
+      [seriesId],
+    );
+
+    for (const tournament of tournamentRows) {
+      await recalculateTournamentResults(Number(tournament.id));
+    }
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        st.series_id,
+        st.team_id,
+        st.total_points,
+        st.tournaments_played,
+        st.updated_at,
+        t.name,
+        t.short_name,
+        t.logo_url,
+        t.team_color_hex
+      FROM series_team_totals st
+      JOIN teams t ON t.id = st.team_id
+      WHERE st.series_id = $1
+      ORDER BY st.total_points DESC, st.tournaments_played DESC, t.id ASC
+      `,
+      [seriesId],
+    );
+
+    const leaderboard = rows.map((row, index) => ({
+      placement: index + 1,
+      ...row,
+    }));
+
+    set.status = 200;
+    return {
+      status: "success",
+      info: {
+        series_id: seriesId,
+        series_slug: series.slug,
+        leaderboard,
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Get series leaderboard from accumulated team points",
+  },
+);
 
 seriesRouter.get(
   "/:slug",
