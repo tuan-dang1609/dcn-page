@@ -1,14 +1,25 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useOutletContext } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Calendar } from "lucide-react";
-import { matchDetails, type MatchDetail } from "@/data/matchDetails";
+import type { MatchDetail } from "@/types/matchDetail";
 import {
   getValorantMatchData,
   type ValorantApiMatchData,
   type ValorantApiPlayer,
 } from "@/api/valorant";
-import { getMatchGameIds } from "@/api/tournaments";
+import {
+  getTftMatchData,
+  type TftApiParticipant,
+  type TftApiResponse,
+} from "@/api/tft";
+import {
+  getMatchGameIds,
+  getMatchesByTournamentSlug,
+  type Match,
+  type MatchGameIdRecord,
+  type TournamentBySlugResponse,
+} from "@/api/tournaments";
 
 const formatDate = (d: string) =>
   new Date(d).toLocaleDateString("vi-VN", {
@@ -16,6 +27,17 @@ const formatDate = (d: string) =>
     month: "2-digit",
     year: "numeric",
   });
+
+const formatNavDate = (value?: string | null) => {
+  if (!value) return "--";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "--";
+
+  return parsed.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+  });
+};
 
 /* ── Map images for background ── */
 const mapImages: Record<string, string> = {
@@ -44,18 +66,193 @@ const isUuid = (value?: string) =>
     ),
   );
 
-const getFallbackDetailKeyByGame = (game?: string) => {
-  const normalizedGame = String(game ?? "")
+const normalizeGameSlug = (value?: string) => {
+  const normalized = String(value ?? "")
     .trim()
     .toLowerCase();
 
-  if (["val", "valorant"].includes(normalizedGame)) return "val-match-1";
-  if (["lol", "leagueoflegends"].includes(normalizedGame)) return "lol-match-1";
-  if (["tft", "teamfighttactics"].includes(normalizedGame))
-    return "tft-match-1";
-  if (["cs2", "counterstrike"].includes(normalizedGame)) return "cs2-match-1";
+  if (["valo", "val", "valorant"].includes(normalized)) return "val";
+  if (["lol", "leagueoflegends", "league_of_legends"].includes(normalized))
+    return "lol";
+  if (["tft", "teamfighttactics", "teamfight_tactics"].includes(normalized))
+    return "tft";
 
-  return null;
+  return normalized;
+};
+
+const resolveGameType = (value?: string): MatchDetail["gameType"] => {
+  const normalized = normalizeGameSlug(value);
+
+  if (normalized === "val") return "valorant";
+  if (normalized === "lol") return "lol";
+  if (normalized === "tft") return "tft";
+  if (normalized === "wildrift") return "wildrift";
+
+  return "cs2";
+};
+
+const toNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildTeamTag = (name?: string | null, shortName?: string | null) => {
+  const normalizedShort = String(shortName ?? "")
+    .trim()
+    .toUpperCase();
+  if (normalizedShort) return normalizedShort;
+
+  const compact = String(name ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toUpperCase();
+
+  return compact.slice(0, 3) || "TBD";
+};
+
+const buildPlaceholderLogo = (teamTag: string) =>
+  `https://placehold.co/80x80/1f2937/ffffff?text=${encodeURIComponent(teamTag)}`;
+
+const buildMatchDetailFromApi = ({
+  match,
+  tournament,
+  normalizedRouteGame,
+}: {
+  match: Match;
+  tournament?: TournamentBySlugResponse["info"];
+  normalizedRouteGame: string;
+}): MatchDetail => {
+  const team1Name = match.team_a?.name || "TBD";
+  const team2Name = match.team_b?.name || "TBD";
+  const team1Tag = buildTeamTag(match.team_a?.name, match.team_a?.short_name);
+  const team2Tag = buildTeamTag(match.team_b?.name, match.team_b?.short_name);
+  const team1Logo = match.team_a?.logo_url || buildPlaceholderLogo(team1Tag);
+  const team2Logo = match.team_b?.logo_url || buildPlaceholderLogo(team2Tag);
+
+  const team1Score = toNumber(match.score_a) ?? 0;
+  const team2Score = toNumber(match.score_b) ?? 0;
+  const roundNumber = toNumber(match.round_number);
+  const matchNo = toNumber(match.match_no);
+  const gameType = resolveGameType(normalizedRouteGame);
+  const scheduledDate = String(match.date_scheduled ?? "").trim();
+
+  return {
+    id: String(match.id),
+    tournamentName: String(tournament?.name ?? "Tournament"),
+    roundName:
+      roundNumber && matchNo
+        ? `Round ${roundNumber} - Match ${matchNo}`
+        : roundNumber
+          ? `Round ${roundNumber}`
+          : `Match ${match.id}`,
+    format: String(tournament?.format ?? ""),
+    date:
+      scheduledDate ||
+      String(tournament?.date_start ?? "").slice(0, 10) ||
+      new Date().toISOString().slice(0, 10),
+    gameType,
+    team1: {
+      name: team1Name,
+      tag: team1Tag,
+      logo: team1Logo,
+      score: team1Score,
+    },
+    team2: {
+      name: team2Name,
+      tag: team2Tag,
+      logo: team2Logo,
+      score: team2Score,
+    },
+    maps: undefined,
+    team1Roster: {
+      teamName: team1Name,
+      teamLogo: team1Logo,
+      teamTag: team1Tag,
+      players: [],
+    },
+    team2Roster: {
+      teamName: team2Name,
+      teamLogo: team2Logo,
+      teamTag: team2Tag,
+      players: [],
+    },
+    statTabs: gameType === "valorant" ? ["All Maps"] : ["All Games"],
+  };
+};
+
+const extractTftParticipants = (
+  payload: TftApiResponse,
+): TftApiParticipant[] => {
+  const fromInfo = payload?.info?.participants;
+  if (Array.isArray(fromInfo) && fromInfo.length > 0) return fromInfo;
+
+  const fromNestedInfo = payload?.data?.info?.participants;
+  if (Array.isArray(fromNestedInfo) && fromNestedInfo.length > 0)
+    return fromNestedInfo;
+
+  return [];
+};
+
+const mergeTftApiIntoMatch = (
+  baseMatch: MatchDetail,
+  tftPayload: TftApiResponse,
+): MatchDetail => {
+  const participants = extractTftParticipants(tftPayload)
+    .map((participant, index) => {
+      const gameName = String(participant.riotIdGameName ?? "").trim();
+      const tagLine = String(participant.riotIdTagline ?? "").trim();
+      const name =
+        gameName && tagLine
+          ? `${gameName}#${tagLine}`
+          : gameName || `Player ${index + 1}`;
+
+      return {
+        name,
+        icon: `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
+        placement: toNumber(participant.placement) ?? 8,
+      };
+    })
+    .sort((a, b) => (a.placement ?? 8) - (b.placement ?? 8));
+
+  if (participants.length === 0) {
+    return baseMatch;
+  }
+
+  const splitIndex = Math.ceil(participants.length / 2);
+
+  return {
+    ...baseMatch,
+    gameType: "tft",
+    team1Roster: {
+      ...baseMatch.team1Roster,
+      players: participants.slice(0, splitIndex),
+    },
+    team2Roster: {
+      ...baseMatch.team2Roster,
+      players: participants.slice(splitIndex),
+    },
+    statTabs: ["All Games"],
+  };
+};
+
+const getProviderMatchIds = (
+  gameIds: MatchGameIdRecord[],
+  provider: "val" | "lol" | "tft",
+) => {
+  const ids = gameIds
+    .filter((item) => {
+      const providerKey = normalizeGameSlug(
+        item.external_provider ??
+          item.resolved_provider ??
+          item.game_short_name,
+      );
+      return providerKey === provider;
+    })
+    .map((item) => String(item.info_game_id ?? "").trim())
+    .filter((value) => Boolean(value));
+
+  return Array.from(new Set(ids));
 };
 
 const getTeamRoundScore = (
@@ -682,26 +879,69 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
 
 /* ── Main Page ── */
 const MatchDetailPage = () => {
+  const { tournament } = useOutletContext<{
+    tournament?: TournamentBySlugResponse["info"];
+  }>();
   const { id, game, slug } = useParams();
+  const normalizedRouteGame = normalizeGameSlug(game);
   const backTo =
-    game && slug ? `/tournament/${game}/${slug}/bracket` : "/bracket";
-  const buildMatchLink = (matchId: string) =>
-    game && slug
-      ? `/tournament/${game}/${slug}/match/${matchId}`
-      : `/tournament/val/tournament_name_3/match/${matchId}`;
+    normalizedRouteGame && slug
+      ? `/tournament/${normalizedRouteGame}/${slug}/bracket`
+      : "/bracket";
+  const buildMatchLink = (matchId: number | string) =>
+    normalizedRouteGame && slug
+      ? `/tournament/${normalizedRouteGame}/${slug}/match/${matchId}`
+      : `/match/${matchId}`;
   const numId = id && /^\d+$/.test(id) ? Number(id) : null;
-  const detailKey = matchDetails[id ?? ""] ? id! : null;
-  const fallbackDetailKey = detailKey ?? getFallbackDetailKeyByGame(game);
-  const baseMatch =
-    fallbackDetailKey && matchDetails[fallbackDetailKey]
-      ? matchDetails[fallbackDetailKey]
-      : (game === "val" || game === "valorant") && isUuid(id)
-        ? matchDetails["val-match-1"]
-        : null;
+
+  const { data: tournamentMatchBundle, isLoading: isMatchListLoading } =
+    useQuery({
+      queryKey: ["tournament-match-list", normalizedRouteGame, slug],
+      enabled: Boolean(normalizedRouteGame && slug),
+      staleTime: 1000 * 60,
+      refetchOnWindowFocus: false,
+      queryFn: async () => {
+        const response = await getMatchesByTournamentSlug(
+          normalizedRouteGame,
+          slug!,
+        );
+        return response;
+      },
+    });
+
+  const sortedMatches = useMemo(() => {
+    const source = tournamentMatchBundle?.matches ?? [];
+
+    return [...source].sort((a, b) => {
+      const roundA = toNumber(a.round_number) ?? Number.MAX_SAFE_INTEGER;
+      const roundB = toNumber(b.round_number) ?? Number.MAX_SAFE_INTEGER;
+      if (roundA !== roundB) return roundA - roundB;
+
+      const noA = toNumber(a.match_no) ?? Number.MAX_SAFE_INTEGER;
+      const noB = toNumber(b.match_no) ?? Number.MAX_SAFE_INTEGER;
+      if (noA !== noB) return noA - noB;
+
+      return (toNumber(a.id) ?? 0) - (toNumber(b.id) ?? 0);
+    });
+  }, [tournamentMatchBundle?.matches]);
+
+  const currentMatchRow = useMemo(() => {
+    if (!numId) return null;
+    return sortedMatches.find((item) => toNumber(item.id) === numId) ?? null;
+  }, [numId, sortedMatches]);
+
+  const baseMatch = useMemo(() => {
+    if (!currentMatchRow) return null;
+    return buildMatchDetailFromApi({
+      match: currentMatchRow,
+      tournament,
+      normalizedRouteGame,
+    });
+  }, [currentMatchRow, tournament, normalizedRouteGame]);
 
   const { data: matchGameIds } = useQuery({
     queryKey: ["match-game-ids", numId],
-    enabled: Boolean(numId && baseMatch?.gameType === "valorant"),
+    enabled: Boolean(numId),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -710,17 +950,37 @@ const MatchDetailPage = () => {
     },
   });
 
+  const preferredProvider = useMemo(() => {
+    const ids = matchGameIds ?? [];
+    const valIds = getProviderMatchIds(ids, "val").filter((value) =>
+      isUuid(value),
+    );
+    const tftIds = getProviderMatchIds(ids, "tft");
+    const lolIds = getProviderMatchIds(ids, "lol");
+
+    if (baseMatch?.gameType === "valorant" && valIds.length > 0) return "val";
+    if (baseMatch?.gameType === "tft" && tftIds.length > 0) return "tft";
+    if (baseMatch?.gameType === "lol" && lolIds.length > 0) return "lol";
+
+    if (tftIds.length > 0) return "tft";
+    if (valIds.length > 0) return "val";
+    if (lolIds.length > 0) return "lol";
+
+    if (baseMatch?.gameType === "valorant") return "val";
+    if (baseMatch?.gameType === "tft") return "tft";
+    if (baseMatch?.gameType === "lol" || baseMatch?.gameType === "wildrift")
+      return "lol";
+
+    return null;
+  }, [baseMatch?.gameType, matchGameIds]);
+
   const valorantApiMatchIds = useMemo(() => {
-    if (baseMatch?.gameType !== "valorant") {
+    if (preferredProvider !== "val") {
       return undefined;
     }
 
-    if (isUuid(id)) {
-      return [id];
-    }
-
-    const idsFromMatchGames = (matchGameIds ?? [])
-      .map((item) => String(item?.info_game_id ?? "").trim())
+    const idsFromMatchGames = getProviderMatchIds(matchGameIds ?? [], "val")
+      .map((value) => String(value).trim())
       .filter((value): value is string => Boolean(value) && isUuid(value));
 
     if (idsFromMatchGames.length > 0) {
@@ -728,7 +988,20 @@ const MatchDetailPage = () => {
     }
 
     return undefined;
-  }, [baseMatch?.gameType, id, matchGameIds]);
+  }, [matchGameIds, preferredProvider]);
+
+  const tftApiMatchIds = useMemo(() => {
+    if (preferredProvider !== "tft") {
+      return undefined;
+    }
+
+    const idsFromMatchGames = getProviderMatchIds(matchGameIds ?? [], "tft");
+    if (idsFromMatchGames.length > 0) {
+      return idsFromMatchGames;
+    }
+
+    return undefined;
+  }, [matchGameIds, preferredProvider]);
 
   const { data: valorantApiData } = useQuery({
     queryKey: ["valorant-match-detail", valorantApiMatchIds],
@@ -743,22 +1016,50 @@ const MatchDetailPage = () => {
     },
   });
 
+  const { data: tftApiData } = useQuery({
+    queryKey: ["tft-match-detail", tftApiMatchIds],
+    enabled: Boolean(tftApiMatchIds && tftApiMatchIds.length > 0),
+    staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const responses = await Promise.all(
+        tftApiMatchIds!.map((matchId) => getTftMatchData(matchId)),
+      );
+      return responses.map((response) => response.data);
+    },
+  });
+
   const match = useMemo(() => {
     if (!baseMatch) return null;
-    if (baseMatch.gameType !== "valorant" || !valorantApiData) {
-      return baseMatch;
+
+    if (preferredProvider === "tft" && tftApiData && tftApiData.length > 0) {
+      return mergeTftApiIntoMatch(baseMatch, tftApiData[0]);
     }
 
-    return mergeValorantApiIntoMatch(baseMatch, valorantApiData);
-  }, [baseMatch, valorantApiData]);
+    if (baseMatch.gameType === "valorant" && valorantApiData) {
+      return mergeValorantApiIntoMatch(baseMatch, valorantApiData);
+    }
+
+    if (preferredProvider === "val" && valorantApiData) {
+      return mergeValorantApiIntoMatch(baseMatch, valorantApiData);
+    }
+
+    return baseMatch;
+  }, [baseMatch, preferredProvider, tftApiData, valorantApiData]);
 
   if (!match) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
-          <h2 className="text-2xl font-bold text-foreground">
-            Không tìm thấy trận đấu
-          </h2>
+          {isMatchListLoading ? (
+            <h2 className="text-2xl font-bold text-foreground">
+              Đang tải dữ liệu trận đấu...
+            </h2>
+          ) : (
+            <h2 className="text-2xl font-bold text-foreground">
+              Không tìm thấy trận đấu
+            </h2>
+          )}
           <Link
             to={backTo}
             className="text-primary hover:underline text-[11px]"
@@ -770,48 +1071,89 @@ const MatchDetailPage = () => {
     );
   }
 
-  const detailKeys = Object.keys(matchDetails);
-  const currentIndex = detailKey ? detailKeys.indexOf(detailKey) : -1;
-  const prevDetail =
-    currentIndex > 0 ? matchDetails[detailKeys[currentIndex - 1]] : null;
-  const nextDetail =
-    currentIndex >= 0 && currentIndex < detailKeys.length - 1
-      ? matchDetails[detailKeys[currentIndex + 1]]
+  const currentIndex = sortedMatches.findIndex(
+    (item) => toNumber(item.id) === numId,
+  );
+  const currentBracketId =
+    currentIndex >= 0
+      ? toNumber(sortedMatches[currentIndex]?.bracket_id)
       : null;
+  const bracketMatches =
+    currentBracketId === null
+      ? sortedMatches
+      : sortedMatches.filter(
+          (item) => toNumber(item.bracket_id) === currentBracketId,
+        );
+  const bracketCurrentIndex = bracketMatches.findIndex(
+    (item) => toNumber(item.id) === numId,
+  );
+  const prevDetail =
+    bracketCurrentIndex > 0 ? bracketMatches[bracketCurrentIndex - 1] : null;
+  const nextDetail =
+    bracketCurrentIndex >= 0 && bracketCurrentIndex < bracketMatches.length - 1
+      ? bracketMatches[bracketCurrentIndex + 1]
+      : null;
+  const hasRosterData =
+    match.team1Roster.players.length > 0 ||
+    match.team2Roster.players.length > 0;
+  const hasMapData = Boolean(match.maps?.length);
 
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b border-border/70 bg-[#140a16] text-foreground">
-        <div className="mx-auto px-4 md:px-8 py-2.5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="mx-auto px-4 md:px-8 py-3 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-2 md:gap-3">
+          <div className="order-2 md:order-1 flex items-center gap-2 min-w-0">
             <Link
               to={backTo}
-              className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-xs font-semibold"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-muted-foreground hover:text-foreground hover:border-border transition-colors text-xs font-semibold"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Nhánh đấu</span>
             </Link>
             {prevDetail ? (
-              <Link
-                to={buildMatchLink(prevDetail.id)}
-                className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-black/20 px-2 py-1 hover:bg-black/35 transition-colors"
-              >
-                <div className="text-left leading-tight">
-                  <p className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+              <div className="inline-flex items-center gap-2 min-w-0">
+                <div className="text-right leading-tight">
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
                     Prev
                   </p>
-                  <p className="text-[9px] text-muted-foreground">
-                    {formatDate(prevDetail.date)}
+                  <p className="text-[10px] text-muted-foreground">
+                    {formatNavDate(prevDetail.date_scheduled)}
                   </p>
                 </div>
-                <span className="text-xs font-bold tabular-nums">
-                  {prevDetail.team1.score}:{prevDetail.team2.score}
-                </span>
-              </Link>
+                <Link
+                  to={buildMatchLink(prevDetail.id)}
+                  className="inline-flex h-8 items-center rounded-md border border-border/70 bg-black/25 px-2 hover:bg-black/40 transition-colors shrink-0"
+                >
+                  <img
+                    src={
+                      prevDetail.team_a?.logo_url ||
+                      prevDetail.team_b?.logo_url ||
+                      match.team1.logo
+                    }
+                    alt="prev-team"
+                    className="w-4 h-4 rounded-sm"
+                  />
+                  <span className="mx-2 h-4 w-px bg-border/70" />
+                  <span className="text-[13px] font-black tabular-nums text-foreground">
+                    {toNumber(prevDetail.score_a) ?? 0}:
+                    {toNumber(prevDetail.score_b) ?? 0}
+                  </span>
+                  <span className="mx-2 h-4 w-px bg-border/70" />
+                  <img
+                    src={
+                      prevDetail.team_b?.logo_url ||
+                      prevDetail.team_a?.logo_url ||
+                      match.team2.logo
+                    }
+                    alt="prev-opponent"
+                    className="w-4 h-4 rounded-sm"
+                  />
+                </Link>
+              </div>
             ) : null}
           </div>
 
-          <div className="text-center">
+          <div className="order-1 md:order-2 text-center">
             <p className="text-xs md:text-[11px] font-black uppercase tracking-[0.14em] text-primary">
               {match.tournamentName}
             </p>
@@ -820,28 +1162,47 @@ const MatchDetailPage = () => {
             </p>
           </div>
 
-          <div className="flex justify-end items-center gap-3 min-w-0">
-            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <Calendar className="w-3.5 h-3.5" />
-              {formatDate(match.date)}
-            </div>
+          <div className="order-3 flex justify-end items-center gap-2 min-w-0">
             {nextDetail ? (
-              <Link
-                to={buildMatchLink(nextDetail.id)}
-                className="inline-flex items-center gap-2 rounded-md border border-border/70 bg-black/20 px-2 py-1 hover:bg-black/35 transition-colors"
-              >
-                <span className="text-xs font-bold tabular-nums">
-                  {nextDetail.team1.score}:{nextDetail.team2.score}
-                </span>
-                <div className="text-right leading-tight">
-                  <p className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+              <div className="inline-flex items-center gap-2 min-w-0">
+                <Link
+                  to={buildMatchLink(nextDetail.id)}
+                  className="inline-flex h-8 items-center rounded-md border border-border/70 bg-black/25 px-2 hover:bg-black/40 transition-colors shrink-0"
+                >
+                  <img
+                    src={
+                      nextDetail.team_a?.logo_url ||
+                      nextDetail.team_b?.logo_url ||
+                      match.team1.logo
+                    }
+                    alt="next-team"
+                    className="w-4 h-4 rounded-sm"
+                  />
+                  <span className="mx-2 h-4 w-px bg-border/70" />
+                  <span className="text-[13px] font-black tabular-nums text-foreground">
+                    {toNumber(nextDetail.score_a) ?? 0}:
+                    {toNumber(nextDetail.score_b) ?? 0}
+                  </span>
+                  <span className="mx-2 h-4 w-px bg-border/70" />
+                  <img
+                    src={
+                      nextDetail.team_b?.logo_url ||
+                      nextDetail.team_a?.logo_url ||
+                      match.team2.logo
+                    }
+                    alt="next-opponent"
+                    className="w-4 h-4 rounded-sm"
+                  />
+                </Link>
+                <div className="text-left leading-tight">
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
                     Next
                   </p>
-                  <p className="text-[9px] text-muted-foreground">
-                    {formatDate(nextDetail.date)}
+                  <p className="text-[10px] text-muted-foreground">
+                    {formatNavDate(nextDetail.date_scheduled)}
                   </p>
                 </div>
-              </Link>
+              </div>
             ) : null}
           </div>
         </div>
@@ -884,7 +1245,7 @@ const MatchDetailPage = () => {
             <img
               src={match.team2.logo}
               alt={match.team2.tag}
-              className="w-10 h-10 rounded-lg border border-border/70"
+              className="w-10 h-10 "
             />
             <div className="min-w-0 text-left">
               <span className="hidden lg:block text-base text-[15px] font-black uppercase tracking-wide">
@@ -915,24 +1276,32 @@ const MatchDetailPage = () => {
       )}
 
       <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
-        <section className="">
-          <RosterSection match={match} />
-        </section>
+        {!hasRosterData && !hasMapData ? (
+          <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-sm text-muted-foreground">
+            Chua co du lieu chi tiet cho tran dau nay.
+          </section>
+        ) : (
+          <>
+            <section className="">
+              <RosterSection match={match} />
+            </section>
 
-        {(match.gameType === "cs2" || match.gameType === "valorant") && (
-          <section className="rounded-2xl ">
-            <FPSStatTable match={match} />
-          </section>
-        )}
-        {(match.gameType === "lol" || match.gameType === "wildrift") && (
-          <section className="rounded-2xl ">
-            <MOBAStatTable match={match} />
-          </section>
-        )}
-        {match.gameType === "tft" && (
-          <section className="rounded-2xl ">
-            <TFTStatTable match={match} />
-          </section>
+            {(match.gameType === "cs2" || match.gameType === "valorant") && (
+              <section className="rounded-2xl ">
+                <FPSStatTable match={match} />
+              </section>
+            )}
+            {(match.gameType === "lol" || match.gameType === "wildrift") && (
+              <section className="rounded-2xl ">
+                <MOBAStatTable match={match} />
+              </section>
+            )}
+            {match.gameType === "tft" && (
+              <section className="rounded-2xl ">
+                <TFTStatTable match={match} />
+              </section>
+            )}
+          </>
         )}
       </div>
     </div>

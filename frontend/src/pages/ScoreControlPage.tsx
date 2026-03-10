@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
+  Calendar,
   Link2,
   Loader2,
   Plus,
@@ -18,6 +19,7 @@ import {
   getMatchesByBracketId,
   pairSwissNextRound,
   updateMatchGameId,
+  updateMatchSchedule,
   updateMatchScore,
   type Bracket,
   type Match,
@@ -40,7 +42,9 @@ interface EditableMatch extends Match {
   draftScoreA: string;
   draftScoreB: string;
   draftWinnerTeamId: string;
+  draftDateScheduled: string;
   saving?: boolean;
+  scheduleSaving?: boolean;
 }
 
 interface NewGameIdDraft {
@@ -64,6 +68,55 @@ const toNumber = (value: unknown): number | null => {
   return Number.isFinite(next) ? next : null;
 };
 
+const normalizeProviderKey = (value?: string | null) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) return "";
+  if (["valo", "val", "valorant"].includes(normalized)) return "valorant";
+  if (["lol", "leagueoflegends", "league_of_legends"].includes(normalized))
+    return "lol";
+  if (["tft", "teamfighttactics", "teamfight_tactics"].includes(normalized))
+    return "tft";
+
+  return normalized;
+};
+
+const toDatetimeLocalInput = (value?: string | null) => {
+  if (!value) return "";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
+const fromDatetimeLocalInput = (value: string) => {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return parsed.toISOString();
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "Chưa hẹn giờ";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Chưa hẹn giờ";
+
+  return parsed.toLocaleString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const hydrateMatches = (matches: Match[]): EditableMatch[] =>
   matches.map((match) => ({
     ...match,
@@ -79,7 +132,9 @@ const hydrateMatches = (matches: Match[]): EditableMatch[] =>
       match.winner_team_id === null || match.winner_team_id === undefined
         ? "auto"
         : String(match.winner_team_id),
+    draftDateScheduled: toDatetimeLocalInput(match.date_scheduled),
     saving: false,
+    scheduleSaving: false,
   }));
 
 const createEmptyNewGameIdDraft = (): NewGameIdDraft => ({
@@ -91,7 +146,9 @@ const createEmptyNewGameIdDraft = (): NewGameIdDraft => ({
 
 const createEditGameIdDraft = (item: MatchGameIdRecord): EditGameIdDraft => ({
   infoGameId: item.info_game_id ?? "",
-  provider: item.external_provider ?? item.resolved_provider ?? "",
+  provider: normalizeProviderKey(
+    item.external_provider ?? item.resolved_provider,
+  ),
   gameNo:
     item.game_no === null || item.game_no === undefined
       ? ""
@@ -278,8 +335,8 @@ const ScoreControlPage = () => {
 
       const gameNo = toNumber(draft.gameNo);
       if (gameNo !== null) payload.game_no = gameNo;
-      if (draft.provider.trim())
-        payload.external_provider = draft.provider.trim();
+      const normalizedProvider = normalizeProviderKey(draft.provider);
+      if (normalizedProvider) payload.external_provider = normalizedProvider;
 
       await createMatchGameId(matchId, payload);
 
@@ -322,9 +379,9 @@ const ScoreControlPage = () => {
 
       payload.match_id_info = draft.infoGameId.trim() || null;
       payload.info_game_id = draft.infoGameId.trim() || null;
-      const trimmedProvider = draft.provider.trim();
-      if (trimmedProvider) {
-        payload.external_provider = trimmedProvider;
+      const normalizedProvider = normalizeProviderKey(draft.provider);
+      if (normalizedProvider) {
+        payload.external_provider = normalizedProvider;
       }
 
       const gameNo = toNumber(draft.gameNo);
@@ -440,7 +497,11 @@ const ScoreControlPage = () => {
 
   const updateDraftMatch = (
     matchId: number,
-    key: "draftScoreA" | "draftScoreB" | "draftWinnerTeamId",
+    key:
+      | "draftScoreA"
+      | "draftScoreB"
+      | "draftWinnerTeamId"
+      | "draftDateScheduled",
     value: string,
   ) => {
     setMatches((prev) =>
@@ -453,6 +514,17 @@ const ScoreControlPage = () => {
   const setSavingForMatch = (matchId: number, saving: boolean) => {
     setMatches((prev) =>
       prev.map((item) => (item.id === matchId ? { ...item, saving } : item)),
+    );
+  };
+
+  const setScheduleSavingForMatch = (
+    matchId: number,
+    scheduleSaving: boolean,
+  ) => {
+    setMatches((prev) =>
+      prev.map((item) =>
+        item.id === matchId ? { ...item, scheduleSaving } : item,
+      ),
     );
   };
 
@@ -513,6 +585,46 @@ const ScoreControlPage = () => {
       });
     } finally {
       setSavingForMatch(match.id, false);
+    }
+  };
+
+  const handleSaveMatchSchedule = async (match: EditableMatch) => {
+    const nextDateScheduled = fromDatetimeLocalInput(match.draftDateScheduled);
+
+    if (String(match.draftDateScheduled).trim() !== "" && !nextDateScheduled) {
+      toast({
+        title: "Ngày giờ không hợp lệ",
+        description: "Vui lòng nhập đúng định dạng ngày giờ.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setScheduleSavingForMatch(match.id, true);
+
+    try {
+      await updateMatchSchedule(match.id, {
+        date_scheduled: nextDateScheduled,
+      });
+
+      toast({
+        title: "Cập nhật lịch thi đấu thành công",
+        description: `Match #${match.id} đã cập nhật date_scheduled.`,
+      });
+
+      const bracketId = toNumber(selectedBracketId);
+      if (bracketId) {
+        await loadMatches(bracketId);
+      }
+    } catch (error: any) {
+      toast({
+        title: "Cập nhật lịch thi đấu thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setScheduleSavingForMatch(match.id, false);
     }
   };
 
@@ -719,8 +831,13 @@ const ScoreControlPage = () => {
                         Match #{match.id} - Round {match.round_number || "?"} -
                         No. {match.match_no || "?"}
                       </div>
-                      <div className="text-sm font-medium">
-                        {match.status || "scheduled"}
+                      <div className="text-right">
+                        <div className="text-sm font-medium">
+                          {match.status || "scheduled"}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {formatDateTime(match.date_scheduled)}
+                        </div>
                       </div>
                     </div>
 
@@ -808,6 +925,41 @@ const ScoreControlPage = () => {
                           <>
                             <Save className="h-4 w-4" />
                             Lưu điểm
+                          </>
+                        )}
+                      </Button>
+                    </div>
+
+                    <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                      <Input
+                        type="datetime-local"
+                        value={match.draftDateScheduled}
+                        onChange={(event) =>
+                          updateDraftMatch(
+                            match.id,
+                            "draftDateScheduled",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="date_scheduled"
+                      />
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void handleSaveMatchSchedule(match)}
+                        disabled={Boolean(match.scheduleSaving)}
+                        className="gap-2"
+                      >
+                        {match.scheduleSaving ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Đang lưu lịch
+                          </>
+                        ) : (
+                          <>
+                            <Calendar className="h-4 w-4" />
+                            Lưu lịch đấu
                           </>
                         )}
                       </Button>

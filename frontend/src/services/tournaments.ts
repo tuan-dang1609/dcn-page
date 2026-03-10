@@ -3,6 +3,20 @@ import axios from "axios";
 const baseUrl = `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000"}/api/tournaments`;
 let token: string | null = null;
 
+const toGameRouteKey = (value: string) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (["valo", "val", "valorant"].includes(normalized)) return "val";
+  if (["lol", "leagueoflegends", "league_of_legends"].includes(normalized))
+    return "lol";
+  if (["tft", "teamfighttactics", "teamfight_tactics"].includes(normalized))
+    return "tft";
+
+  return normalized;
+};
+
 export interface TournamentPayload {
   name: string;
   game_id: number;
@@ -37,7 +51,9 @@ interface TournamentBySlugResponse {
 const getAll = () => axios.get<Tournament[]>(baseUrl);
 
 const getBySlug = (game: string, slug: string) =>
-  axios.get<TournamentBySlugResponse>(`${baseUrl}/by-slug/${game}/${slug}`);
+  axios.get<TournamentBySlugResponse>(
+    `${baseUrl}/by-slug/${toGameRouteKey(game)}/${slug}`,
+  );
 
 const setToken = (nextToken: string | null) => {
   token = nextToken ? `Bearer ${nextToken}` : null;

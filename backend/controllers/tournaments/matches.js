@@ -82,8 +82,21 @@ const getMatchById = async (matchId) => {
 
 const normalizeProvider = (value) => {
   if (value === null || value === undefined) return null;
-  const key = String(value).trim().toLowerCase();
-  return providerAliases[key] ?? null;
+
+  const rawCandidates = Array.isArray(value)
+    ? value
+    : String(value)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+  for (const candidate of rawCandidates) {
+    const key = String(candidate).trim().toLowerCase();
+    const normalized = providerAliases[key] ?? null;
+    if (normalized) return normalized;
+  }
+
+  return null;
 };
 
 const buildProviderRouteTemplate = (provider) =>
@@ -106,16 +119,36 @@ const getGameIdByProvider = async (provider) => {
   if (providerKey === "lol") providerAliasesToTry.push("leagueoflegends");
   if (providerKey === "tft") providerAliasesToTry.push("teamfighttactics");
 
+  const aliasesCsv = Array.from(
+    new Set(
+      providerAliasesToTry
+        .map((item) =>
+          String(item ?? "")
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    ),
+  ).join(",");
+
+  if (!aliasesCsv) return null;
+
   const { rows } = await pool.query(
     `
     SELECT id, short_name
     FROM games
-    WHERE LOWER(short_name) = ANY($1::text[])
-       OR LOWER(name) = ANY($1::text[])
+    WHERE LOWER(short_name) IN (
+      SELECT provider
+      FROM UNNEST(regexp_split_to_array($1, E'\\s*,\\s*')) AS provider
+    )
+       OR LOWER(name) IN (
+      SELECT provider
+      FROM UNNEST(regexp_split_to_array($1, E'\\s*,\\s*')) AS provider
+    )
     ORDER BY id ASC
     LIMIT 1
     `,
-    [providerAliasesToTry],
+    [aliasesCsv],
   );
 
   return rows[0]?.id ? Number(rows[0].id) : null;
@@ -480,6 +513,7 @@ matchRouter.get(
              m.bracket_id,
              m.round_number,
              m.match_no,
+              m.date_scheduled,
              m.team_a_id,
              m.team_b_id,
              m.seed_a,
@@ -891,6 +925,73 @@ matchRouter.delete(
   {
     tags: [TAG],
     summary: "Delete info_game_id entry",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.patch(
+  "/matches/:match_id/schedule",
+  async ({ params, body, set, user }) => {
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchById(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const dateRaw = body?.date_scheduled;
+
+    if (dateRaw === undefined) {
+      set.status = 400;
+      return { error: "date_scheduled là bắt buộc" };
+    }
+
+    let nextDateScheduled = null;
+
+    if (dateRaw !== null && String(dateRaw).trim() !== "") {
+      const parsed = new Date(String(dateRaw));
+      if (Number.isNaN(parsed.getTime())) {
+        set.status = 400;
+        return { error: "date_scheduled không hợp lệ" };
+      }
+
+      nextDateScheduled = parsed.toISOString();
+    }
+
+    const { rows } = await pool.query(
+      `
+      UPDATE matches
+      SET date_scheduled = $1
+      WHERE id = $2
+      RETURNING *
+      `,
+      [nextDateScheduled, matchId],
+    );
+
+    set.status = 200;
+    return {
+      message: "Cập nhật lịch trận đấu thành công",
+      data: {
+        match: rows[0] ?? null,
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Update match schedule datetime",
     security: [{ bearerAuth: [] }],
   },
 );

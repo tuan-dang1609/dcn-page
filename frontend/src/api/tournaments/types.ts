@@ -18,6 +18,9 @@ export interface Tournament {
   name: string;
   slug: string;
   game_id: number;
+  format?: string;
+  date_start?: string;
+  date_end?: string;
   max_participate?: number;
 }
 
@@ -74,6 +77,7 @@ export interface Match {
   bracket_id: number;
   round_number?: number;
   match_no?: number;
+  date_scheduled?: string | null;
   team_a_id?: number | null;
   team_b_id?: number | null;
   score_a?: number | null;
