@@ -1,13 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, RotateCw, Save, ShieldCheck } from "lucide-react";
 import {
+  ArrowLeft,
+  Link2,
+  Loader2,
+  Plus,
+  RotateCw,
+  Save,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
+import {
+  createMatchGameId,
+  deleteMatchGameId,
   getBracketsByTournamentId,
+  getMatchGameIds,
   getMatchesByBracketId,
   pairSwissNextRound,
+  updateMatchGameId,
   updateMatchScore,
   type Bracket,
   type Match,
+  type MatchGameIdRecord,
 } from "@/api/tournaments";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -15,11 +29,31 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const allowedRoleIds = new Set([1, 2, 3]);
+const providerOptions = [
+  { value: "", label: "Auto theo game của tournament" },
+  { value: "valorant", label: "Valorant" },
+  { value: "lol", label: "LoL" },
+  { value: "tft", label: "TFT" },
+];
 
 interface EditableMatch extends Match {
   draftScoreA: string;
   draftScoreB: string;
   draftWinnerTeamId: string;
+  saving?: boolean;
+}
+
+interface NewGameIdDraft {
+  infoGameId: string;
+  provider: string;
+  gameNo: string;
+  saving?: boolean;
+}
+
+interface EditGameIdDraft {
+  infoGameId: string;
+  provider: string;
+  gameNo: string;
   saving?: boolean;
 }
 
@@ -48,6 +82,23 @@ const hydrateMatches = (matches: Match[]): EditableMatch[] =>
     saving: false,
   }));
 
+const createEmptyNewGameIdDraft = (): NewGameIdDraft => ({
+  infoGameId: "",
+  provider: "",
+  gameNo: "",
+  saving: false,
+});
+
+const createEditGameIdDraft = (item: MatchGameIdRecord): EditGameIdDraft => ({
+  infoGameId: item.info_game_id ?? "",
+  provider: item.external_provider ?? item.resolved_provider ?? "",
+  gameNo:
+    item.game_no === null || item.game_no === undefined
+      ? ""
+      : String(item.game_no),
+  saving: false,
+});
+
 const ScoreControlPage = () => {
   const navigate = useNavigate();
   const { user, token, isLoading } = useAuth();
@@ -61,6 +112,18 @@ const ScoreControlPage = () => {
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [pairingSwiss, setPairingSwiss] = useState(false);
   const [targetSwissRound, setTargetSwissRound] = useState("");
+  const [gameIdsByMatch, setGameIdsByMatch] = useState<
+    Record<number, MatchGameIdRecord[]>
+  >({});
+  const [loadingGameIdsByMatch, setLoadingGameIdsByMatch] = useState<
+    Record<number, boolean>
+  >({});
+  const [newGameIdDraftByMatch, setNewGameIdDraftByMatch] = useState<
+    Record<number, NewGameIdDraft>
+  >({});
+  const [editGameIdDraftByRow, setEditGameIdDraftByRow] = useState<
+    Record<number, EditGameIdDraft>
+  >({});
 
   const roleId = Number(user?.role_id);
   const hasAccess = allowedRoleIds.has(roleId);
@@ -100,6 +163,10 @@ const ScoreControlPage = () => {
       const response = await getMatchesByBracketId(bracketId);
       const nextMatches = hydrateMatches(response.data?.data ?? []);
       setMatches(nextMatches);
+      setGameIdsByMatch({});
+      setLoadingGameIdsByMatch({});
+      setNewGameIdDraftByMatch({});
+      setEditGameIdDraftByRow({});
     } catch (error: any) {
       toast({
         title: "Không thể tải danh sách trận",
@@ -110,6 +177,200 @@ const ScoreControlPage = () => {
       setMatches([]);
     } finally {
       setLoadingMatches(false);
+    }
+  };
+
+  const setLoadingGameIds = (matchId: number, loading: boolean) => {
+    setLoadingGameIdsByMatch((prev) => ({
+      ...prev,
+      [matchId]: loading,
+    }));
+  };
+
+  const loadGameIdsForMatch = async (matchId: number) => {
+    setLoadingGameIds(matchId, true);
+
+    try {
+      const response = await getMatchGameIds(matchId);
+      const items = response.data?.data ?? [];
+
+      setGameIdsByMatch((prev) => ({
+        ...prev,
+        [matchId]: items,
+      }));
+
+      setEditGameIdDraftByRow((prev) => {
+        const next = { ...prev };
+        items.forEach((item) => {
+          next[item.id] = createEditGameIdDraft(item);
+        });
+        return next;
+      });
+    } catch (error: any) {
+      toast({
+        title: "Không tải được info_game_id",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingGameIds(matchId, false);
+    }
+  };
+
+  const updateNewGameIdDraft = (
+    matchId: number,
+    key: keyof NewGameIdDraft,
+    value: string | boolean,
+  ) => {
+    setNewGameIdDraftByMatch((prev) => ({
+      ...prev,
+      [matchId]: {
+        ...(prev[matchId] ?? createEmptyNewGameIdDraft()),
+        [key]: value,
+      },
+    }));
+  };
+
+  const updateEditGameIdDraft = (
+    rowId: number,
+    key: keyof EditGameIdDraft,
+    value: string | boolean,
+  ) => {
+    setEditGameIdDraftByRow((prev) => ({
+      ...prev,
+      [rowId]: {
+        ...(prev[rowId] ?? {
+          infoGameId: "",
+          provider: "",
+          gameNo: "",
+          saving: false,
+        }),
+        [key]: value,
+      },
+    }));
+  };
+
+  const handleCreateGameId = async (matchId: number) => {
+    const draft = newGameIdDraftByMatch[matchId] ?? createEmptyNewGameIdDraft();
+    const infoGameId = draft.infoGameId.trim();
+
+    if (!infoGameId) {
+      toast({
+        title: "Thiếu info_game_id",
+        description: "Vui lòng nhập ID trận game trước khi thêm.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    updateNewGameIdDraft(matchId, "saving", true);
+
+    try {
+      const payload: {
+        match_id_info: string;
+        info_game_id?: string;
+        external_provider?: string | null;
+        game_no?: number;
+      } = {
+        match_id_info: infoGameId,
+      };
+
+      const gameNo = toNumber(draft.gameNo);
+      if (gameNo !== null) payload.game_no = gameNo;
+      if (draft.provider.trim())
+        payload.external_provider = draft.provider.trim();
+
+      await createMatchGameId(matchId, payload);
+
+      toast({
+        title: "Đã thêm info_game_id",
+        description: `Match #${matchId} đã thêm ID game mới.`,
+      });
+
+      setNewGameIdDraftByMatch((prev) => ({
+        ...prev,
+        [matchId]: createEmptyNewGameIdDraft(),
+      }));
+
+      await loadGameIdsForMatch(matchId);
+    } catch (error: any) {
+      toast({
+        title: "Thêm info_game_id thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      updateNewGameIdDraft(matchId, "saving", false);
+    }
+  };
+
+  const handleUpdateGameId = async (matchId: number, rowId: number) => {
+    const draft = editGameIdDraftByRow[rowId];
+    if (!draft) return;
+
+    updateEditGameIdDraft(rowId, "saving", true);
+
+    try {
+      const payload: {
+        match_id_info?: string | null;
+        info_game_id?: string | null;
+        external_provider?: string | null;
+        game_no?: number;
+      } = {};
+
+      payload.match_id_info = draft.infoGameId.trim() || null;
+      payload.info_game_id = draft.infoGameId.trim() || null;
+      const trimmedProvider = draft.provider.trim();
+      if (trimmedProvider) {
+        payload.external_provider = trimmedProvider;
+      }
+
+      const gameNo = toNumber(draft.gameNo);
+      if (gameNo !== null) payload.game_no = gameNo;
+
+      await updateMatchGameId(matchId, rowId, payload);
+
+      toast({
+        title: "Đã cập nhật info_game_id",
+        description: `Game row #${rowId} đã được cập nhật.`,
+      });
+
+      await loadGameIdsForMatch(matchId);
+    } catch (error: any) {
+      toast({
+        title: "Cập nhật info_game_id thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      updateEditGameIdDraft(rowId, "saving", false);
+    }
+  };
+
+  const handleDeleteGameId = async (matchId: number, rowId: number) => {
+    updateEditGameIdDraft(rowId, "saving", true);
+
+    try {
+      await deleteMatchGameId(matchId, rowId);
+
+      toast({
+        title: "Đã xóa info_game_id",
+        description: `Game row #${rowId} đã được xóa khỏi match #${matchId}.`,
+      });
+
+      await loadGameIdsForMatch(matchId);
+    } catch (error: any) {
+      toast({
+        title: "Xóa info_game_id thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      updateEditGameIdDraft(rowId, "saving", false);
     }
   };
 
@@ -133,6 +394,10 @@ const ScoreControlPage = () => {
 
       setBrackets(nextBrackets);
       setMatches([]);
+      setGameIdsByMatch({});
+      setLoadingGameIdsByMatch({});
+      setNewGameIdDraftByMatch({});
+      setEditGameIdDraftByRow({});
 
       if (!nextBrackets.length) {
         setSelectedBracketId("");
@@ -546,6 +811,224 @@ const ScoreControlPage = () => {
                           </>
                         )}
                       </Button>
+                    </div>
+
+                    <div className="rounded-md border border-border bg-muted/20 p-3 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">Info Game IDs</p>
+                          <p className="text-xs text-muted-foreground">
+                            All Maps = tổng/trung bình. Từng row bên dưới là ID
+                            của từng trận game (LOL/TFT/Valorant).
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-2"
+                          disabled={Boolean(loadingGameIdsByMatch[match.id])}
+                          onClick={() => void loadGameIdsForMatch(match.id)}
+                        >
+                          {loadingGameIdsByMatch[match.id] ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Đang tải IDs
+                            </>
+                          ) : (
+                            <>
+                              <Link2 className="h-4 w-4" />
+                              Tải IDs
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      {(gameIdsByMatch[match.id] ?? []).length > 0 ? (
+                        <div className="space-y-2">
+                          {(gameIdsByMatch[match.id] ?? []).map((item) => {
+                            const draft =
+                              editGameIdDraftByRow[item.id] ??
+                              createEditGameIdDraft(item);
+
+                            return (
+                              <div
+                                key={item.id}
+                                className="rounded-md border border-border bg-card p-2.5 space-y-2"
+                              >
+                                <div className="grid gap-2 md:grid-cols-[100px_1fr_220px_120px_auto_auto]">
+                                  <Input
+                                    value={draft.gameNo}
+                                    onChange={(event) =>
+                                      updateEditGameIdDraft(
+                                        item.id,
+                                        "gameNo",
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder="game_no"
+                                    inputMode="numeric"
+                                  />
+                                  <Input
+                                    value={draft.infoGameId}
+                                    onChange={(event) =>
+                                      updateEditGameIdDraft(
+                                        item.id,
+                                        "infoGameId",
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder="info_game_id"
+                                  />
+                                  <select
+                                    value={draft.provider}
+                                    onChange={(event) =>
+                                      updateEditGameIdDraft(
+                                        item.id,
+                                        "provider",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                                  >
+                                    {providerOptions.map((option) => (
+                                      <option
+                                        key={option.value}
+                                        value={option.value}
+                                      >
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <div className="h-10 flex items-center rounded-md border border-border px-3 text-xs text-muted-foreground bg-background">
+                                    #{item.id}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    className="gap-1"
+                                    disabled={Boolean(draft.saving)}
+                                    onClick={() =>
+                                      void handleUpdateGameId(match.id, item.id)
+                                    }
+                                  >
+                                    {draft.saving ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Save className="h-4 w-4" />
+                                    )}
+                                    Lưu
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    className="gap-1"
+                                    disabled={Boolean(draft.saving)}
+                                    onClick={() =>
+                                      void handleDeleteGameId(match.id, item.id)
+                                    }
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    Xóa
+                                  </Button>
+                                </div>
+
+                                <p className="text-xs text-muted-foreground break-all">
+                                  Route:{" "}
+                                  {item.route_preview ||
+                                    item.route_template ||
+                                    "Không xác định được route game"}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                          Chưa có info_game_id. Bấm "Tải IDs" hoặc thêm mới ở
+                          form bên dưới.
+                        </div>
+                      )}
+
+                      <div className="rounded-md border border-border bg-card p-2.5">
+                        <div className="grid gap-2 md:grid-cols-[100px_1fr_220px_auto]">
+                          <Input
+                            value={
+                              (
+                                newGameIdDraftByMatch[match.id] ??
+                                createEmptyNewGameIdDraft()
+                              ).gameNo
+                            }
+                            onChange={(event) =>
+                              updateNewGameIdDraft(
+                                match.id,
+                                "gameNo",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="game_no"
+                            inputMode="numeric"
+                          />
+                          <Input
+                            value={
+                              (
+                                newGameIdDraftByMatch[match.id] ??
+                                createEmptyNewGameIdDraft()
+                              ).infoGameId
+                            }
+                            onChange={(event) =>
+                              updateNewGameIdDraft(
+                                match.id,
+                                "infoGameId",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="Nhập info_game_id"
+                          />
+                          <select
+                            value={
+                              (
+                                newGameIdDraftByMatch[match.id] ??
+                                createEmptyNewGameIdDraft()
+                              ).provider
+                            }
+                            onChange={(event) =>
+                              updateNewGameIdDraft(
+                                match.id,
+                                "provider",
+                                event.target.value,
+                              )
+                            }
+                            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            {providerOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <Button
+                            type="button"
+                            className="gap-2"
+                            onClick={() => void handleCreateGameId(match.id)}
+                            disabled={Boolean(
+                              (
+                                newGameIdDraftByMatch[match.id] ??
+                                createEmptyNewGameIdDraft()
+                              ).saving,
+                            )}
+                          >
+                            {(
+                              newGameIdDraftByMatch[match.id] ??
+                              createEmptyNewGameIdDraft()
+                            ).saving ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Plus className="h-4 w-4" />
+                            )}
+                            Thêm ID
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );

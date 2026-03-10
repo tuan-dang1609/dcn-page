@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext, useParams } from "react-router-dom";
 import {
   getMatchesByBracketId,
   type Match as ApiMatch,
@@ -481,10 +481,12 @@ const MatchCard = ({
 }) => {
   const hasHover = hoveredTeamId !== null;
   const faded = hasHover && !isInJourney;
+  const { game, slug } = useParams();
+  const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
 
   return (
     <Link
-      to={`${match.routeMatchId}`}
+      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
       className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
       style={{ width: CARD_W, height: CARD_H }}
     >

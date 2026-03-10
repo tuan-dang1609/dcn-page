@@ -7,6 +7,27 @@ import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Matches";
 const allowedRoleIds = new Set([1, 2, 3]);
+const providerAliases = {
+  val: "valorant",
+  valorant: "valorant",
+  valorantv2: "valorant",
+  lol: "lol",
+  leagueoflegends: "lol",
+  league_of_legends: "lol",
+  tft: "tft",
+  teamfighttactics: "tft",
+  teamfight_tactics: "tft",
+};
+
+const gameProviderRouteTemplates = {
+  valorant:
+    "https://bigtournament-1.onrender.com/api/auth/valorant/matchdata/valorant/match/:matchId",
+  lol: "https://bigtournament-1.onrender.com/api/lol/match/:matchId",
+  tft: "https://bigtournament-1.onrender.com/api/tft/match/:matchId",
+};
+
+let matchGamesInfoIdColumnCache = null;
+let matchGamesHasGameIdColumnCache = null;
 
 const toNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -56,6 +77,178 @@ const getMatchById = async (matchId) => {
   const { rows } = await pool.query("SELECT * FROM matches WHERE id = $1", [
     matchId,
   ]);
+  return rows[0] ?? null;
+};
+
+const normalizeProvider = (value) => {
+  if (value === null || value === undefined) return null;
+  const key = String(value).trim().toLowerCase();
+  return providerAliases[key] ?? null;
+};
+
+const buildProviderRouteTemplate = (provider) =>
+  gameProviderRouteTemplates[provider] ?? null;
+
+const buildProviderRoutePreview = (provider, infoGameId) => {
+  const template = buildProviderRouteTemplate(provider);
+  if (!template) return null;
+  if (!infoGameId) return template;
+  return template.replace(":matchId", String(infoGameId));
+};
+
+const getGameIdByProvider = async (provider) => {
+  if (!provider) return null;
+
+  const providerKey = String(provider).trim().toLowerCase();
+  const providerAliasesToTry = [providerKey];
+
+  if (providerKey === "valorant") providerAliasesToTry.push("val");
+  if (providerKey === "lol") providerAliasesToTry.push("leagueoflegends");
+  if (providerKey === "tft") providerAliasesToTry.push("teamfighttactics");
+
+  const { rows } = await pool.query(
+    `
+    SELECT id, short_name
+    FROM games
+    WHERE LOWER(short_name) = ANY($1::text[])
+       OR LOWER(name) = ANY($1::text[])
+    ORDER BY id ASC
+    LIMIT 1
+    `,
+    [providerAliasesToTry],
+  );
+
+  return rows[0]?.id ? Number(rows[0].id) : null;
+};
+
+const resolveRequestedGameId = async ({ body, fallbackGameId }) => {
+  const explicitGameId = toNumber(body?.game_id);
+  if (explicitGameId) return explicitGameId;
+
+  const requestedProvider = normalizeProvider(
+    body?.external_provider ?? body?.provider ?? body?.game_short_name,
+  );
+
+  if (requestedProvider) {
+    const mappedGameId = await getGameIdByProvider(requestedProvider);
+    if (mappedGameId) return mappedGameId;
+  }
+
+  return toNumber(fallbackGameId);
+};
+
+const getMatchWithGameContext = async (matchId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT m.*,
+           g.id AS tournament_game_id,
+           g.short_name AS game_short_name
+    FROM matches m
+    LEFT JOIN tournaments t ON t.id = m.tournament_id
+    LEFT JOIN games g ON g.id = t.game_id
+    WHERE m.id = $1
+    LIMIT 1
+    `,
+    [matchId],
+  );
+
+  return rows[0] ?? null;
+};
+
+const getMatchGamesHasGameIdColumn = async () => {
+  if (matchGamesHasGameIdColumnCache !== null) {
+    return matchGamesHasGameIdColumnCache;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'match_games'
+      AND column_name = 'game_id'
+    LIMIT 1
+    `,
+  );
+
+  matchGamesHasGameIdColumnCache = rows.length > 0;
+  return matchGamesHasGameIdColumnCache;
+};
+
+const getInfoGameIdColumnName = async () => {
+  if (matchGamesInfoIdColumnCache) {
+    return matchGamesInfoIdColumnCache;
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'match_games'
+      AND column_name IN ('info_game_id', 'external_match_id')
+    `,
+  );
+
+  const columns = new Set(rows.map((row) => String(row.column_name)));
+
+  if (columns.has("info_game_id")) {
+    matchGamesInfoIdColumnCache = "info_game_id";
+    return matchGamesInfoIdColumnCache;
+  }
+
+  if (columns.has("external_match_id")) {
+    matchGamesInfoIdColumnCache = "external_match_id";
+    return matchGamesInfoIdColumnCache;
+  }
+
+  throw new Error(
+    "match_games table must include either info_game_id or external_match_id",
+  );
+};
+
+const formatGameIdRowResponse = (row, fallbackProvider) => {
+  const providerFromRow = normalizeProvider(row.game_short_name);
+  const provider = providerFromRow ?? fallbackProvider ?? null;
+  const infoGameId = row.info_game_id ?? null;
+
+  return {
+    ...row,
+    game_id: toNumber(row.game_id),
+    resolved_provider: provider,
+    route_template: buildProviderRouteTemplate(provider),
+    route_preview: buildProviderRoutePreview(provider, infoGameId),
+  };
+};
+
+const getMatchGameRowById = async ({
+  gameRowId,
+  infoGameIdColumn,
+  hasGameIdColumn,
+}) => {
+  const gameSelect = hasGameIdColumn
+    ? "mg.game_id, g.short_name AS game_short_name,"
+    : "NULL::bigint AS game_id, NULL::text AS game_short_name,";
+  const gameJoin = hasGameIdColumn
+    ? "LEFT JOIN games g ON g.id = mg.game_id"
+    : "";
+
+  const { rows } = await pool.query(
+    `
+    SELECT mg.id,
+           mg.match_id,
+           mg.game_id,
+           mg.${infoGameIdColumn} AS info_game_id,
+           ${gameSelect}
+           mg.created_at
+    FROM match_games mg
+    ${gameJoin}
+    WHERE mg.id = $1
+    LIMIT 1
+    `,
+    [gameRowId],
+  );
+
   return rows[0] ?? null;
 };
 
@@ -353,6 +546,352 @@ matchRouter.get(
   {
     tags: [TAG],
     summary: "List games of a match",
+  },
+);
+
+matchRouter.get(
+  "/matches/:match_id/game-ids",
+  async ({ params, set }) => {
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchWithGameContext(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const infoGameIdColumn = await getInfoGameIdColumnName();
+    const hasGameIdColumn = await getMatchGamesHasGameIdColumn();
+    const fallbackProvider = normalizeProvider(match.game_short_name);
+    const gameSelect = hasGameIdColumn
+      ? "mg.game_id, g.short_name AS game_short_name,"
+      : "NULL::bigint AS game_id, NULL::text AS game_short_name,";
+    const gameJoin = hasGameIdColumn
+      ? "LEFT JOIN games g ON g.id = mg.game_id"
+      : "";
+
+    const { rows } = await pool.query(
+      `
+      SELECT mg.id,
+             mg.match_id,
+             mg.game_id,
+             mg.${infoGameIdColumn} AS info_game_id,
+             ${gameSelect}
+             mg.created_at
+      FROM match_games mg
+      ${gameJoin}
+      WHERE mg.match_id = $1
+      ORDER BY mg.game_id ASC, mg.id ASC
+      `,
+      [matchId],
+    );
+
+    const data = rows.map((row) =>
+      formatGameIdRowResponse(row, fallbackProvider),
+    );
+
+    set.status = 200;
+    return { data };
+  },
+  {
+    tags: [TAG],
+    summary: "List info_game_id entries by match",
+  },
+);
+
+matchRouter.post(
+  "/matches/:match_id/game-ids",
+  async ({ params, body, set, user }) => {
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchWithGameContext(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const infoGameIdRaw =
+      body?.match_id_info ?? body?.info_game_id ?? body?.external_match_id;
+    const infoGameId =
+      infoGameIdRaw === null || infoGameIdRaw === undefined
+        ? null
+        : String(infoGameIdRaw).trim();
+
+    if (!infoGameId) {
+      set.status = 400;
+      return { error: "match_id_info (info_game_id) không được để trống" };
+    }
+
+    const fallbackProvider = normalizeProvider(match.game_short_name);
+
+    const infoGameIdColumn = await getInfoGameIdColumnName();
+    const hasGameIdColumn = await getMatchGamesHasGameIdColumn();
+    const gameNoCandidate = toNumber(body?.game_no);
+    const resolvedGameId = await resolveRequestedGameId({
+      body,
+      fallbackGameId: match.tournament_game_id,
+    });
+
+    if (hasGameIdColumn && !resolvedGameId) {
+      set.status = 400;
+      return { error: "Không xác định được game_id cho match_game" };
+    }
+
+    let gameNo = gameNoCandidate;
+    if (!gameNo) {
+      const { rows: maxRows } = await pool.query(
+        "SELECT COALESCE(MAX(game_no), 0) AS max_game_no FROM match_games WHERE match_id = $1",
+        [matchId],
+      );
+      gameNo = Number(maxRows[0]?.max_game_no ?? 0) + 1;
+    }
+
+    const insertSql = hasGameIdColumn
+      ? `
+      INSERT INTO match_games (
+        match_id,
+        game_no,
+        ${infoGameIdColumn},
+        game_id
+      )
+      VALUES ($1, $2, $3, $4)
+      RETURNING id
+      `
+      : `
+      INSERT INTO match_games (
+        match_id,
+        game_no,
+        ${infoGameIdColumn}
+      )
+      VALUES ($1, $2, $3)
+      RETURNING id
+      `;
+
+    const insertParams = hasGameIdColumn
+      ? [matchId, gameNo, infoGameId, resolvedGameId]
+      : [matchId, gameNo, infoGameId];
+
+    const { rows } = await pool.query(insertSql, insertParams);
+    const createdId = rows[0]?.id;
+    const item = await getMatchGameRowById({
+      gameRowId: createdId,
+      infoGameIdColumn,
+      hasGameIdColumn,
+    });
+
+    if (!item) {
+      set.status = 500;
+      return { error: "Không thể đọc dữ liệu game vừa tạo" };
+    }
+
+    set.status = 201;
+    return {
+      message: "Thêm info_game_id thành công",
+      data: formatGameIdRowResponse(item, fallbackProvider),
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Create info_game_id entry for a match",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.patch(
+  "/matches/:match_id/game-ids/:game_id",
+  async ({ params, body, set, user }) => {
+    const matchId = toNumber(params.match_id);
+    const gameRowId = toNumber(params.game_id);
+
+    if (!matchId || !gameRowId) {
+      set.status = 400;
+      return { error: "match_id hoặc game_id không hợp lệ" };
+    }
+
+    const match = await getMatchWithGameContext(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const infoGameIdColumn = await getInfoGameIdColumnName();
+    const hasGameIdColumn = await getMatchGamesHasGameIdColumn();
+
+    const { rows: existedRows } = await pool.query(
+      "SELECT id, match_id FROM match_games WHERE id = $1 LIMIT 1",
+      [gameRowId],
+    );
+    const existed = existedRows[0] ?? null;
+
+    if (!existed || Number(existed.match_id) !== matchId) {
+      set.status = 404;
+      return { error: "Không tìm thấy game id trong match này" };
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (
+      body?.match_id_info !== undefined ||
+      body?.info_game_id !== undefined ||
+      body?.external_match_id !== undefined
+    ) {
+      const nextInfoGameIdRaw =
+        body?.match_id_info ?? body?.info_game_id ?? body?.external_match_id;
+      const nextInfoGameId =
+        nextInfoGameIdRaw === null || nextInfoGameIdRaw === undefined
+          ? null
+          : String(nextInfoGameIdRaw).trim();
+
+      values.push(nextInfoGameId || null);
+      updates.push(`${infoGameIdColumn} = $${values.length}`);
+    }
+
+    if (body?.game_no !== undefined) {
+      const nextGameNo = toNumber(body?.game_no);
+      if (!nextGameNo) {
+        set.status = 400;
+        return { error: "game_no không hợp lệ" };
+      }
+      values.push(nextGameNo);
+      updates.push(`game_no = $${values.length}`);
+    }
+
+    if (
+      hasGameIdColumn &&
+      (body?.game_id !== undefined ||
+        body?.external_provider !== undefined ||
+        body?.provider !== undefined ||
+        body?.game_short_name !== undefined)
+    ) {
+      const nextGameId = await resolveRequestedGameId({
+        body,
+        fallbackGameId: match.tournament_game_id,
+      });
+
+      if (!nextGameId) {
+        set.status = 400;
+        return { error: "game_id không hợp lệ" };
+      }
+
+      values.push(nextGameId);
+      updates.push(`game_id = $${values.length}`);
+    }
+
+    if (!updates.length) {
+      set.status = 400;
+      return { error: "Không có dữ liệu để cập nhật" };
+    }
+
+    values.push(gameRowId);
+
+    const { rows } = await pool.query(
+      `
+      UPDATE match_games
+      SET ${updates.join(", ")}
+      WHERE id = $${values.length}
+      RETURNING id
+      `,
+      values,
+    );
+
+    const updatedId = rows[0]?.id;
+    const item = await getMatchGameRowById({
+      gameRowId: updatedId,
+      infoGameIdColumn,
+      hasGameIdColumn,
+    });
+
+    if (!item) {
+      set.status = 500;
+      return { error: "Không thể đọc dữ liệu game vừa cập nhật" };
+    }
+    const fallbackProvider = normalizeProvider(match.game_short_name);
+
+    set.status = 200;
+    return {
+      message: "Cập nhật info_game_id thành công",
+      data: formatGameIdRowResponse(item, fallbackProvider),
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Update info_game_id entry",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.delete(
+  "/matches/:match_id/game-ids/:game_id",
+  async ({ params, set, user }) => {
+    const matchId = toNumber(params.match_id);
+    const gameRowId = toNumber(params.game_id);
+
+    if (!matchId || !gameRowId) {
+      set.status = 400;
+      return { error: "match_id hoặc game_id không hợp lệ" };
+    }
+
+    const match = await getMatchWithGameContext(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const { rows: existedRows } = await pool.query(
+      "SELECT id, match_id FROM match_games WHERE id = $1 LIMIT 1",
+      [gameRowId],
+    );
+    const existed = existedRows[0] ?? null;
+
+    if (!existed || Number(existed.match_id) !== matchId) {
+      set.status = 404;
+      return { error: "Không tìm thấy game id trong match này" };
+    }
+
+    await pool.query("DELETE FROM match_games WHERE id = $1", [gameRowId]);
+
+    set.status = 200;
+    return {
+      message: "Xóa info_game_id thành công",
+      data: { id: gameRowId },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Delete info_game_id entry",
+    security: [{ bearerAuth: [] }],
   },
 );
 

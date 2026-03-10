@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext, useParams } from "react-router-dom";
 import {
   getMatchesByBracketId,
   type Match as ApiMatch,
@@ -130,6 +130,8 @@ const MatchCard = ({
   isInJourney: boolean;
 }) => {
   const hasHover = hoveredPlayer !== null;
+  const { game, slug } = useParams();
+  const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
 
   const content = (
     <>
@@ -170,7 +172,7 @@ const MatchCard = ({
 
   return (
     <Link
-      to={`${match.routeMatchId}`}
+      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
       className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
       style={{ width: CARD_W }}
     >
@@ -660,7 +662,8 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   }, [rounds, inferredTeamCount]);
 
   const sixTeamSpecial = useMemo(() => {
-    const likelySixTeamBracket = inferredTeamCount > 0 && inferredTeamCount <= 6;
+    const likelySixTeamBracket =
+      inferredTeamCount > 0 && inferredTeamCount <= 6;
     if (!likelySixTeamBracket) return null;
     if (rounds.length < 7) return null;
 
@@ -749,11 +752,19 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   }
 
   if (isError) {
-    return <p className="text-sm text-destructive">Không tải được dữ liệu double elimination.</p>;
+    return (
+      <p className="text-sm text-destructive">
+        Không tải được dữ liệu double elimination.
+      </p>
+    );
   }
 
   if (!rounds.length) {
-    return <p className="text-sm text-muted-foreground">Chưa có match trong bracket này.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        Chưa có match trong bracket này.
+      </p>
+    );
   }
 
   const totalRounds = rounds.length;

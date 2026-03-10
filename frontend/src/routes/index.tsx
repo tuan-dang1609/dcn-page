@@ -16,6 +16,7 @@ const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
 const ScoreControlPage = lazy(() => import("@/pages/ScoreControlPage"));
 const TournamentSetupPage = lazy(() => import("@/pages/TournamentSetupPage"));
 const BracketSetupPage = lazy(() => import("@/pages/BracketSetupPage"));
+const MatchDetailPage = lazy(() => import("@/pages/MatchDetailPage"));
 const PageFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
     Đang tải...
@@ -32,10 +33,10 @@ const routes = [
     element: withSuspense(<Layout />),
     children: [
       { path: "bracket", element: withSuspense(<BracketPage />) },
-      { path: "bracket/:matchId", element: withSuspense(<BracketPage />) },
       { path: "participants", element: withSuspense(<PlayersPage />) },
       { path: "leaderboard", element: withSuspense(<LeaderboardPage />) },
       { path: "rule", element: withSuspense(<RulePage />) },
+      { path: "match/:id", element: withSuspense(<MatchDetailPage />) },
     ],
   },
   {

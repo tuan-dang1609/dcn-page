@@ -9,6 +9,9 @@ import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
 
 const Layout = () => {
   const isTournamentHome = Boolean(useMatch("/tournament/:game/:slug"));
+  const isMatchDetailPage = Boolean(
+    useMatch("/tournament/:game/:slug/match/:id"),
+  );
   const { game, slug } = useParams();
   const { tournament, isLoading, refetch } = useTournamentBySlug(game, slug);
   const location = useLocation();
@@ -17,6 +20,14 @@ const Layout = () => {
     // Ensure we start at the top when navigating inside tournament pages
     window.scrollTo(0, 0);
   }, [location.pathname]);
+
+  if (isMatchDetailPage) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Outlet context={{ tournament, isLoading, refetch }} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
