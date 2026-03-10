@@ -57,9 +57,7 @@ const LeaderboardPage = () => {
       <h2 className="text-2xl font-heading">Bảng xếp hạng</h2>
 
       {isTournamentLoading || isLoading ? (
-        <p className="text-sm text-muted-foreground">
-          Đang tải bảng xếp hạng...
-        </p>
+        <p className="text-smtext-[#EEEEEE]">Đang tải bảng xếp hạng...</p>
       ) : null}
 
       {isError ? (
@@ -69,7 +67,7 @@ const LeaderboardPage = () => {
       ) : null}
 
       {!isLoading && !isError && !leaderboard.length ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-smtext-[#EEEEEE]">
           Chưa có dữ liệu xếp hạng cho giải này.
         </p>
       ) : null}

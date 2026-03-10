@@ -565,7 +565,7 @@ const TeamListCard = ({
             </div>
           ))
         ) : (
-          <p className="text-xs text-muted-foreground">Chưa có đội.</p>
+          <p className="text-xstext-[#EEEEEE]">Chưa có đội.</p>
         )}
       </div>
     </div>
@@ -849,9 +849,7 @@ const SwissBracket = ({ bracketId }: SwissBracketProps) => {
   }, [displayMatches, advanceWins, eliminateLosses]);
 
   if (isLoading) {
-    return (
-      <p className="text-sm text-muted-foreground">Dang tai Swiss bracket...</p>
-    );
+    return <p className="text-smtext-[#EEEEEE]">Dang tai Swiss bracket...</p>;
   }
 
   if (isError) {
@@ -864,7 +862,7 @@ const SwissBracket = ({ bracketId }: SwissBracketProps) => {
 
   if (!displayMatches.length) {
     return (
-      <p className="text-sm text-muted-foreground">
+      <p className="text-smtext-[#EEEEEE]">
         Chua co match trong Swiss bracket nay.
       </p>
     );

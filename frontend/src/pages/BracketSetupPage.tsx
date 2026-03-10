@@ -163,7 +163,7 @@ const BracketSetupPage = () => {
 
   if (isLoading || !user || !token) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground gap-2">
+      <div className="min-h-screen bg-background flex items-center justify-centertext-[#EEEEEE] gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
         <span>Đang kiểm tra quyền truy cập...</span>
       </div>
@@ -177,7 +177,7 @@ const BracketSetupPage = () => {
       <div className="mx-auto w-full max-w-5xl space-y-6">
         <button
           onClick={() => navigate("/ops/tournament-setup")}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm transition-colors"
+          className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Quay về Tournament Setup
@@ -187,7 +187,7 @@ const BracketSetupPage = () => {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold">Bracket Setup</h1>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-smtext-[#EEEEEE]">
                 Tạo bracket riêng theo loại cho tournament.
               </p>
             </div>

@@ -259,23 +259,23 @@ const getMatchGameRowById = async ({
   infoGameIdColumn,
   hasGameIdColumn,
 }) => {
-  const gameSelect = hasGameIdColumn
-    ? "mg.game_id, g.short_name AS game_short_name,"
-    : "NULL::bigint AS game_id, NULL::text AS game_short_name,";
-  const gameJoin = hasGameIdColumn
-    ? "LEFT JOIN games g ON g.id = mg.game_id"
-    : "";
+  // Keep response shape stable across schema variants to avoid cached-plan type mismatches.
+  void infoGameIdColumn;
+  void hasGameIdColumn;
 
   const { rows } = await pool.query(
     `
     SELECT mg.id,
            mg.match_id,
-           mg.game_id,
-           mg.${infoGameIdColumn} AS info_game_id,
-           ${gameSelect}
+           (to_jsonb(mg)->>'game_id')::bigint AS game_id,
+           COALESCE(
+             to_jsonb(mg)->>'info_game_id',
+             to_jsonb(mg)->>'external_match_id'
+           ) AS info_game_id,
+           g.short_name AS game_short_name,
            mg.created_at
     FROM match_games mg
-    ${gameJoin}
+    LEFT JOIN games g ON g.id = (to_jsonb(mg)->>'game_id')::bigint
     WHERE mg.id = $1
     LIMIT 1
     `,
@@ -599,28 +599,23 @@ matchRouter.get(
       return { error: "Match not found" };
     }
 
-    const infoGameIdColumn = await getInfoGameIdColumnName();
-    const hasGameIdColumn = await getMatchGamesHasGameIdColumn();
     const fallbackProvider = normalizeProvider(match.game_short_name);
-    const gameSelect = hasGameIdColumn
-      ? "mg.game_id, g.short_name AS game_short_name,"
-      : "NULL::bigint AS game_id, NULL::text AS game_short_name,";
-    const gameJoin = hasGameIdColumn
-      ? "LEFT JOIN games g ON g.id = mg.game_id"
-      : "";
 
     const { rows } = await pool.query(
       `
       SELECT mg.id,
              mg.match_id,
-             mg.game_id,
-             mg.${infoGameIdColumn} AS info_game_id,
-             ${gameSelect}
+             (to_jsonb(mg)->>'game_id')::bigint AS game_id,
+             COALESCE(
+               to_jsonb(mg)->>'info_game_id',
+               to_jsonb(mg)->>'external_match_id'
+             ) AS info_game_id,
+             g.short_name AS game_short_name,
              mg.created_at
       FROM match_games mg
-      ${gameJoin}
+      LEFT JOIN games g ON g.id = (to_jsonb(mg)->>'game_id')::bigint
       WHERE mg.match_id = $1
-      ORDER BY mg.game_id ASC, mg.id ASC
+      ORDER BY (to_jsonb(mg)->>'game_id')::bigint ASC NULLS LAST, mg.id ASC
       `,
       [matchId],
     );

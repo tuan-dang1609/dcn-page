@@ -680,7 +680,7 @@ const ScoreControlPage = () => {
 
   if (isLoading || !user || !token) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground gap-2">
+      <div className="min-h-screen bg-background flex items-center justify-centertext-[#EEEEEE] gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
         <span>Đang kiểm tra quyền truy cập...</span>
       </div>
@@ -696,7 +696,7 @@ const ScoreControlPage = () => {
       <div className="mx-auto w-full max-w-6xl space-y-6">
         <button
           onClick={() => navigate("/profile")}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm transition-colors"
+          className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Về trang hồ sơ
@@ -709,7 +709,7 @@ const ScoreControlPage = () => {
             </div>
             <div>
               <h1 className="text-2xl font-bold">Score Control Panel</h1>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-smtext-[#EEEEEE]">
                 Trang riêng cho role 1, 2, 3 để cập nhật điểm và roll Swiss
                 round.
               </p>
@@ -757,7 +757,7 @@ const ScoreControlPage = () => {
 
           {isSwissBracket ? (
             <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
-              <p className="text-sm text-muted-foreground">
+              <p className="text-smtext-[#EEEEEE]">
                 Swiss stage: có thể roll cặp đấu round tiếp theo sau khi cập
                 nhật điểm.
               </p>
@@ -796,20 +796,18 @@ const ScoreControlPage = () => {
         <section className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Danh sách match</h2>
-            <span className="text-sm text-muted-foreground">
-              {matches.length} trận
-            </span>
+            <span className="text-smtext-[#EEEEEE]">{matches.length} trận</span>
           </div>
 
           {loadingMatches ? (
-            <div className="py-12 flex items-center justify-center text-muted-foreground gap-2">
+            <div className="py-12 flex items-center justify-centertext-[#EEEEEE] gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
               Đang tải matches...
             </div>
           ) : null}
 
           {!loadingMatches && matches.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">
+            <div className="py-12 text-centertext-[#EEEEEE]">
               Chưa có dữ liệu match. Hãy chọn tournament và bracket rồi bấm "Tải
               matches".
             </div>
@@ -827,7 +825,7 @@ const ScoreControlPage = () => {
                     className="rounded-lg border border-border p-4 space-y-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-smtext-[#EEEEEE]">
                         Match #{match.id} - Round {match.round_number || "?"} -
                         No. {match.match_no || "?"}
                       </div>
@@ -835,7 +833,7 @@ const ScoreControlPage = () => {
                         <div className="text-sm font-medium">
                           {match.status || "scheduled"}
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">
+                        <div className="text-xstext-[#EEEEEE] mt-0.5">
                           {formatDateTime(match.date_scheduled)}
                         </div>
                       </div>
@@ -843,17 +841,13 @@ const ScoreControlPage = () => {
 
                     <div className="grid gap-3 md:grid-cols-2">
                       <div>
-                        <p className="text-xs text-muted-foreground mb-1">
-                          Team A
-                        </p>
+                        <p className="text-xstext-[#EEEEEE] mb-1">Team A</p>
                         <p className="font-medium">
                           {match.team_a?.name || `Team #${teamAId ?? "?"}`}
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground mb-1">
-                          Team B
-                        </p>
+                        <p className="text-xstext-[#EEEEEE] mb-1">Team B</p>
                         <p className="font-medium">
                           {match.team_b?.name || `Team #${teamBId ?? "?"}`}
                         </p>
@@ -969,7 +963,7 @@ const ScoreControlPage = () => {
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-medium">Info Game IDs</p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xstext-[#EEEEEE]">
                             All Maps = tổng/trung bình. Từng row bên dưới là ID
                             của từng trận game (LOL/TFT/Valorant).
                           </p>
@@ -1051,7 +1045,7 @@ const ScoreControlPage = () => {
                                       </option>
                                     ))}
                                   </select>
-                                  <div className="h-10 flex items-center rounded-md border border-border px-3 text-xs text-muted-foreground bg-background">
+                                  <div className="h-10 flex items-center rounded-md border border-border px-3 text-xstext-[#EEEEEE] bg-background">
                                     #{item.id}
                                   </div>
                                   <Button
@@ -1084,7 +1078,7 @@ const ScoreControlPage = () => {
                                   </Button>
                                 </div>
 
-                                <p className="text-xs text-muted-foreground break-all">
+                                <p className="text-xstext-[#EEEEEE] break-all">
                                   Route:{" "}
                                   {item.route_preview ||
                                     item.route_template ||
@@ -1095,7 +1089,7 @@ const ScoreControlPage = () => {
                           })}
                         </div>
                       ) : (
-                        <div className="rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                        <div className="rounded-md border border-dashed border-border px-3 py-2 text-xstext-[#EEEEEE]">
                           Chưa có info_game_id. Bấm "Tải IDs" hoặc thêm mới ở
                           form bên dưới.
                         </div>

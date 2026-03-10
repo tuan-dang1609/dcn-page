@@ -18,7 +18,7 @@ const TournamentSetupPage = lazy(() => import("@/pages/TournamentSetupPage"));
 const BracketSetupPage = lazy(() => import("@/pages/BracketSetupPage"));
 const MatchDetailPage = lazy(() => import("@/pages/MatchDetailPage"));
 const PageFallback = () => (
-  <div className="min-h-screen flex items-center justify-center text-muted-foreground">
+  <div className="min-h-screen flex items-center justify-centertext-[#EEEEEE]">
     Đang tải...
   </div>
 );

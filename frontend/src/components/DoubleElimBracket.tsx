@@ -748,7 +748,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
   }, [rounds]);
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Đang tải bracket...</p>;
+    return <p className="text-smtext-[#EEEEEE]">Đang tải bracket...</p>;
   }
 
   if (isError) {
@@ -761,9 +761,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
 
   if (!rounds.length) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Chưa có match trong bracket này.
-      </p>
+      <p className="text-smtext-[#EEEEEE]">Chưa có match trong bracket này.</p>
     );
   }
 
@@ -819,26 +817,26 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 8)}
           </div>
 
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x1,
               width: CARD_W,
@@ -849,7 +847,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x2,
               width: CARD_W,
@@ -860,7 +858,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             {getDoubleElimRoundTitle(5, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x3,
               width: CARD_W,
@@ -871,7 +869,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x4,
               width: CARD_W,
@@ -882,7 +880,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x5,
               width: CARD_W,
@@ -1214,26 +1212,26 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 6)}
           </div>
 
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x1,
               width: CARD_W,
@@ -1244,7 +1242,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x5,
               width: CARD_W,
@@ -1255,7 +1253,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x4,
               width: CARD_W,
@@ -1266,7 +1264,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x2,
               width: CARD_W,
@@ -1491,7 +1489,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(
@@ -1502,7 +1500,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(
@@ -1513,7 +1511,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x5, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(
@@ -1524,7 +1522,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x1,
               width: CARD_W,
@@ -1540,7 +1538,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           </div>
           <div
-            className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x2,
               width: CARD_W,
@@ -1674,9 +1672,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
 
   if (!layout) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Không thể dựng layout bracket.
-      </p>
+      <p className="text-smtext-[#EEEEEE]">Không thể dựng layout bracket.</p>
     );
   }
 
@@ -1699,7 +1695,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
           return (
             <div key={`col-${colIndex}`}>
               <div
-                className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+                className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
                 style={{
                   left: colLeft,
                   width: CARD_W,

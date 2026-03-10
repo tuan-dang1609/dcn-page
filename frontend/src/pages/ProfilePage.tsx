@@ -201,7 +201,7 @@ const ProfilePage = () => {
 
   if (isLoading || !user) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground gap-2">
+      <div className="min-h-screen bg-background flex items-center justify-centertext-[#EEEEEE] gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
         <span>Đang tải hồ sơ...</span>
       </div>
@@ -213,7 +213,7 @@ const ProfilePage = () => {
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <button
           onClick={handleGoBack}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm transition-colors"
+          className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Quay lại
@@ -235,9 +235,7 @@ const ProfilePage = () => {
                 <h1 className="text-2xl font-bold leading-tight">
                   Hồ sơ cá nhân
                 </h1>
-                <p className="text-sm text-muted-foreground">
-                  @{user.nickname}
-                </p>
+                <p className="text-smtext-[#EEEEEE]">@{user.nickname}</p>
               </div>
             </div>
             <Badge variant={user.riot_account ? "default" : "secondary"}>
@@ -295,12 +293,12 @@ const ProfilePage = () => {
 
         <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-2">Riot Account</h2>
-          <p className="text-sm text-muted-foreground mb-4">
+          <p className="text-smtext-[#EEEEEE] mb-4">
             Liên kết Riot Sign On để lấy Riot ID và dùng cho đăng ký giải đấu.
           </p>
 
           <div className="rounded-md border border-border bg-muted/30 p-4 mb-4">
-            <p className="text-sm text-muted-foreground">Riot ID hiện tại</p>
+            <p className="text-smtext-[#EEEEEE]">Riot ID hiện tại</p>
             <p className="font-semibold text-foreground mt-1">
               {user.riot_account || "Chưa có"}
             </p>

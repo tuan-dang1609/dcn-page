@@ -44,7 +44,7 @@ const LoginPage = () => {
       <div className="w-full max-w-md">
         <button
           onClick={() => navigate("/")}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm mb-8 transition-colors"
+          className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm mb-8 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           Quay lại
@@ -89,10 +89,10 @@ const LoginPage = () => {
               {loading ? "Đang đăng nhập..." : "Đăng nhập"}
             </Button>
           </form>
-          <p className="text-center text-muted-foreground text-xs mt-4">
+          <p className="text-centertext-[#EEEEEE] text-xs mt-4">
             Đăng nhập để có thể đăng ký tham gia giải đấu
           </p>
-          <p className="text-center text-muted-foreground text-xs mt-2">
+          <p className="text-centertext-[#EEEEEE] text-xs mt-2">
             Chưa có tài khoản?{" "}
             <Link to="/register" className="text-primary hover:underline">
               Đăng ký ngay

@@ -15,7 +15,7 @@ import {
 } from "@/api/tft";
 import {
   getMatchGameIds,
-  getMatchesByTournamentSlug,
+  getMatchesByTournamentId,
   type Match,
   type MatchGameIdRecord,
   type TournamentBySlugResponse,
@@ -540,7 +540,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
             Match Stats
           </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-xstext-[#EEEEEE] mt-0.5">
             Thống kê chi tiết từng người chơi
           </p>
         </div>
@@ -552,7 +552,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
               className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
                 currentTab === i
                   ? "bg-foreground text-background border-foreground"
-                  : "bg-transparent border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                  : "bg-transparent border-bordertext-[#EEEEEE] hover:text-foreground hover:border-foreground/30"
               }`}
             >
               {tab}
@@ -571,7 +571,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] border-collapse">
                   <thead>
-                    <tr className="border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                    <tr className="border-b border-border/40 text-[11px] font-bold uppercase tracking-widertext-[#EEEEEE]">
                       <th className="!w-[180px] sticky left-0 z-20 bg-card px-4 py-3 text-left normal-case text-base font-bold text-foreground border-r border-border/40">
                         <div className="flex items-center gap-2 min-w-0">
                           <img
@@ -609,7 +609,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
                                 className="w-6 h-6 rounded"
                               />
                             ) : (
-                              <div className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-[11px] font-bold text-muted-foreground">
+                              <div className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-[11px] font-boldtext-[#EEEEEE]">
                                 {p.name.charAt(0)}
                               </div>
                             )}
@@ -678,7 +678,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
             Match Stats
           </h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-xstext-[#EEEEEE] mt-0.5">
             Thống kê chi tiết từng người chơi
           </p>
         </div>
@@ -690,7 +690,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
               className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
                 activeTab === i
                   ? "bg-foreground text-background border-foreground"
-                  : "bg-transparent border-border text-muted-foreground hover:text-foreground"
+                  : "bg-transparent border-bordertext-[#EEEEEE] hover:text-foreground"
               }`}
             >
               {tab}
@@ -707,7 +707,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
             <div className="overflow-x-auto">
               <div className="min-w-[560px]">
                 <div
-                  className="grid gap-0 px-4 py-3 border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
+                  className="grid gap-0 px-4 py-3 border-b border-border/40 text-[11px] font-bold uppercase tracking-widertext-[#EEEEEE]"
                   style={{
                     gridTemplateColumns: "1fr 2.5rem 2.5rem 2.5rem 3.5rem 4rem",
                   }}
@@ -740,7 +740,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
                         {p.name}
                       </span>
                       {p.role && (
-                        <span className="text-[11px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
+                        <span className="text-[11px] text-[#EEEEEE] bg-secondary px-1.5 py-0.5 rounded">
                           {p.role}
                         </span>
                       )}
@@ -778,7 +778,7 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
       <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
         Kết quả TFT
       </h3>
-      <p className="text-xs text-muted-foreground mt-0.5">
+      <p className="text-xstext-[#EEEEEE] mt-0.5">
         Hạng trung bình của từng người chơi
       </p>
     </div>
@@ -801,7 +801,7 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
           <div className="overflow-x-auto">
             <div className="min-w-[320px]">
               <div
-                className="grid gap-0 px-4 py-2 border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
+                className="grid gap-0 px-4 py-2 border-b border-border/40 text-[11px] font-bold uppercase tracking-widertext-[#EEEEEE]"
                 style={{ gridTemplateColumns: "1fr 4rem" }}
               >
                 <span className="sticky left-0 z-20 bg-card pr-4 border-r border-border/40"></span>
@@ -845,7 +845,7 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
     {[match.team1Roster, match.team2Roster].map((roster) => (
       <div key={roster.teamTag} className="space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-[0.15em] text-muted-foreground">
+        <h3 className="text-xs font-bold uppercase tracking-[0.15em] text-[#EEEEEE]">
           {roster.teamName} Roster
         </h3>
         <div className="grid gap-2 justify-start grid-cols-5 w-full">
@@ -854,7 +854,7 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
               key={p.name}
               className="min-h-[120px] flex flex-col items-center justify-start gap-2 px-2 py-3"
             >
-              <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-base font-bold text-muted-foreground">
+              <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-base font-boldtext-[#EEEEEE]">
                 {p.name.charAt(0)}
               </div>
               <div className="text-center w-full">
@@ -864,7 +864,7 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
                   </span>
                 </div>
                 {p.role && (
-                  <span className="text-[9px] text-muted-foreground truncate block">
+                  <span className="text-[9px] text-[#EEEEEE] truncate block">
                     {p.role}
                   </span>
                 )}
@@ -893,18 +893,16 @@ const MatchDetailPage = () => {
       ? `/tournament/${normalizedRouteGame}/${slug}/match/${matchId}`
       : `/match/${matchId}`;
   const numId = id && /^\d+$/.test(id) ? Number(id) : null;
+  const tournamentId = toNumber(tournament?.id);
 
   const { data: tournamentMatchBundle, isLoading: isMatchListLoading } =
     useQuery({
-      queryKey: ["tournament-match-list", normalizedRouteGame, slug],
-      enabled: Boolean(normalizedRouteGame && slug),
+      queryKey: ["tournament-match-list", tournamentId],
+      enabled: Boolean(tournamentId),
       staleTime: 1000 * 60,
       refetchOnWindowFocus: false,
       queryFn: async () => {
-        const response = await getMatchesByTournamentSlug(
-          normalizedRouteGame,
-          slug!,
-        );
+        const response = await getMatchesByTournamentId(tournamentId!);
         return response;
       },
     });
@@ -1105,7 +1103,7 @@ const MatchDetailPage = () => {
           <div className="order-2 md:order-1 flex items-center gap-2 min-w-0">
             <Link
               to={backTo}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-muted-foreground hover:text-foreground hover:border-border transition-colors text-xs font-semibold"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/60 px-2.5text-[#EEEEEE] hover:text-foreground hover:border-border transition-colors text-xs font-semibold"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Nhánh đấu</span>
@@ -1113,10 +1111,10 @@ const MatchDetailPage = () => {
             {prevDetail ? (
               <div className="inline-flex items-center gap-2 min-w-0">
                 <div className="text-right leading-tight">
-                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#EEEEEE]">
                     Prev
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-[#EEEEEE]">
                     {formatNavDate(prevDetail.date_scheduled)}
                   </p>
                 </div>
@@ -1154,10 +1152,10 @@ const MatchDetailPage = () => {
           </div>
 
           <div className="order-1 md:order-2 text-center">
-            <p className="text-xs md:text-[11px] font-black uppercase tracking-[0.14em] text-primary">
+            <p className="text-xs md:text-[11px] lg:text-[14px] font-black uppercase tracking-[0.14em] text-primary">
               {match.tournamentName}
             </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-[11px] lg:text-[12px] text-[#EEEEEE] mt-0.5">
               {match.roundName} · {match.format}
             </p>
           </div>
@@ -1195,10 +1193,10 @@ const MatchDetailPage = () => {
                   />
                 </Link>
                 <div className="text-left leading-tight">
-                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-muted-foreground">
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#EEEEEE]">
                     Next
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-[#EEEEEE]">
                     {formatNavDate(nextDetail.date_scheduled)}
                   </p>
                 </div>
@@ -1232,7 +1230,7 @@ const MatchDetailPage = () => {
             </span>
             <div className="text-center leading-tight min-w-[76px] lg:block hidden">
               <p className="text-[20px] font-black">FIN</p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11px] text-[#EEEEEE]">
                 {formatDate(match.date)}
               </p>
             </div>
@@ -1277,7 +1275,7 @@ const MatchDetailPage = () => {
 
       <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
         {!hasRosterData && !hasMapData ? (
-          <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-sm text-muted-foreground">
+          <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-smtext-[#EEEEEE]">
             Chua co du lieu chi tiet cho tran dau nay.
           </section>
         ) : (

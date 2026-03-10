@@ -80,7 +80,7 @@ const SignupPage = () => {
       <div className="w-full max-w-md">
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm mb-8 transition-colors"
+          className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm mb-8 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           Quay lại
@@ -165,7 +165,7 @@ const SignupPage = () => {
             </Button>
           </form>
 
-          <p className="text-center text-muted-foreground text-xs mt-4">
+          <p className="text-centertext-[#EEEEEE] text-xs mt-4">
             Đã có tài khoản?{" "}
             <Link to="/login" className="text-primary hover:underline">
               Đăng nhập

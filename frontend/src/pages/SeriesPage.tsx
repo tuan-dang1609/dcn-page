@@ -184,7 +184,7 @@ const TournamentCard = ({
         <h3 className="font-bold text-base leading-snug text-foreground mb-2 line-clamp-2 group-hover:text-primary transition-colors">
           {t.title}
         </h3>
-        <p className="text-xs text-muted-foreground leading-relaxed mb-4 line-clamp-2">
+        <p className="text-xstext-[#EEEEEE] leading-relaxed mb-4 line-clamp-2">
           {t.description}
         </p>
 
@@ -192,7 +192,7 @@ const TournamentCard = ({
         <div className="mt-auto space-y-2.5">
           <div className="grid grid-cols-2 gap-2">
             <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Calendar className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <Calendar className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
               <span>
                 {new Date(t.startDate).toLocaleDateString("vi-VN", {
                   day: "2-digit",
@@ -201,15 +201,15 @@ const TournamentCard = ({
               </span>
             </div>
             <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Shield className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <Shield className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
               <span>{t.format}</span>
             </div>
             <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Trophy className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <Trophy className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
               <span>{t.prizePool}</span>
             </div>
             <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Users className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <Users className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
               <span>
                 {t.teamSize} · {t.registered_count}/{t.maxPlayers}
               </span>
@@ -341,9 +341,7 @@ const SeriesPage = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <p className="text-sm text-muted-foreground">
-          Dang tai du lieu series...
-        </p>
+        <p className="text-smtext-[#EEEEEE]">Dang tai du lieu series...</p>
       </div>
     );
   }
@@ -355,7 +353,7 @@ const SeriesPage = () => {
           <p className="text-base font-semibold text-foreground mb-2">
             Khong tai duoc du lieu series
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-smtext-[#EEEEEE]">
             Vui long thu lai sau hoac kiem tra ket noi API `/api/series/
             {seriesSlug}`.
           </p>
@@ -403,7 +401,7 @@ const SeriesPage = () => {
                 <p className="text-xl md:text-2xl font-bold text-foreground">
                   {s.val}
                 </p>
-                <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mt-0.5">
+                <p className="text-[10px] uppercase tracking-[0.15em] text-[#EEEEEE] mt-0.5">
                   {s.label}
                 </p>
               </div>
@@ -415,7 +413,7 @@ const SeriesPage = () => {
       {/* ═══ TEAM LOGOS CAROUSEL ═══ */}
       <Section className="border-b border-border py-8 overflow-hidden">
         <div className="max-w-6xl mx-auto px-6 md:px-10 mb-5">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#EEEEEE]">
             Đội tuyển tham gia
           </p>
         </div>
@@ -438,9 +436,7 @@ const SeriesPage = () => {
                   <p className="text-sm font-bold text-foreground whitespace-nowrap">
                     {team.name}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {team.shortName}
-                  </p>
+                  <p className="text-[10px] text-[#EEEEEE]">{team.shortName}</p>
                 </div>
               </div>
             ))}
@@ -459,7 +455,7 @@ const SeriesPage = () => {
                 className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all duration-200 ${
                   activeFilter === g
                     ? "bg-primary text-primary-foreground"
-                    : "bg-card border border-border text-muted-foreground hover:text-foreground hover:border-primary/20"
+                    : "bg-card border border-bordertext-[#EEEEEE] hover:text-foreground hover:border-primary/20"
                 }`}
               >
                 {g}
@@ -467,7 +463,7 @@ const SeriesPage = () => {
             ))}
           </div>
           <div className="relative w-full sm:w-56">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4text-[#EEEEEE]" />
             <Input
               placeholder="Tìm giải đấu..."
               value={search}
@@ -548,12 +544,12 @@ const SeriesPage = () => {
               <h2 className="text-2xl font-bold text-foreground">
                 Bảng xếp hạng tổng
               </h2>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xstext-[#EEEEEE] mt-1">
                 Điểm tích lũy qua các giải · Giải thưởng chỉ dành cho nhà vô
                 địch tổng
               </p>
             </div>
-            <Target className="w-6 h-6 text-muted-foreground" />
+            <Target className="w-6 h-6text-[#EEEEEE]" />
           </div>
 
           {/* Points legend */}
@@ -561,7 +557,7 @@ const SeriesPage = () => {
             {placementPoints.map((pts, i) => (
               <div
                 key={i}
-                className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+                className="flex items-center gap-1.5 text-[10px] text-[#EEEEEE]"
               >
                 <span
                   className={`font-bold ${i === 0 ? "text-primary" : "text-foreground"}`}
@@ -581,10 +577,10 @@ const SeriesPage = () => {
                 gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
               }}
             >
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
                 #
               </div>
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
                 Đội tuyển
               </div>
               {completedTournamentIds.map((tid) => {
@@ -592,14 +588,14 @@ const SeriesPage = () => {
                 return (
                   <div
                     key={tid}
-                    className="px-2 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground text-center truncate"
+                    className="px-2 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.08em] text-[#EEEEEE] text-center truncate"
                     title={t?.title}
                   >
                     {t?.gameIcon}
                   </div>
                 );
               })}
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground text-right">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] text-right">
                 Tổng
               </div>
             </div>
@@ -662,14 +658,12 @@ const SeriesPage = () => {
                             >
                               {pts}
                             </span>
-                            <span className="block text-[9px] text-muted-foreground">
+                            <span className="block text-[9px] text-[#EEEEEE]">
                               #{placement}
                             </span>
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground/50">
-                            —
-                          </span>
+                          <span className="text-xstext-[#EEEEEE]/50">—</span>
                         )}
                       </div>
                     );

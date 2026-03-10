@@ -118,7 +118,7 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
             )}
 
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              <p className="text-xs font-bold uppercase tracking-widertext-[#EEEEEE]">
                 {item.label}
               </p>
               <p className="font-bold text-foreground">{item.value}</p>

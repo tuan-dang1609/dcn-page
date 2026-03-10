@@ -83,7 +83,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold leading-tight mb-2 max-w-[720px] mx-auto md:mx-0">
               TFT Set 15 – KO Coliseum
             </h1>
-            <p className="text-sm sm:text-sm md:text-base text-muted-foreground">
+            <p className="text-sm sm:text-sm md:text-basetext-[#EEEEEE]">
               Tổ chức bởi{" "}
               <span className="font-semibold text-primary">
                 Dong Chuyen Nghiep

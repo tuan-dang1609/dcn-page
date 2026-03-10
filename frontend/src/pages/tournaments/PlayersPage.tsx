@@ -241,7 +241,7 @@ const PlayersPage = () => {
         ) : null}
       </div>
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Đang tải người chơi...</p>
+        <p className="text-smtext-[#EEEEEE]">Đang tải người chơi...</p>
       ) : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {apiPlayersRaw.map((participant) => (

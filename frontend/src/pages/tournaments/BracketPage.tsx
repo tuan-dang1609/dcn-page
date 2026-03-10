@@ -113,9 +113,7 @@ const BracketPage = () => {
       <h2 className="text-2xl font-heading">Nhánh đấu</h2>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">
-          Đang tải danh sách bracket...
-        </p>
+        <p className="text-smtext-[#EEEEEE]">Đang tải danh sách bracket...</p>
       ) : null}
 
       {isError ? (
@@ -138,7 +136,7 @@ const BracketPage = () => {
                 className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${
                   isActive
                     ? "bg-primary text-primary-foreground neo-box-sm"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    : "bg-mutedtext-[#EEEEEE] hover:bg-muted/80"
                 }`}
               >
                 {bracket.name || `Bracket ${bracket.id}`}
@@ -151,7 +149,7 @@ const BracketPage = () => {
               key={group.key}
               className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/40"
             >
-              <span className="text-xs font-bold text-muted-foreground">
+              <span className="text-xs font-boldtext-[#EEEEEE]">
                 {group.title}
               </span>
               <div className="flex items-center gap-1">
@@ -166,7 +164,7 @@ const BracketPage = () => {
                       className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
                         isActive
                           ? "bg-primary text-primary-foreground neo-box-sm"
-                          : "bg-muted text-muted-foreground hover:bg-muted/80"
+                          : "bg-mutedtext-[#EEEEEE] hover:bg-muted/80"
                       }`}
                     >
                       {toBranchLabel(index)}
@@ -201,7 +199,7 @@ const BracketPage = () => {
           selectedFormatId !== 1 &&
           selectedFormatId !== 2 &&
           !isSwissBracket ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-smtext-[#EEEEEE]">
               Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ
               hỗ trợ hiển thị Single Elimination, Double Elimination và Swiss.
             </p>

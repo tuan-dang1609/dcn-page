@@ -760,18 +760,18 @@ const TournamentRegistration = ({
               step === "edit-team" ||
               step === "team-members"
                 ? "bg-primary/15 text-primary"
-                : "bg-muted text-muted-foreground"
+                : "bg-mutedtext-[#EEEEEE]"
             }`}
           >
             <Shield className="w-3.5 h-3.5" />
             Bước 1
           </div>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          <ChevronRight className="w-4 h-4text-[#EEEEEE]" />
           <div
             className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full transition-colors ${
               step === "members"
                 ? "bg-primary/15 text-primary"
-                : "bg-muted text-muted-foreground"
+                : "bg-mutedtext-[#EEEEEE]"
             }`}
           >
             <Users className="w-3.5 h-3.5" />
@@ -833,7 +833,7 @@ const TournamentRegistration = ({
                   </Button>
                 </div>
                 {!canManageTeam && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xstext-[#EEEEEE]">
                     Bạn có thể đăng ký giải nhưng không có quyền chỉnh sửa đội.
                   </p>
                 )}
@@ -920,7 +920,7 @@ const TournamentRegistration = ({
                 </label>
                 <div className="max-h-44 overflow-y-auto rounded-md border border-border p-2 space-y-2 bg-muted/20">
                   {loadingUsers ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xstext-[#EEEEEE]">
                       Đang tải người dùng...
                     </p>
                   ) : (
@@ -1118,7 +1118,7 @@ const TournamentRegistration = ({
             </DialogHeader>
             <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
               {loadingUsers ? (
-                <div className="text-sm text-muted-foreground py-4 text-center">
+                <div className="text-smtext-[#EEEEEE] py-4 text-center">
                   Đang tải danh sách người dùng...
                 </div>
               ) : (
@@ -1185,16 +1185,16 @@ const TournamentRegistration = ({
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xstext-[#EEEEEE]">
                 Điều kiện: chọn từ {minPlayersRequired} đến {maxPlayersAllowed}
                 người.
               </p>
               {loadingMembers ? (
-                <div className="text-sm text-muted-foreground py-4 text-center">
+                <div className="text-smtext-[#EEEEEE] py-4 text-center">
                   Đang tải danh sách thành viên...
                 </div>
               ) : teamMembers.length === 0 ? (
-                <div className="text-sm text-muted-foreground py-4 text-center">
+                <div className="text-smtext-[#EEEEEE] py-4 text-center">
                   Team chưa có thành viên để đăng ký.
                 </div>
               ) : (

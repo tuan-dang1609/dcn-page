@@ -443,7 +443,7 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
     };
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Đang tải bracket...</p>;
+    return <p className="text-smtext-[#EEEEEE]">Đang tải bracket...</p>;
   }
 
   if (isError) {
@@ -456,9 +456,7 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
 
   if (!singleElimMatches.length) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Chưa có match trong bracket này.
-      </p>
+      <p className="text-smtext-[#EEEEEE]">Chưa có match trong bracket này.</p>
     );
   }
 
@@ -502,13 +500,13 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
         style={{ width: totalW, height: totalH4 + HEADER_H }}
       >
         <div
-          className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+          className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
           style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
         >
           Bán kết
         </div>
         <div
-          className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+          className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
           style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
         >
           Chung kết
@@ -567,19 +565,19 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
       style={{ width: totalW, height: totalH + HEADER_H }}
     >
       <div
-        className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+        className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
         style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
       >
         Tứ kết
       </div>
       <div
-        className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+        className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
         style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
       >
         Bán kết
       </div>
       <div
-        className="absolute text-xs font-bold text-muted-foreground uppercase tracking-wider"
+        className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
         style={{ left: col4, width: CARD_W, textAlign: "center", top: 0 }}
       >
         Chung kết

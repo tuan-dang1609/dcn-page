@@ -526,7 +526,7 @@ const TournamentSetupPage = () => {
 
   if (isLoading || !user || !token) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground gap-2">
+      <div className="min-h-screen bg-background flex items-center justify-centertext-[#EEEEEE] gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
         <span>Đang kiểm tra quyền truy cập...</span>
       </div>
@@ -540,7 +540,7 @@ const TournamentSetupPage = () => {
       <div className="mx-auto w-full max-w-6xl space-y-6">
         <button
           onClick={() => navigate("/profile")}
-          className="flex items-center gap-2 text-muted-foreground hover:text-foreground text-sm transition-colors"
+          className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Về trang hồ sơ
@@ -550,7 +550,7 @@ const TournamentSetupPage = () => {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold">Tournament Setup Wizard</h1>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-smtext-[#EEEEEE]">
                 Luồng tuần tự: Tạo giải, Milestones, Rules, Requirements.
               </p>
             </div>
@@ -656,7 +656,7 @@ const TournamentSetupPage = () => {
                 placeholder="game slug preview (valorant/tft...)"
               />
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-xstext-[#EEEEEE]">
                   Date start (GMT+7)
                 </label>
                 <Input
@@ -675,7 +675,7 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-xstext-[#EEEEEE]">
                   Date end (GMT+7)
                 </label>
                 <Input
@@ -694,7 +694,7 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-xstext-[#EEEEEE]">
                   Register start (GMT+7)
                 </label>
                 <Input
@@ -713,7 +713,7 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-xstext-[#EEEEEE]">
                   Register end (GMT+7)
                 </label>
                 <Input
@@ -732,7 +732,7 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-xstext-[#EEEEEE]">
                   Check-in start (GMT+7)
                 </label>
                 <Input
@@ -751,7 +751,7 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-xstext-[#EEEEEE]">
                   Check-in end (GMT+7)
                 </label>
                 <Input
@@ -793,7 +793,7 @@ const TournamentSetupPage = () => {
               />
             </div>
 
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xstext-[#EEEEEE]">
               Tất cả mốc thời gian đang chọn theo GMT+7 khi submit.
             </p>
 
@@ -822,9 +822,7 @@ const TournamentSetupPage = () => {
                   className="w-full max-h-64 rounded-md object-cover border border-border"
                 />
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  Chưa có banner preview.
-                </p>
+                <p className="text-smtext-[#EEEEEE]">Chưa có banner preview.</p>
               )}
 
               {previewPath ? (
@@ -844,7 +842,7 @@ const TournamentSetupPage = () => {
                   </Button>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-smtext-[#EEEEEE]">
                   Nhập tên giải + game slug preview để tạo link xem trước.
                 </p>
               )}
@@ -1132,9 +1130,7 @@ const TournamentSetupPage = () => {
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
-                  Rank tối thiểu
-                </label>
+                <label className="text-xstext-[#EEEEEE]">Rank tối thiểu</label>
                 <select
                   value={requirements.rank_min}
                   onChange={(event) =>
@@ -1154,9 +1150,7 @@ const TournamentSetupPage = () => {
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
-                  Rank tối đa
-                </label>
+                <label className="text-xstext-[#EEEEEE]">Rank tối đa</label>
                 <select
                   value={requirements.rank_max}
                   onChange={(event) =>
@@ -1186,7 +1180,7 @@ const TournamentSetupPage = () => {
                 placeholder="devices, ngăn cách bởi dấu phẩy"
               />
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
+                <label className="text-xstext-[#EEEEEE]">
                   Yêu cầu vào Discord
                 </label>
                 <select

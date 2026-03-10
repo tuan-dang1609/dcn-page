@@ -34,10 +34,14 @@ const Timeline = ({ tournament }) => {
               )}
             </div>
             <div className="pb-6 flex-1">
-              <p className="text-xs text-muted-foreground mb-1">{formatDateTime(event.milestone_time)}</p>
+              <p className="text-xstext-[#EEEEEE] mb-1">
+                {formatDateTime(event.milestone_time)}
+              </p>
               <h3 className="font-semibold text-base">{event.title}</h3>
               {event.context && (
-                <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{event.context}</p>
+                <p className="text-smtext-[#EEEEEE] mt-1 leading-relaxed">
+                  {event.context}
+                </p>
               )}
             </div>
           </div>

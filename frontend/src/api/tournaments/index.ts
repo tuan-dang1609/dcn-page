@@ -85,7 +85,21 @@ export const getMatchesByTournamentSlug = async (
     throw new Error("Không tìm thấy tournament_id từ slug");
   }
 
-  const bracketsResponse = await getBracketsByTournamentId(tournamentId);
+  return getMatchesByTournamentId(tournamentId);
+};
+
+export const getMatchesByTournamentId = async (
+  tournamentId: number | string,
+) => {
+  const normalizedTournamentId = Number(tournamentId);
+
+  if (!Number.isFinite(normalizedTournamentId)) {
+    throw new Error("tournament_id không hợp lệ");
+  }
+
+  const bracketsResponse = await getBracketsByTournamentId(
+    normalizedTournamentId,
+  );
   const brackets = bracketsResponse.data?.data ?? [];
   const bracketIds = brackets
     .map((bracket) => Number(bracket.id))
@@ -100,8 +114,11 @@ export const getMatchesByTournamentSlug = async (
   }
 
   const preferredBracketId =
-    (brackets.find((bracket) => String(bracket.stage || "").toLowerCase() === "main")
-      ?.id ?? bracketIds[0]) || null;
+    (brackets.find(
+      (bracket) => String(bracket.stage || "").toLowerCase() === "main",
+    )?.id ??
+      bracketIds[0]) ||
+    null;
 
   const matchesResponses = await Promise.all(
     bracketIds.map((bracketId) => getMatchesByBracketId(bracketId)),
