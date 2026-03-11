@@ -27,7 +27,11 @@ const buildProfileRedirectUrl = (riot, reason = "", extras = {}) => {
   }
 
   Object.entries(extras).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim().length > 0) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      String(value).trim().length > 0
+    ) {
       url.searchParams.set(key, String(value));
     }
   });

@@ -11,8 +11,7 @@ const FRONTEND_BASE_URL =
 const RIOT_CLIENT_ID = process.env.RIOT_CLIENT_ID ?? "";
 const RIOT_CLIENT_SECRET = process.env.RIOT_CLIENT_SECRET ?? "";
 const RIOT_REDIRECT_URI =
-  process.env.RIOT_REDIRECT_URI ??
-  `${APP_BASE_URL}/api/users/riot/callback`;
+  process.env.RIOT_REDIRECT_URI ?? `${APP_BASE_URL}/api/users/riot/callback`;
 const RIOT_ACCOUNT_API_BASE_URL =
   process.env.RIOT_ACCOUNT_API_BASE_URL ?? "https://asia.api.riotgames.com";
 
