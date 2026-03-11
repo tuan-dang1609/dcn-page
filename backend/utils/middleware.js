@@ -27,7 +27,8 @@ export const deriveAuthContext = async ({ request }) => {
   }
 
   if (!token) return { token: null, user: null, authError: "NO_TOKEN" };
-  const secret = process.env.SECRET ?? "dev-secret";
+  const secret =
+    process.env.SECRET ?? process.env.JWT_SECRET ?? "dev-secret";
   const decoded = jwt.verify(token, secret);
 
   const userId = Number(decoded?.id);

@@ -18,7 +18,7 @@ const normalizeNullableText = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const buildProfileRedirectUrl = (riot, reason = "") => {
+const buildProfileRedirectUrl = (riot, reason = "", extras = {}) => {
   const url = new URL("/profile", config.FRONTEND_BASE_URL);
   url.searchParams.set("riot", riot);
 
@@ -26,17 +26,26 @@ const buildProfileRedirectUrl = (riot, reason = "") => {
     url.searchParams.set("reason", reason);
   }
 
+  Object.entries(extras).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim().length > 0) {
+      url.searchParams.set(key, String(value));
+    }
+  });
+
   return url.toString();
 };
 
-const buildRiotAuthorizeUrl = (state) => {
+const buildRiotAuthorizeUrl = (state = "") => {
   const query = new URLSearchParams({
     redirect_uri: config.RIOT_REDIRECT_URI,
     client_id: config.RIOT_CLIENT_ID,
     response_type: "code",
     scope: "openid",
-    state,
   });
+
+  if (state) {
+    query.set("state", state);
+  }
 
   return `${config.RIOT_AUTHORIZE_URL}?${query.toString()}`;
 };
@@ -45,6 +54,66 @@ const getBasicAuthHeader = () => {
   const plain = `${config.RIOT_CLIENT_ID}:${config.RIOT_CLIENT_SECRET}`;
   const encoded = Buffer.from(plain, "utf8").toString("base64");
   return `Basic ${encoded}`;
+};
+
+const exchangeRiotCodeForToken = async (accessCode) => {
+  const tokenResponse = await fetch(config.RIOT_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      Authorization: getBasicAuthHeader(),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: accessCode,
+      redirect_uri: config.RIOT_REDIRECT_URI,
+    }).toString(),
+  });
+
+  if (!tokenResponse.ok) {
+    const tokenErrText = await tokenResponse.text();
+    throw new Error(`token exchange failed: ${tokenErrText}`);
+  }
+
+  const tokenPayload = await tokenResponse.json();
+  const accessToken = String(tokenPayload?.access_token ?? "").trim();
+
+  if (!accessToken) {
+    throw new Error("riot access token is missing");
+  }
+
+  return accessToken;
+};
+
+const fetchRiotAccountByToken = async (accessToken) => {
+  const accountResponse = await fetch(
+    `${config.RIOT_ACCOUNT_API_BASE_URL}/riot/account/v1/accounts/me`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!accountResponse.ok) {
+    const accountErrText = await accountResponse.text();
+    throw new Error(`fetch riot account failed: ${accountErrText}`);
+  }
+
+  const accountPayload = await accountResponse.json();
+  const gameName = String(accountPayload?.gameName ?? "").trim();
+  const tagLine = String(accountPayload?.tagLine ?? "").trim();
+  const riotAccount = gameName && tagLine ? `${gameName}#${tagLine}` : null;
+
+  if (!riotAccount) {
+    throw new Error("riot account is empty");
+  }
+
+  return {
+    gameName,
+    tagLine,
+    riotAccount,
+  };
 };
 
 usersRouter.get(
@@ -249,6 +318,22 @@ usersRouter.get(
 );
 
 usersRouter.get(
+  "/riot/login",
+  ({ set }) => {
+    if (!config.RIOT_CLIENT_ID || !config.RIOT_CLIENT_SECRET) {
+      set.status = 500;
+      return { error: "riot oauth is not configured" };
+    }
+
+    return Response.redirect(buildRiotAuthorizeUrl(), 302);
+  },
+  {
+    tags: [TAG],
+    summary: "Legacy Riot OAuth entrypoint",
+  },
+);
+
+usersRouter.get(
   "/riot/callback",
   async ({ query }) => {
     const oauthError = String(query?.error ?? "").trim();
@@ -262,14 +347,28 @@ usersRouter.get(
     const accessCode = String(query?.code ?? "").trim();
     const state = String(query?.state ?? "").trim();
 
-    if (!accessCode || !state) {
+    if (!accessCode) {
       return Response.redirect(
-        buildProfileRedirectUrl("failed", "missing code or state"),
+        buildProfileRedirectUrl("failed", "missing code"),
         302,
       );
     }
 
     try {
+      const accessToken = await exchangeRiotCodeForToken(accessCode);
+      const riot = await fetchRiotAccountByToken(accessToken);
+
+      if (!state) {
+        // Backward-compatible callback mode for older Riot Portal setups.
+        return Response.redirect(
+          buildProfileRedirectUrl("connected", "", {
+            gameName: riot.gameName,
+            tagName: riot.tagLine,
+          }),
+          302,
+        );
+      }
+
       const decodedState = jwt.verify(state, config.RIOT_STATE_SECRET);
       const userId = Number(decodedState?.uid);
 
@@ -277,60 +376,18 @@ usersRouter.get(
         throw new Error("invalid state");
       }
 
-      const tokenResponse = await fetch(config.RIOT_TOKEN_URL, {
-        method: "POST",
-        headers: {
-          Authorization: getBasicAuthHeader(),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code: accessCode,
-          redirect_uri: config.RIOT_REDIRECT_URI,
-        }).toString(),
-      });
-
-      if (!tokenResponse.ok) {
-        const tokenErrText = await tokenResponse.text();
-        throw new Error(`token exchange failed: ${tokenErrText}`);
-      }
-
-      const tokenPayload = await tokenResponse.json();
-      const accessToken = String(tokenPayload?.access_token ?? "").trim();
-
-      if (!accessToken) {
-        throw new Error("riot access token is missing");
-      }
-
-      const accountResponse = await fetch(
-        `${config.RIOT_ACCOUNT_API_BASE_URL}/riot/account/v1/accounts/me`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
-      );
-
-      if (!accountResponse.ok) {
-        const accountErrText = await accountResponse.text();
-        throw new Error(`fetch riot account failed: ${accountErrText}`);
-      }
-
-      const accountPayload = await accountResponse.json();
-      const gameName = String(accountPayload?.gameName ?? "").trim();
-      const tagLine = String(accountPayload?.tagLine ?? "").trim();
-      const riotAccount = gameName && tagLine ? `${gameName}#${tagLine}` : null;
-
-      if (!riotAccount) {
-        throw new Error("riot account is empty");
-      }
-
       await pool.query("UPDATE users SET riot_account = $1 WHERE id = $2", [
-        riotAccount,
+        riot.riotAccount,
         userId,
       ]);
 
-      return Response.redirect(buildProfileRedirectUrl("connected"), 302);
+      return Response.redirect(
+        buildProfileRedirectUrl("connected", "", {
+          gameName: riot.gameName,
+          tagName: riot.tagLine,
+        }),
+        302,
+      );
     } catch (error) {
       return Response.redirect(
         buildProfileRedirectUrl(

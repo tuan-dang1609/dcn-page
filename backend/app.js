@@ -56,6 +56,10 @@ const buildCorsHeaders = (origin) => ({
 });
 
 const app = new Elysia()
+  .get("/sso/login-riot", ({ request }) => {
+    const nextUrl = new URL("/api/users/riot/login", request.url);
+    return Response.redirect(nextUrl.toString(), 302);
+  })
   // Legacy Riot callback support for existing Riot Portal redirect registrations.
   .get("/oauth2-callback", ({ query, request }) => {
     const queryString = serializeQuery(query);
