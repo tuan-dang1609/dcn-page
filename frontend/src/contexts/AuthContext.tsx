@@ -7,6 +7,7 @@ import {
 } from "react";
 import axios from "axios";
 import { setTournamentToken } from "@/api/tournaments";
+import { API_BASE } from "@/lib/apiBase";
 
 export interface UserTeam {
   name: string;
@@ -39,39 +40,6 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
-const sanitizeApiBase = (value: unknown): string | null => {
-  if (typeof value !== "string") return null;
-
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const lowered = trimmed.toLowerCase();
-  if (lowered === "undefined" || lowered === "null") return null;
-
-  return trimmed.replace(/\/+$/, "");
-};
-
-const apiBaseFromVite =
-  typeof import.meta !== "undefined"
-    ? sanitizeApiBase(import.meta.env?.VITE_API_BASE_URL)
-    : null;
-
-const apiBaseFromBun =
-  typeof import.meta !== "undefined"
-    ? sanitizeApiBase(import.meta.env?.BUN_PUBLIC_API_BASE_URL)
-    : null;
-
-const apiBaseFromProcess =
-  typeof process !== "undefined"
-    ? sanitizeApiBase(process.env?.BUN_PUBLIC_API_BASE_URL)
-    : null;
-
-// Keep auth working when env vars are missing in a deployment target.
-const API_BASE =
-  apiBaseFromVite ??
-  apiBaseFromBun ??
-  apiBaseFromProcess ??
-  "https://dcn-page.onrender.com";
 const TOKEN_STORAGE_KEY = "tft_token";
 const USER_STORAGE_KEY = "tft_user";
 

@@ -6,8 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { uploadImageToSupabase } from "@/lib/supabaseUpload";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+import { API_BASE } from "@/lib/apiBase";
 
 const SignupPage = () => {
   const navigate = useNavigate();

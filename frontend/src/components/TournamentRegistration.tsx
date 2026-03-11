@@ -25,6 +25,7 @@ import {
   deleteImageFromSupabase,
   uploadImageToSupabase,
 } from "@/lib/supabaseUpload";
+import { API_BASE } from "@/lib/apiBase";
 
 interface TeamMember {
   id: number;
@@ -68,8 +69,6 @@ interface UsersListResponse {
     team_id: number | string | null;
   }>;
 }
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 const getApiErrorMessage = (error: unknown, fallback: string) => {
   if (!axios.isAxiosError(error)) return fallback;

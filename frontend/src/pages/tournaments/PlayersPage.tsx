@@ -4,6 +4,7 @@ import axios from "axios";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { API_BASE } from "@/lib/apiBase";
 import {
   Dialog,
   DialogContent,
@@ -52,8 +53,6 @@ type PlayersOutletContext = {
   isLoading?: boolean;
   refetch?: () => Promise<unknown>;
 };
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 const toTime = (value?: string) => {
   const ms = Number(new Date(value ?? ""));

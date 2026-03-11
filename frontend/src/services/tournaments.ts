@@ -1,6 +1,7 @@
 import axios from "axios";
+import { API_BASE } from "@/lib/apiBase";
 
-const baseUrl = `${import.meta.env.VITE_API_BASE_URL}/api/tournaments`;
+const baseUrl = `${API_BASE}/api/tournaments`;
 let token: string | null = null;
 
 const toGameRouteKey = (value: string) => {

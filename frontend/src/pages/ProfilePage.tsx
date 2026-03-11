@@ -9,8 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "@/hooks/use-toast";
 import { uploadImageToSupabase } from "@/lib/supabaseUpload";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+import { API_BASE } from "@/lib/apiBase";
 
 const ProfilePage = () => {
   const navigate = useNavigate();
