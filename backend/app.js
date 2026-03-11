@@ -69,6 +69,7 @@ const app = new Elysia()
 
     return Response.redirect(new URL(nextPath, request.url).toString(), 302);
   })
+  .get("/alive", () => new Response("alive"))
   .onRequest(({ request, set }) => {
     const origin = request.headers.get("origin");
 
