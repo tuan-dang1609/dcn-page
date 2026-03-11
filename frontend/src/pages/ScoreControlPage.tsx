@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -19,12 +20,12 @@ import {
   getMatchesByBracketId,
   pairSwissNextRound,
   updateMatchGameId,
-  updateMatchSchedule,
   updateMatchScore,
   type Bracket,
   type Match,
   type MatchGameIdRecord,
 } from "@/api/tournaments";
+import { tournamentsBaseUrl } from "@/api/tournaments/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -603,9 +604,15 @@ const ScoreControlPage = () => {
     setScheduleSavingForMatch(match.id, true);
 
     try {
-      await updateMatchSchedule(match.id, {
-        date_scheduled: nextDateScheduled,
-      });
+      await axios.patch(
+        `${tournamentsBaseUrl}/matches/matches/${match.id}/schedule`,
+        { date_scheduled: nextDateScheduled },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
 
       toast({
         title: "Cập nhật lịch thi đấu thành công",

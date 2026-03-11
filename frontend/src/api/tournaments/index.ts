@@ -11,20 +11,6 @@ import type {
 
 let token: string | null = null;
 
-const toGameRouteKey = (value: string) => {
-  const normalized = String(value ?? "")
-    .trim()
-    .toLowerCase();
-
-  if (["valo", "val", "valorant"].includes(normalized)) return "val";
-  if (["lol", "leagueoflegends", "league_of_legends"].includes(normalized))
-    return "lol";
-  if (["tft", "teamfighttactics", "teamfight_tactics"].includes(normalized))
-    return "tft";
-
-  return normalized;
-};
-
 const getAuthConfig = () =>
   token
     ? {
@@ -43,7 +29,7 @@ export const getAllTournaments = () =>
 
 export const getTournamentBySlug = (game: string, slug: string) =>
   axios.get<TournamentBySlugResponse>(
-    `${tournamentsBaseUrl}/by-slug/${toGameRouteKey(game)}/${slug}`,
+    `${tournamentsBaseUrl}/by-slug/${game}/${slug}`,
   );
 
 export const getBracketsByTournamentId = (tournamentId: number | string) =>
@@ -55,6 +41,27 @@ export const getMatchesByBracketId = (bracketId: number | string) =>
   axios.get<DataEnvelope<Match[]>>(
     `${tournamentsBaseUrl}/matches/brackets/${bracketId}/matches`,
   );
+
+export const getMatchesByTournamentId = async (
+  tournamentId: number | string,
+) => {
+  const preferredBracketId =
+    await getPreferredBracketIdByTournamentId(tournamentId);
+
+  if (!preferredBracketId) {
+    return {
+      bracketId: null,
+      matches: [] as Match[],
+    };
+  }
+
+  const matchesResponse = await getMatchesByBracketId(preferredBracketId);
+
+  return {
+    bracketId: preferredBracketId,
+    matches: matchesResponse.data?.data ?? [],
+  };
+};
 
 export const getPreferredBracketIdByTournamentId = async (
   tournamentId: number | string,
@@ -75,63 +82,27 @@ export const getMatchesByTournamentSlug = async (
   game: string,
   slug: string,
 ) => {
-  const tournamentResponse = await getTournamentBySlug(
-    toGameRouteKey(game),
-    slug,
-  );
+  const tournamentResponse = await getTournamentBySlug(game, slug);
   const tournamentId = tournamentResponse.data?.info?.id;
 
   if (!tournamentId) {
     throw new Error("Không tìm thấy tournament_id từ slug");
   }
 
-  return getMatchesByTournamentId(tournamentId);
-};
+  const bracketId = await getPreferredBracketIdByTournamentId(tournamentId);
 
-export const getMatchesByTournamentId = async (
-  tournamentId: number | string,
-) => {
-  const normalizedTournamentId = Number(tournamentId);
-
-  if (!Number.isFinite(normalizedTournamentId)) {
-    throw new Error("tournament_id không hợp lệ");
-  }
-
-  const bracketsResponse = await getBracketsByTournamentId(
-    normalizedTournamentId,
-  );
-  const brackets = bracketsResponse.data?.data ?? [];
-  const bracketIds = brackets
-    .map((bracket) => Number(bracket.id))
-    .filter((id) => Number.isFinite(id));
-
-  if (!bracketIds.length) {
+  if (!bracketId) {
     return {
       bracketId: null,
-      bracketIds: [] as number[],
       matches: [] as Match[],
     };
   }
 
-  const preferredBracketId =
-    (brackets.find(
-      (bracket) => String(bracket.stage || "").toLowerCase() === "main",
-    )?.id ??
-      bracketIds[0]) ||
-    null;
-
-  const matchesResponses = await Promise.all(
-    bracketIds.map((bracketId) => getMatchesByBracketId(bracketId)),
-  );
-
-  const allMatches = matchesResponses.flatMap(
-    (response) => response.data?.data ?? [],
-  );
+  const matchesResponse = await getMatchesByBracketId(bracketId);
 
   return {
-    bracketId: preferredBracketId,
-    bracketIds,
-    matches: allMatches,
+    bracketId,
+    matches: matchesResponse.data?.data ?? [],
   };
 };
 
@@ -275,10 +246,6 @@ export interface UpdateMatchScorePayload {
   propagate_loser?: boolean;
 }
 
-export interface UpdateMatchSchedulePayload {
-  date_scheduled: string | null;
-}
-
 export const updateMatchScore = (
   matchId: number | string,
   payload: UpdateMatchScorePayload,
@@ -291,7 +258,7 @@ export const updateMatchScore = (
 
 export const updateMatchSchedule = (
   matchId: number | string,
-  payload: UpdateMatchSchedulePayload,
+  payload: { date_scheduled?: string | null },
 ) =>
   axios.patch(
     `${tournamentsBaseUrl}/matches/matches/${matchId}/schedule`,
