@@ -10,14 +10,18 @@ import config from "./utils/config.js";
 
       // Self-ping to keep Render (free-tier) instance from idling.
       // Render provides `PORT` env var; we ping localhost to generate activity.
-      const selfUrl = `http://127.0.0.1:${port}/alive`;
+      const selfUrl = `
+https://dcn-page.onrender.com/alive`;
       setInterval(async () => {
         try {
           // global fetch is available in Bun; swallow errors silently.
           await fetch(selfUrl).catch(() => {});
         } catch (err) {
           // logger.warn doesn't exist, use error to avoid crashing
-          logger.error("self-ping failed:", err instanceof Error ? err.message : String(err));
+          logger.error(
+            "self-ping failed:",
+            err instanceof Error ? err.message : String(err),
+          );
         }
       }, 30_000);
     });
