@@ -13,11 +13,7 @@ const apiBaseFromProcess =
     ? (process.env?.BUN_PUBLIC_API_BASE_URL ?? null)
     : null;
 
-const API_BASE =
-  apiBaseFromVite ??
-  apiBaseFromBun ??
-  apiBaseFromProcess ??
-  "http://localhost:3000";
+const API_BASE = apiBaseFromVite ?? apiBaseFromBun ?? apiBaseFromProcess;
 
 const seriesBaseUrl = `${API_BASE}/api/series`;
 

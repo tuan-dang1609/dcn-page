@@ -11,10 +11,6 @@ const apiBaseFromProcess =
     ? (process.env?.BUN_PUBLIC_API_BASE_URL ?? null)
     : null;
 
-const API_BASE =
-  apiBaseFromVite ??
-  apiBaseFromBun ??
-  apiBaseFromProcess ??
-  "http://localhost:3000";
+const API_BASE = apiBaseFromVite ?? apiBaseFromBun ?? apiBaseFromProcess;
 
 export const tournamentsBaseUrl = `${API_BASE}/api/tournaments`;
