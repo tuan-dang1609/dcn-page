@@ -6,7 +6,7 @@ const APP_BASE_URL =
   process.env.APP_BASE_URL ?? `http://localhost:${PORT ?? 3000}`;
 
 const FRONTEND_BASE_URL =
-  process.env.FRONTEND_BASE_URL ?? "http://localhost:5173";
+  process.env.FRONTEND_BASE_URL ?? "http://localhost:8080";
 
 const RIOT_CLIENT_ID = process.env.RIOT_CLIENT_ID ?? "";
 const RIOT_CLIENT_SECRET = process.env.RIOT_CLIENT_SECRET ?? "";
