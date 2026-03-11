@@ -15,9 +15,20 @@ export const deriveAuthContext = async ({ request }) => {
   const auth = request.headers.get("authorization");
 
   const match = auth?.match(/^Bearer\s+(.+)$/i);
-  const token = match?.[1]?.trim() ?? null;
+  let token = match?.[1]?.trim() ?? null;
+
+  // Use DEFAULT_AUTH_TOKEN if no Authorization header provided.
+  // You can set DEFAULT_AUTH_TOKEN in env, otherwise it falls back to the hardcoded token below.
+  const DEFAULT_AUTH_TOKEN = process.env.DEFAULT_AUTH_TOKEN ??
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6IkJlYWNvbiIsImlkIjoiNiIsImlhdCI6MTc3MzA0MDUwNiwiZXhwIjoxNzgzODQwNTA2fQ.WbMVxhy3lojNkWCmkpXnZLm1qTgI4jZDq1Lo8zpHu6E";
+
+  if (!token) {
+    token = DEFAULT_AUTH_TOKEN ?? null;
+  }
+
   if (!token) return { token: null, user: null, authError: "NO_TOKEN" };
-  const secret = process.env.SECRET ?? "dev-secret";
+  const secret =
+    process.env.SECRET ?? process.env.JWT_SECRET ?? "dev-secret";
   const decoded = jwt.verify(token, secret);
 
   const userId = Number(decoded?.id);
