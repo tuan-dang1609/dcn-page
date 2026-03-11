@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const baseUrl = `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000"}/api/tournaments`;
+const baseUrl = `${import.meta.env.VITE_API_BASE_URL}/api/tournaments`;
 let token: string | null = null;
 
 const toGameRouteKey = (value: string) => {
@@ -73,8 +73,6 @@ const create = (newObject: TournamentPayload) =>
 
 const update = (id: number | string, newObject: Partial<TournamentPayload>) =>
   axios.patch(`${baseUrl}/${id}`, newObject, getAuthConfig());
-
-
 
 export default {
   getAll,

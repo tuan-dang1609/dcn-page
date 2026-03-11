@@ -69,7 +69,7 @@ interface UsersListResponse {
   }>;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 const getApiErrorMessage = (error: unknown, fallback: string) => {
   if (!axios.isAxiosError(error)) return fallback;

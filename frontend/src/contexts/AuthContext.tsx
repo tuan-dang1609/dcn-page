@@ -39,7 +39,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const TOKEN_STORAGE_KEY = "tft_token";
 const USER_STORAGE_KEY = "tft_user";
 

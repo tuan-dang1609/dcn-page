@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "@/hooks/use-toast";
 import { uploadImageToSupabase } from "@/lib/supabaseUpload";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 const ProfilePage = () => {
   const navigate = useNavigate();
