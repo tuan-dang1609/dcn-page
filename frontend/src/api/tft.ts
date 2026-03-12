@@ -1,4 +1,4 @@
-import axios from "axios";
+﻿import axios from "axios";
 
 export interface TftApiParticipant {
   puuid?: string;
@@ -18,7 +18,7 @@ export interface TftApiResponse {
   };
 }
 
-const TFT_MATCH_BASE_URL = "https://bigtournament-1.onrender.com/api/tft/match";
+const TFT_MATCH_BASE_URL = "/ext-api/bigtournament/api/tft/match";
 
 export const getTftMatchData = (matchId: string) =>
   axios.get<TftApiResponse>(`${TFT_MATCH_BASE_URL}/${matchId}`);

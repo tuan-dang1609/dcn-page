@@ -1,4 +1,4 @@
-import axios from "axios";
+﻿import axios from "axios";
 
 export interface ValorantApiPlayerStats {
   multiKills?: number;
@@ -44,21 +44,21 @@ export interface ValorantMatchDataResponse {
 }
 
 const VALORANT_MATCH_BASE_URL =
-  "https://bigtournament-1.onrender.com/api/auth/valorant/matchdata";
+  "/ext-api/bigtournament/api/auth/valorant/matchdata";
 
-const valorantApiKeyFromVite =
+const VALORANT_API_KEY =
   typeof import.meta !== "undefined"
     ? (import.meta.env?.VITE_VALORANT_API_KEY ?? null)
     : null;
 
-const VALORANT_API_KEY = valorantApiKeyFromVite ?? "HoangTuan2004";
+if (!VALORANT_API_KEY && typeof window !== "undefined") {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "VITE_VALORANT_API_KEY is not set. Valorant match requests may fail.",
+  );
+}
 
 export const getValorantMatchData = (matchId: string) =>
-  axios.get<ValorantMatchDataResponse>(
-    `${VALORANT_MATCH_BASE_URL}/${matchId}`,
-    {
-      params: {
-        api_key: VALORANT_API_KEY,
-      },
-    },
-  );
+  axios.get<ValorantMatchDataResponse>(`${VALORANT_MATCH_BASE_URL}/${matchId}`, {
+    params: VALORANT_API_KEY ? { api_key: VALORANT_API_KEY } : undefined,
+  });
