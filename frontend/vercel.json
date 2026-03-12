@@ -1,12 +1,12 @@
-﻿{
+{
   "rewrites": [
     {
       "source": "/riot.txt",
       "destination": "/riot.txt"
     },
     {
-      "source": "/ext-api/bigtournament/:path*",
-      "destination": "https://bigtournament-1.onrender.com/:path*"
+      "source": "/ext-api/bigtournament/(.*)",
+      "destination": "https://bigtournament-1.onrender.com/$1"
     },
     {
       "source": "/(.*)",
