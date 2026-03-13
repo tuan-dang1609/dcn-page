@@ -11,6 +11,7 @@ import teamRouter from "./controllers/teams.js";
 import tournamentRouter from "./controllers/tournaments/tournament.js";
 import ruleRouter from "./controllers/tournaments/rules.js";
 import requirementRouter from "./controllers/tournaments/requirements.js";
+import roundRouter from "./controllers/tournaments/rounds.js";
 import teamTourRoute from "./controllers/tournaments/tournament_team.js";
 import playerTourRoute from "./controllers/tournaments/tournament_team_player.js";
 import matchRouter from "./controllers/tournaments/matches.js";
@@ -145,6 +146,7 @@ const app = new Elysia()
   .group("/api/tournaments/milestones", (app) => app.use(milestoneRouter))
   .group("/api/tournaments/rules", (app) => app.use(ruleRouter))
   .group("/api/tournaments/requirements", (app) => app.use(requirementRouter))
+  .group("/api/tournaments/round", (app) => app.use(roundRouter))
   .group("/api/tournaments/teams", (app) => app.use(teamTourRoute))
   .group("/api/tournaments/team/players", (app) => app.use(playerTourRoute))
   .group("/api/tournaments/brackets", (app) => app.use(bracketRouter))

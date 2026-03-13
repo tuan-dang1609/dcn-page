@@ -1,5 +1,11 @@
-import { VALORANT_MAPS, MapState, Team } from "@/data/maps";
-import { X, Check, Shield, Swords, Crown } from "lucide-react";
+import { VALORANT_MAPS, MapState } from "@/data/maps";
+import { X, Check, Crown } from "lucide-react";
+
+interface MapMeta {
+  map_code: string;
+  map_name: string;
+  image_url: string;
+}
 
 interface MapCardProps {
   mapState: MapState;
@@ -7,6 +13,7 @@ interface MapCardProps {
   onSelect: (mapId: string) => void;
   disabled: boolean;
   teamNames: { team1: string; team2: string };
+  mapMeta?: MapMeta;
 }
 
 export function MapCard({
@@ -15,8 +22,15 @@ export function MapCard({
   onSelect,
   disabled,
   teamNames,
+  mapMeta,
 }: MapCardProps) {
-  const mapData = VALORANT_MAPS.find((m) => m.id === mapState.mapId)!;
+  const fallbackMap = VALORANT_MAPS.find((m) => m.id === mapState.mapId);
+  const mapData = {
+    id: mapState.mapId,
+    name:
+      mapMeta?.map_name ?? fallbackMap?.name ?? mapState.mapId.toUpperCase(),
+    image: mapMeta?.image_url ?? fallbackMap?.image ?? "",
+  };
   const isBanned = mapState.status === "banned";
   const isPicked = mapState.status === "picked";
   const isDecider = mapState.status === "decider";
@@ -31,7 +45,7 @@ export function MapCard({
       disabled={!isAvailable || disabled}
       className={`
         relative overflow-hidden group cursor-pointer
-        w-full aspect-[16/10] border-2 transition-all duration-100
+        w-full aspect-16/10 border-2 transition-all duration-100
         ${isAvailable && !disabled ? "hover:scale-105 hover:border-primary active:scale-100" : ""}
         ${isSelected ? "border-primary shadow-[0_0_20px_hsl(var(--val-teal)/0.4)]" : "border-border"}
         ${isBanned ? "border-destructive/50" : ""}
@@ -52,7 +66,7 @@ export function MapCard({
       />
 
       {/* Gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent" />
+      <div className="absolute inset-0 bg-linear-to-t from-background/90 via-background/20 to-transparent" />
 
       {/* Map name */}
       <div className="absolute bottom-0 left-0 right-0 p-3">

@@ -24,6 +24,7 @@
     "figlet": "^1.10.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.17.2",
-    "sequelize": "^6.37.7"
+    "sequelize": "^6.37.7",
+    "socket.io": "^4.8.1"
   }
 }

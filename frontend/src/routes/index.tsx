@@ -49,7 +49,7 @@ const routes = [
     element: withSuspense(<SeriesPage />),
   },
   {
-    path: "/banpicktest",
+    path: "/round/:slug",
     element: withSuspense(<BanPickPage />),
   },
   {

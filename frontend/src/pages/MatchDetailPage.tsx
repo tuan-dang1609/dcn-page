@@ -97,6 +97,33 @@ const toNumber = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const buildRoundSlug = ({
+  tournamentSlug,
+  roundNumber,
+  matchNo,
+  matchId,
+}: {
+  tournamentSlug?: string;
+  roundNumber?: number | null;
+  matchNo?: number | null;
+  matchId?: number | null;
+}) => {
+  const base = String(tournamentSlug ?? "tournament")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+
+  const safeRound = toNumber(roundNumber) ?? 0;
+  const safeMatchNo = toNumber(matchNo) ?? toNumber(matchId) ?? 0;
+  const safeMatchId = toNumber(matchId) ?? 0;
+
+  return `${base || "tournament"}-r${safeRound}-m${safeMatchNo}-${safeMatchId}`;
+};
+
 const buildTeamTag = (name?: string | null, shortName?: string | null) => {
   const normalizedShort = String(shortName ?? "")
     .trim()
@@ -1072,6 +1099,13 @@ const MatchDetailPage = () => {
   const currentIndex = sortedMatches.findIndex(
     (item) => toNumber(item.id) === numId,
   );
+  const roundSlug = buildRoundSlug({
+    tournamentSlug: slug,
+    roundNumber: toNumber(currentMatchRow?.round_number),
+    matchNo: toNumber(currentMatchRow?.match_no),
+    matchId: toNumber(currentMatchRow?.id),
+  });
+  const banPickLink = `/round/${roundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`;
   const currentBracketId =
     currentIndex >= 0
       ? toNumber(sortedMatches[currentIndex]?.bracket_id)
@@ -1158,6 +1192,14 @@ const MatchDetailPage = () => {
             <p className="text-[11px] lg:text-[12px] text-[#EEEEEE] mt-0.5">
               {match.roundName} · {match.format}
             </p>
+            {match.gameType === "valorant" && (
+              <Link
+                to={banPickLink}
+                className="inline-flex mt-2 h-7 items-center rounded-md border border-primary/60 px-3 text-[10px] font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 transition-colors"
+              >
+                Mở Ban/Pick
+              </Link>
+            )}
           </div>
 
           <div className="order-3 flex justify-end items-center gap-2 min-w-0">
