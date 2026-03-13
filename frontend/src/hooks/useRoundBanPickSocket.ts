@@ -80,7 +80,7 @@ export const useRoundBanPickSocket = ({
 
     const socket = io(API_BASE, {
       path: "/socket.io",
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       auth: token ? { token: `Bearer ${token}` } : {},
     });
 
