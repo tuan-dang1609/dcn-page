@@ -39,6 +39,12 @@ const serializeQuery = (query = {}) => {
   return params.toString();
 };
 
+const normalizeOrigin = (value) =>
+  String(value ?? "")
+    .trim()
+    .replace(/\/+$/, "")
+    .toLowerCase();
+
 const allowedOrigins = [
   "http://localhost:8080",
   "http://localhost:5173",
@@ -47,10 +53,26 @@ const allowedOrigins = [
   "http://localhost:3001",
   "http://127.0.0.1:3001",
   "https://dcnpagetest.vercel.app",
-];
+].map(normalizeOrigin);
+
+const allowedOriginSet = new Set(allowedOrigins);
+
+const isAllowedOrigin = (origin) => {
+  const normalized = normalizeOrigin(origin);
+
+  if (!normalized) return false;
+  if (allowedOriginSet.has(normalized)) return true;
+
+  // Allow project preview deployments on Vercel.
+  return (
+    normalized.startsWith("https://") &&
+    normalized.endsWith(".vercel.app") &&
+    normalized.includes("dcnpagetest")
+  );
+};
 
 const buildCorsHeaders = (origin) => ({
-  "access-control-allow-origin": origin,
+  "access-control-allow-origin": normalizeOrigin(origin),
   "access-control-allow-credentials": "true",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers": "Content-Type, Authorization",
@@ -75,7 +97,7 @@ const app = new Elysia()
   .onRequest(({ request, set }) => {
     const origin = request.headers.get("origin");
 
-    if (!origin || !allowedOrigins.includes(origin)) return;
+    if (!origin || !isAllowedOrigin(origin)) return;
 
     set.headers = {
       ...(set.headers ?? {}),
@@ -93,7 +115,7 @@ const app = new Elysia()
     const origin = request.headers.get("origin");
     const pathname = new URL(request.url).pathname;
 
-    if (!origin || !allowedOrigins.includes(origin)) return;
+    if (!origin || !isAllowedOrigin(origin)) return;
     if (!pathname.startsWith("/api")) return;
 
     const headers = new Headers(
