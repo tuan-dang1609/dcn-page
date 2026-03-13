@@ -79,7 +79,9 @@ const isAllowedOrigin = (origin) => {
   if (allowedOriginSet.has(normalized)) return true;
 
   // Allow Vercel preview deployments.
-  return normalized.startsWith("https://") && normalized.endsWith(".vercel.app");
+  return (
+    normalized.startsWith("https://") && normalized.endsWith(".vercel.app")
+  );
 };
 
 const buildCorsHeaders = (origin) => ({

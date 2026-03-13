@@ -38,7 +38,10 @@ const DEFAULT_ALLOWED_ORIGINS = [
 ];
 
 const allowedOriginSet = new Set(
-  [...DEFAULT_ALLOWED_ORIGINS, ...parseOriginList(process.env.CORS_ALLOWED_ORIGINS)]
+  [
+    ...DEFAULT_ALLOWED_ORIGINS,
+    ...parseOriginList(process.env.CORS_ALLOWED_ORIGINS),
+  ]
     .map(normalizeOrigin)
     .filter(Boolean),
 );
@@ -49,7 +52,9 @@ const isAllowedOrigin = (origin) => {
   if (allowedOriginSet.has(normalized)) return true;
 
   // Allow Vercel preview deployments.
-  return normalized.startsWith("https://") && normalized.endsWith(".vercel.app");
+  return (
+    normalized.startsWith("https://") && normalized.endsWith(".vercel.app")
+  );
 };
 
 const ROOM_PREFIX = "banpick:round:";
@@ -153,8 +158,6 @@ const emitSessionState = ({ io, roundSlug, session, user, socket }) => {
 };
 
 export const registerBanPickSocket = async (httpServer) => {
-  await ensureBanPickTables();
-
   const io = new Server(httpServer, {
     path: "/socket.io",
     transports: ["websocket", "polling"],
@@ -171,6 +174,16 @@ export const registerBanPickSocket = async (httpServer) => {
       credentials: true,
     },
   });
+
+  try {
+    await ensureBanPickTables();
+  } catch (err) {
+    logger.error("[socket.io] ensureBanPickTables failed", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    // Keep Socket.IO online even if schema bootstrap fails,
+    // so clients don't receive 404 unknown endpoint.
+  }
 
   io.on("connection", async (socket) => {
     const token = readTokenFromSocket(socket);
