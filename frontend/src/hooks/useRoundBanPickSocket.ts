@@ -58,7 +58,9 @@ export const useRoundBanPickSocket = ({
         if (cancelled) return;
 
         const message =
-          err instanceof Error ? err.message : "Không tải được dữ liệu ban/pick";
+          err instanceof Error
+            ? err.message
+            : "Không tải được dữ liệu ban/pick";
 
         setError(message);
       } finally {

@@ -17,7 +17,9 @@ export default function BanPickPage() {
   const [searchParams] = useSearchParams();
   const { token } = useAuth();
 
-  const roundSlug = String(slug ?? "").trim().toLowerCase();
+  const roundSlug = String(slug ?? "")
+    .trim()
+    .toLowerCase();
   const matchId = toNumber(searchParams.get("matchId"));
 
   const {
@@ -38,7 +40,10 @@ export default function BanPickPage() {
   });
 
   const mapByCode = useMemo(() => {
-    const entries = (session?.map_pool ?? []).map((item) => [item.map_code, item]);
+    const entries = (session?.map_pool ?? []).map((item) => [
+      item.map_code,
+      item,
+    ]);
     return Object.fromEntries(entries);
   }, [session?.map_pool]);
 
@@ -58,7 +63,8 @@ export default function BanPickPage() {
 
   const isMyTurn =
     Boolean(viewerTeamSlot) &&
-    ((banPick?.phase === "ban_pick" && currentAction?.team === viewerTeamSlot) ||
+    ((banPick?.phase === "ban_pick" &&
+      currentAction?.team === viewerTeamSlot) ||
       (banPick?.phase === "side_select" &&
         banPick?.sideSelectTeam === viewerTeamSlot));
 
@@ -80,7 +86,9 @@ export default function BanPickPage() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-xl border border-border rounded-lg p-6 space-y-4 bg-card">
-          <h1 className="font-display text-2xl text-foreground">Thiếu round slug</h1>
+          <h1 className="font-display text-2xl text-foreground">
+            Thiếu round slug
+          </h1>
           <p className="text-sm text-muted-foreground">
             Link hợp lệ cần theo dạng /round/slug?matchId=123
           </p>
@@ -96,7 +104,9 @@ export default function BanPickPage() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="text-center space-y-3">
-          <h1 className="font-display text-3xl text-foreground">Đang tải ban/pick</h1>
+          <h1 className="font-display text-3xl text-foreground">
+            Đang tải ban/pick
+          </h1>
           <p className="text-muted-foreground text-sm">Round: {roundSlug}</p>
         </div>
       </div>
@@ -107,9 +117,12 @@ export default function BanPickPage() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-xl border border-border rounded-lg p-6 space-y-4 bg-card">
-          <h1 className="font-display text-2xl text-foreground">Không tìm thấy phiên ban/pick</h1>
+          <h1 className="font-display text-2xl text-foreground">
+            Không tìm thấy phiên ban/pick
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Hãy mở link có thêm matchId để backend tự khởi tạo ban/pick cho trận.
+            Hãy mở link có thêm matchId để backend tự khởi tạo ban/pick cho
+            trận.
           </p>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
@@ -151,7 +164,8 @@ export default function BanPickPage() {
 
       {!canAct && (
         <div className="border-b border-border px-4 py-2 text-center text-xs text-muted-foreground">
-          Bạn đang ở chế độ xem. Chỉ thành viên của 2 team trong trận mới có thể thao tác ban/pick.
+          Bạn đang ở chế độ xem. Chỉ thành viên của 2 team trong trận mới có thể
+          thao tác ban/pick.
         </div>
       )}
 

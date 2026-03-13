@@ -164,7 +164,9 @@ const createInitialState = ({ mapPool, format, teamNames }) => ({
 
 const findCurrentAction = (state) => {
   const sequence = getSequence(state.format);
-  return state.currentStep < sequence.length ? sequence[state.currentStep] : null;
+  return state.currentStep < sequence.length
+    ? sequence[state.currentStep]
+    : null;
 };
 
 const handleSequenceComplete = ({ state, maps, step, log }) => {
@@ -370,7 +372,7 @@ export const ensureBanPickTables = async () => {
 
   ensureBanPickTablesPromise = (async () => {
     await pool.query(
-    `
+      `
     CREATE TABLE IF NOT EXISTS map_pool (
       id BIGSERIAL PRIMARY KEY,
       game_key TEXT NOT NULL,
@@ -387,7 +389,7 @@ export const ensureBanPickTables = async () => {
     );
 
     await pool.query(
-    `
+      `
     CREATE TABLE IF NOT EXISTS ban_picks (
       id BIGSERIAL PRIMARY KEY,
       round_slug TEXT NOT NULL UNIQUE,
@@ -410,7 +412,7 @@ export const ensureBanPickTables = async () => {
     );
 
     await pool.query(
-    `
+      `
     CREATE TABLE IF NOT EXISTS ban_pick_actions (
       id BIGSERIAL PRIMARY KEY,
       ban_pick_id BIGINT NOT NULL REFERENCES ban_picks(id) ON DELETE CASCADE,
@@ -426,26 +428,26 @@ export const ensureBanPickTables = async () => {
     );
 
     await pool.query(
-    `
+      `
     ALTER TABLE matches
     ADD COLUMN IF NOT EXISTS ban_pick_id BIGINT NULL
     `,
     );
 
     await pool.query(
-    `
+      `
     CREATE INDEX IF NOT EXISTS idx_ban_picks_match_id ON ban_picks(match_id)
     `,
     );
 
     await pool.query(
-    `
+      `
     CREATE INDEX IF NOT EXISTS idx_ban_pick_actions_ban_pick_id ON ban_pick_actions(ban_pick_id)
     `,
     );
 
     await pool.query(
-    `
+      `
     DO $$
     BEGIN
       ALTER TABLE ban_picks
@@ -458,7 +460,7 @@ export const ensureBanPickTables = async () => {
     );
 
     await pool.query(
-    `
+      `
     DO $$
     BEGIN
       ALTER TABLE matches
@@ -472,7 +474,7 @@ export const ensureBanPickTables = async () => {
 
     for (const map of DEFAULT_VALORANT_MAP_POOL) {
       await pool.query(
-      `
+        `
       INSERT INTO map_pool (game_key, map_code, map_name, image_url, display_order)
       VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT (game_key, map_code)
@@ -482,7 +484,13 @@ export const ensureBanPickTables = async () => {
         display_order = EXCLUDED.display_order,
         updated_at = NOW()
       `,
-      ["valorant", map.map_code, map.map_name, map.image_url, map.display_order],
+        [
+          "valorant",
+          map.map_code,
+          map.map_name,
+          map.image_url,
+          map.display_order,
+        ],
       );
     }
   })().catch((error) => {
@@ -610,7 +618,9 @@ export const createBanPickSession = async ({ matchId, roundSlug, format }) => {
       );
     }
 
-    return getBanPickSessionByRoundSlug(roundSlug ?? existingByMatch.round_slug);
+    return getBanPickSessionByRoundSlug(
+      roundSlug ?? existingByMatch.round_slug,
+    );
   }
 
   const normalizedFormat = normalizeFormat(format ?? match.best_of ?? 3, "BO3");
@@ -715,7 +725,9 @@ export const resolveUserTeamSlot = (user, session) => {
 
 export const getCurrentAction = (state) => {
   const sequence = getSequence(state.format);
-  return state.currentStep < sequence.length ? sequence[state.currentStep] : null;
+  return state.currentStep < sequence.length
+    ? sequence[state.currentStep]
+    : null;
 };
 
 export const toBanPickPayload = (session, userTeamSlot = null) => {
@@ -835,7 +847,11 @@ export const mutateBanPickSession = async ({
   if (command === "select_map") {
     const currentAction = getCurrentAction(nextState);
     if (nextState.phase !== "ban_pick" || !currentAction) {
-      return { ok: false, status: 400, error: "Không thể chọn map ở phase hiện tại" };
+      return {
+        ok: false,
+        status: 400,
+        error: "Không thể chọn map ở phase hiện tại",
+      };
     }
 
     if (currentAction.team !== actorTeamSlot) {
@@ -845,7 +861,11 @@ export const mutateBanPickSession = async ({
     nextState = applySelectMap(nextState, String(mapId ?? ""));
 
     if (nextState === session.state) {
-      return { ok: false, status: 400, error: "Map không hợp lệ hoặc đã được chọn" };
+      return {
+        ok: false,
+        status: 400,
+        error: "Map không hợp lệ hoặc đã được chọn",
+      };
     }
 
     await persistSessionState({
@@ -894,7 +914,11 @@ export const mutateBanPickSession = async ({
 
   if (command === "select_side") {
     if (nextState.phase !== "side_select" || !nextState.sideSelectTeam) {
-      return { ok: false, status: 400, error: "Không thể chọn side ở phase hiện tại" };
+      return {
+        ok: false,
+        status: 400,
+        error: "Không thể chọn side ở phase hiện tại",
+      };
     }
 
     if (nextState.sideSelectTeam !== actorTeamSlot) {

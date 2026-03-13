@@ -14,12 +14,16 @@ import { registerBanPickSocket } from "./realtime/banPickSocket.js";
         if (server) {
           await registerBanPickSocket(server);
         } else {
-          logger.error("[socket.io] Unable to initialize because app.server is empty");
+          logger.error(
+            "[socket.io] Unable to initialize because app.server is empty",
+          );
         }
       } catch (socketError) {
         logger.error(
           "[socket.io] Initialization failed:",
-          socketError instanceof Error ? socketError.message : String(socketError),
+          socketError instanceof Error
+            ? socketError.message
+            : String(socketError),
         );
       }
 
