@@ -4,6 +4,13 @@ import middleware from "../../utils/middleware.js";
 const playerTourRoute = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Tournament Team Players";
 
+const getPlayerLimits = (basePlayerCount) => {
+  const minPlayers = Math.max(1, Number(basePlayerCount) || 1);
+  const maxPlayers = minPlayers + 2;
+
+  return { minPlayers, maxPlayers };
+};
+
 playerTourRoute.get(
   "/:tournament_team_id",
   async ({ params, set }) => {
@@ -82,6 +89,7 @@ playerTourRoute.post(
       `
       SELECT tt.team_id, tt.tournament_id,
              t.created_by AS tournament_owner,
+              t.max_player_per_team,
              tm.created_by AS team_owner
       FROM tournament_teams tt
       JOIN tournaments t ON t.id = tt.tournament_id
@@ -109,9 +117,15 @@ playerTourRoute.post(
       return { error: "Bạn không có quyền gán thành viên cho đội này" };
     }
 
+    const { minPlayers, maxPlayers } = getPlayerLimits(
+      teamInfo.max_player_per_team,
+    );
+
     if (userIds.length === 0) {
       set.status = 400;
-      return { error: "POST chỉ dùng để thêm, user_ids không được rỗng" };
+      return {
+        error: `Giải đấu yêu cầu từ ${minPlayers} đến ${maxPlayers} người đăng ký`,
+      };
     }
 
     const userIdPlaceholders = userIds
@@ -125,6 +139,20 @@ playerTourRoute.post(
     if (validUsers.length !== userIds.length) {
       set.status = 400;
       return { error: "Một số user không thuộc team này" };
+    }
+
+    if (userIds.length > maxPlayers) {
+      set.status = 400;
+      return {
+        error: `Giải đấu chỉ cho phép tối đa ${maxPlayers} người đăng ký`,
+      };
+    }
+
+    if (userIds.length < minPlayers) {
+      set.status = 400;
+      return {
+        error: `Giải đấu yêu cầu tối thiểu ${minPlayers} người đăng ký`,
+      };
     }
 
     const userPlaceholders = userIds
@@ -220,6 +248,7 @@ playerTourRoute.patch(
       `
       SELECT tt.team_id, tt.tournament_id,
              t.created_by AS tournament_owner,
+              t.max_player_per_team,
              tm.created_by AS team_owner
       FROM tournament_teams tt
       JOIN tournaments t ON t.id = tt.tournament_id
@@ -247,14 +276,15 @@ playerTourRoute.patch(
       return { error: "Bạn không có quyền gán thành viên cho đội này" };
     }
 
-    if (userIds.length === 0) {
-      await pool.query(
-        "DELETE FROM tournament_team_players WHERE tournament_team_id = $1",
-        [tournamentTeamId],
-      );
+    const { minPlayers, maxPlayers } = getPlayerLimits(
+      teamInfo.max_player_per_team,
+    );
 
-      set.status = 200;
-      return { message: "Cập nhật thành công: đã xóa toàn bộ người chơi" };
+    if (userIds.length === 0) {
+      set.status = 400;
+      return {
+        error: `Giải đấu yêu cầu từ ${minPlayers} đến ${maxPlayers} người đăng ký`,
+      };
     }
 
     const userIdPlaceholders = userIds
@@ -268,6 +298,20 @@ playerTourRoute.patch(
     if (validUsers.length !== userIds.length) {
       set.status = 400;
       return { error: "Một số user không thuộc team này" };
+    }
+
+    if (userIds.length > maxPlayers) {
+      set.status = 400;
+      return {
+        error: `Giải đấu chỉ cho phép tối đa ${maxPlayers} người đăng ký`,
+      };
+    }
+
+    if (userIds.length < minPlayers) {
+      set.status = 400;
+      return {
+        error: `Giải đấu yêu cầu tối thiểu ${minPlayers} người đăng ký`,
+      };
     }
 
     await pool.query(
