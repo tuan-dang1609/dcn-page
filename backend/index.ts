@@ -3,25 +3,64 @@ import app from "./app.js";
 import config from "./utils/config.js";
 import { registerBanPickSocket } from "./realtime/banPickSocket.js";
 
-const resolveHttpServer = (listenResult: any) => {
+const resolveHttpServerCandidates = (listenResult: any) => {
   const appAny = app as any;
-  const candidates = [
+  const rawCandidates = [
+    appAny?.server?.server,
+    appAny?.server,
     listenResult?.server,
     listenResult,
-    appAny?.server,
   ];
 
-  for (const candidate of candidates) {
-    if (
-      candidate &&
-      typeof candidate.on === "function" &&
-      typeof candidate.emit === "function"
-    ) {
-      return candidate;
+  const candidates: any[] = [];
+  for (const candidate of rawCandidates) {
+    if (!candidate) continue;
+    if (!candidates.includes(candidate)) {
+      candidates.push(candidate);
     }
   }
 
-  return null;
+  return candidates;
+};
+
+const describeCandidate = (candidate: any) => {
+  if (!candidate) return "unknown";
+  const ctor = candidate?.constructor?.name;
+  return ctor ? String(ctor) : typeof candidate;
+};
+
+const tryRegisterBanPickSocket = async (listenResult: any) => {
+  const candidates = resolveHttpServerCandidates(listenResult);
+  if (candidates.length === 0) {
+    logger.error(
+      "[socket.io] Unable to initialize because no server candidate was found",
+    );
+    return false;
+  }
+
+  let lastError: unknown = null;
+
+  for (const candidate of candidates) {
+    try {
+      await registerBanPickSocket(candidate);
+      logger.info(
+        `[socket.io] attached using server candidate: ${describeCandidate(candidate)}`,
+      );
+      return true;
+    } catch (err) {
+      lastError = err;
+      logger.error(
+        `[socket.io] candidate ${describeCandidate(candidate)} failed:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return false;
 };
 
 (async () => {
@@ -31,13 +70,11 @@ const resolveHttpServer = (listenResult: any) => {
     logger.info(`Server running on port ${port}`);
 
     try {
-      const httpServer = resolveHttpServer(listenResult);
-      if (!httpServer) {
+      const attached = await tryRegisterBanPickSocket(listenResult);
+      if (!attached) {
         logger.error(
-          "[socket.io] Unable to initialize because no compatible HTTP server was found",
+          "[socket.io] Unable to initialize after trying all server candidates",
         );
-      } else {
-        await registerBanPickSocket(httpServer);
       }
     } catch (socketError) {
       logger.error(
