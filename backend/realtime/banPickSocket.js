@@ -11,7 +11,19 @@ import {
   toBanPickPayload,
 } from "../utils/banPick.js";
 
-const ALLOWED_ORIGINS = [
+const normalizeOrigin = (value) =>
+  String(value ?? "")
+    .trim()
+    .replace(/\/+$/, "")
+    .toLowerCase();
+
+const parseOriginList = (value) =>
+  String(value ?? "")
+    .split(",")
+    .map((item) => normalizeOrigin(item))
+    .filter(Boolean);
+
+const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:8080",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -19,7 +31,26 @@ const ALLOWED_ORIGINS = [
   "http://localhost:3001",
   "http://127.0.0.1:3001",
   "https://dcnpagetest.vercel.app",
+  "https://dcn-page.vercel.app",
+  "https://dcn-page.onrender.com",
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_ORIGIN,
 ];
+
+const allowedOriginSet = new Set(
+  [...DEFAULT_ALLOWED_ORIGINS, ...parseOriginList(process.env.CORS_ALLOWED_ORIGINS)]
+    .map(normalizeOrigin)
+    .filter(Boolean),
+);
+
+const isAllowedOrigin = (origin) => {
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  if (allowedOriginSet.has(normalized)) return true;
+
+  // Allow Vercel preview deployments.
+  return normalized.startsWith("https://") && normalized.endsWith(".vercel.app");
+};
 
 const ROOM_PREFIX = "banpick:round:";
 
@@ -129,11 +160,12 @@ export const registerBanPickSocket = async (httpServer) => {
     transports: ["websocket", "polling"],
     cors: {
       origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        if (!origin || isAllowedOrigin(origin)) {
           callback(null, true);
           return;
         }
 
+        logger.error("[socket.io] CORS blocked", { origin });
         callback(new Error("CORS blocked"));
       },
       credentials: true,
