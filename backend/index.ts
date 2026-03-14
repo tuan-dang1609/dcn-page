@@ -3,12 +3,27 @@ import app from "./app.js";
 import config from "./utils/config.js";
 import { registerBanPickSocket } from "./realtime/banPickSocket.js";
 
+const isPromiseLike = (value: unknown): value is Promise<unknown> =>
+  Boolean(value && typeof (value as { then?: unknown }).then === "function");
+
+const resolveListenResult = async (listenResult: unknown) => {
+  if (isPromiseLike(listenResult)) {
+    return await listenResult;
+  }
+
+  return listenResult;
+};
+
 const resolveHttpServerCandidates = (listenResult: any) => {
   const appAny = app as any;
   const rawCandidates = [
     appAny?.server?.server,
+    appAny?.server?.raw,
     appAny?.server,
+    listenResult?.server?.server,
+    listenResult?.server?.raw,
     listenResult?.server,
+    listenResult?.raw,
     listenResult,
   ];
 
@@ -66,7 +81,7 @@ const tryRegisterBanPickSocket = async (listenResult: any) => {
 (async () => {
   try {
     const port = process.env.PORT ?? config.PORT ?? 3000;
-    const listenResult = app.listen(port);
+    const listenResult = await resolveListenResult(app.listen(port));
     logger.info(`Server running on port ${port}`);
 
     try {

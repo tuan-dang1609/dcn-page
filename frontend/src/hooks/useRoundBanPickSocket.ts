@@ -140,6 +140,10 @@ export const useRoundBanPickSocket = ({
       path: "/socket.io",
       transports: ["polling", "websocket"],
       auth: token ? { token: `Bearer ${token}` } : {},
+      reconnection: true,
+      reconnectionAttempts: 4,
+      reconnectionDelay: 1000,
+      timeout: 5000,
     });
 
     socketRef.current = socket;
@@ -174,6 +178,21 @@ export const useRoundBanPickSocket = ({
 
     socket.on("connect_error", (err) => {
       setError(err?.message || "Kết nối realtime thất bại");
+
+      const description = String(
+        (err as { description?: unknown })?.description ?? "",
+      ).toLowerCase();
+      const message = String(err?.message ?? "").toLowerCase();
+
+      // If server has no Socket.IO endpoint in this deployment, stop reconnect loop
+      // and rely on HTTP fallback for mutating actions.
+      if (
+        message.includes("xhr poll error") ||
+        message.includes("unknown endpoint") ||
+        description.includes("unknown endpoint")
+      ) {
+        socket.disconnect();
+      }
     });
 
     const onSessionPayload = (payload: RoundBanPickPayload) => {

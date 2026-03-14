@@ -16,6 +16,10 @@ declare module "socket.io-client" {
       path?: string;
       transports?: string[];
       auth?: Record<string, unknown>;
+      reconnection?: boolean;
+      reconnectionAttempts?: number;
+      reconnectionDelay?: number;
+      timeout?: number;
     },
   ): Socket;
 }
