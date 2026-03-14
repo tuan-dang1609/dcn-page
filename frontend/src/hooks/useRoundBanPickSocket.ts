@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { API_BASE } from "@/lib/apiBase";
-import { getRoundBanPick, type RoundBanPickPayload } from "@/api/banpick";
+import {
+  getRoundBanPick,
+  mutateRoundBanPick,
+  type RoundBanPickActionInput,
+  type RoundBanPickPayload,
+} from "@/api/banpick";
 
 interface UseRoundBanPickSocketParams {
   roundSlug?: string;
@@ -15,6 +20,27 @@ interface AckResponse {
   error?: string;
   data?: RoundBanPickPayload;
 }
+
+const resolveErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error) return error.message;
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "response" in error &&
+    error.response &&
+    typeof error.response === "object" &&
+    "data" in error.response &&
+    error.response.data &&
+    typeof error.response.data === "object" &&
+    "error" in error.response.data
+  ) {
+    const serverError = String(error.response.data.error ?? "").trim();
+    if (serverError) return serverError;
+  }
+
+  return fallback;
+};
 
 export const useRoundBanPickSocket = ({
   roundSlug,
@@ -75,6 +101,38 @@ export const useRoundBanPickSocket = ({
     };
   }, [roundSlug, matchId, format]);
 
+  const runHttpFallback = useCallback(
+    async (action: RoundBanPickActionInput): Promise<AckResponse> => {
+      if (!roundSlug) {
+        return { ok: false, error: "Thiếu round slug" };
+      }
+
+      if (!token) {
+        const message = "Bạn cần đăng nhập để thao tác ban/pick";
+        setError(message);
+        return { ok: false, error: message };
+      }
+
+      try {
+        const response = await mutateRoundBanPick(roundSlug, action, token);
+        const payload = response.data?.data;
+
+        if (payload) {
+          setSession(payload);
+          setError(null);
+          return { ok: true, data: payload };
+        }
+
+        return { ok: true };
+      } catch (err) {
+        const message = resolveErrorMessage(err, "Thao tác ban/pick thất bại");
+        setError(message);
+        return { ok: false, error: message };
+      }
+    },
+    [roundSlug, token],
+  );
+
   useEffect(() => {
     if (!roundSlug) return;
 
@@ -100,6 +158,7 @@ export const useRoundBanPickSocket = ({
         (ack: AckResponse) => {
           if (ack?.ok && ack.data) {
             setSession(ack.data);
+            setError(null);
           }
 
           if (ack?.ok === false && ack?.error) {
@@ -117,9 +176,13 @@ export const useRoundBanPickSocket = ({
       setError(err?.message || "Kết nối realtime thất bại");
     });
 
-    socket.on("banpick:state", (payload: RoundBanPickPayload) => {
+    const onSessionPayload = (payload: RoundBanPickPayload) => {
       setSession(payload);
-    });
+      setError(null);
+    };
+
+    socket.on("banpick:state", onSessionPayload);
+    socket.on("banpick:update", onSessionPayload);
 
     socket.on("banpick:self", (payload) => {
       setViewerTeamSlot(payload?.viewer_team_slot ?? null);
@@ -138,28 +201,41 @@ export const useRoundBanPickSocket = ({
   }, [roundSlug, matchId, format, token]);
 
   const emitWithAck = useCallback(
-    (eventName: string, payload: Record<string, unknown>) => {
-      return new Promise<AckResponse>((resolve) => {
-        const socket = socketRef.current;
-        if (!socket) {
-          resolve({ ok: false, error: "Socket chưa kết nối" });
-          return;
+    async (
+      eventName: string,
+      payload: Record<string, unknown>,
+      fallbackAction?: RoundBanPickActionInput,
+    ) => {
+      const socket = socketRef.current;
+
+      if (!socket || !socket.connected) {
+        if (fallbackAction) {
+          return runHttpFallback(fallbackAction);
         }
 
-        socket.emit(eventName, payload, (ack: AckResponse) => {
-          if (ack?.ok && ack.data) {
-            setSession(ack.data);
-          }
+        const message = "Socket chưa kết nối";
+        setError(message);
+        return { ok: false, error: message };
+      }
 
-          if (ack?.ok === false && ack?.error) {
-            setError(ack.error);
-          }
-
-          resolve(ack ?? { ok: true });
+      const ack = await new Promise<AckResponse>((resolve) => {
+        socket.emit(eventName, payload, (socketAck: AckResponse) => {
+          resolve(socketAck ?? { ok: true });
         });
       });
+
+      if (ack?.ok && ack.data) {
+        setSession(ack.data);
+        setError(null);
+      }
+
+      if (ack?.ok === false && ack?.error) {
+        setError(ack.error);
+      }
+
+      return ack;
     },
-    [],
+    [runHttpFallback],
   );
 
   const selectMap = useCallback(
@@ -167,6 +243,9 @@ export const useRoundBanPickSocket = ({
       if (!roundSlug) return;
       await emitWithAck("banpick:select_map", {
         round_slug: roundSlug,
+        map_id: mapId,
+      }, {
+        command: "select_map",
         map_id: mapId,
       });
     },
@@ -177,6 +256,8 @@ export const useRoundBanPickSocket = ({
     if (!roundSlug) return;
     await emitWithAck("banpick:confirm_action", {
       round_slug: roundSlug,
+    }, {
+      command: "confirm_action",
     });
   }, [emitWithAck, roundSlug]);
 
@@ -185,6 +266,9 @@ export const useRoundBanPickSocket = ({
       if (!roundSlug) return;
       await emitWithAck("banpick:select_side", {
         round_slug: roundSlug,
+        side,
+      }, {
+        command: "select_side",
         side,
       });
     },
@@ -195,6 +279,8 @@ export const useRoundBanPickSocket = ({
     if (!roundSlug) return;
     await emitWithAck("banpick:reset", {
       round_slug: roundSlug,
+    }, {
+      command: "reset",
     });
   }, [emitWithAck, roundSlug]);
 

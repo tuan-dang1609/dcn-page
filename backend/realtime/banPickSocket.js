@@ -4,12 +4,19 @@ import logger from "../utils/logger.js";
 import { pool } from "../utils/db.js";
 import {
   ensureBanPickTables,
+  getCurrentAction,
   ensureSessionByRoundSlug,
   getBanPickSessionByRoundSlug,
   mutateBanPickSession,
   resolveUserTeamSlot,
   toBanPickPayload,
 } from "../utils/banPick.js";
+import {
+  emitBanPickRoomState,
+  emitBanPickViewerContext,
+  getBanPickRoomName,
+  setBanPickSocketServer,
+} from "./banPickHub.js";
 
 const normalizeOrigin = (value) =>
   String(value ?? "")
@@ -57,15 +64,19 @@ const isAllowedOrigin = (origin) => {
   );
 };
 
-const ROOM_PREFIX = "banpick:round:";
-
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const getRoomName = (roundSlug) => `${ROOM_PREFIX}${roundSlug}`;
+const normalizeRoundSlug = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+const resolveRoundSlug = (payload, socket) =>
+  normalizeRoundSlug(payload?.round_slug ?? socket.data.roundSlug ?? "");
 
 const normalizeToken = (rawToken) => {
   if (!rawToken) return null;
@@ -112,10 +123,25 @@ const findUserByToken = async (token) => {
   return rows[0] ?? null;
 };
 
+const ackError = (ack, error) => {
+  if (typeof ack === "function") {
+    ack({ ok: false, error });
+  }
+};
+
+const ackSuccess = (ack, data) => {
+  if (typeof ack === "function") {
+    ack({ ok: true, data });
+  }
+};
+
+const emitActionError = ({ socket, ack, error }) => {
+  ackError(ack, error);
+  socket.emit("banpick:error", { message: error });
+};
+
 const ensureSessionFromJoinPayload = async (payload) => {
-  const roundSlug = String(payload?.round_slug ?? "")
-    .trim()
-    .toLowerCase();
+  const roundSlug = normalizeRoundSlug(payload?.round_slug);
 
   if (!roundSlug) {
     return { ok: false, error: "Thiếu round_slug" };
@@ -142,19 +168,167 @@ const ensureSessionFromJoinPayload = async (payload) => {
   };
 };
 
-const emitSessionState = ({ io, roundSlug, session, user, socket }) => {
+const emitSessionState = ({ roundSlug, session, user, socket }) => {
   const viewerTeamSlot = resolveUserTeamSlot(user, session);
-  const payload = toBanPickPayload(session, viewerTeamSlot);
-
-  io.to(getRoomName(roundSlug)).emit("banpick:state", payload);
+  emitBanPickRoomState({ roundSlug, session });
 
   if (socket) {
-    socket.emit("banpick:self", {
-      viewer_team_slot: viewerTeamSlot,
-      can_act: Boolean(viewerTeamSlot),
-      user_id: toNumber(user?.id),
+    socket.emit("banpick:state", toBanPickPayload(session, viewerTeamSlot));
+    emitBanPickViewerContext({
+      socket,
+      viewerTeamSlot,
+      userId: user?.id,
     });
   }
+};
+
+const mutateAndEmit = async ({
+  roundSlug,
+  user,
+  command,
+  mapId,
+  side,
+  socket,
+  ack,
+}) => {
+  const result = await mutateBanPickSession({
+    roundSlug,
+    user,
+    command,
+    mapId,
+    side,
+  });
+
+  if (!result.ok) {
+    emitActionError({ socket, ack, error: result.error });
+    return result;
+  }
+
+  emitSessionState({ roundSlug, session: result.session, user });
+  ackSuccess(ack, toBanPickPayload(result.session, resolveUserTeamSlot(user, result.session)));
+
+  return result;
+};
+
+const normalizeLegacySide = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toUpperCase();
+
+  if (normalized === "ATTACK" || normalized === "ATTACKER") return "ATK";
+  if (normalized === "DEFENSE" || normalized === "DEFENDER") return "DEF";
+
+  return normalized;
+};
+
+const handleLegacyAction = async ({ roundSlug, payload, user, socket, ack }) => {
+  const action = String(payload?.action ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (!action) {
+    emitActionError({ socket, ack, error: "Thiếu action" });
+    return;
+  }
+
+  if (action === "reset") {
+    await mutateAndEmit({
+      roundSlug,
+      user,
+      command: "reset",
+      socket,
+      ack,
+    });
+    return;
+  }
+
+  if (action === "side" || action === "select_side") {
+    await mutateAndEmit({
+      roundSlug,
+      user,
+      command: "select_side",
+      side: normalizeLegacySide(payload?.side),
+      socket,
+      ack,
+    });
+    return;
+  }
+
+  if (action === "confirm" || action === "confirm_action") {
+    await mutateAndEmit({
+      roundSlug,
+      user,
+      command: "confirm_action",
+      socket,
+      ack,
+    });
+    return;
+  }
+
+  if (action === "select_map") {
+    await mutateAndEmit({
+      roundSlug,
+      user,
+      command: "select_map",
+      mapId: payload?.map_id ?? payload?.map,
+      socket,
+      ack,
+    });
+    return;
+  }
+
+  if (action === "ban" || action === "pick") {
+    const session = await getBanPickSessionByRoundSlug(roundSlug);
+    if (!session) {
+      emitActionError({ socket, ack, error: "Không tìm thấy phiên ban/pick" });
+      return;
+    }
+
+    const expectedAction = getCurrentAction(session.state)?.type;
+    if ((action === "ban" || action === "pick") && expectedAction && expectedAction !== action) {
+      emitActionError({
+        socket,
+        ack,
+        error: `Action không hợp lệ ở lượt hiện tại. Đang chờ ${expectedAction.toUpperCase()}`,
+      });
+      return;
+    }
+
+    const selectedResult = await mutateBanPickSession({
+      roundSlug,
+      user,
+      command: "select_map",
+      mapId: payload?.map_id ?? payload?.map,
+    });
+
+    if (!selectedResult.ok) {
+      emitActionError({ socket, ack, error: selectedResult.error });
+      return;
+    }
+
+    const confirmedResult = await mutateBanPickSession({
+      roundSlug,
+      user,
+      command: "confirm_action",
+    });
+
+    if (!confirmedResult.ok) {
+      emitActionError({ socket, ack, error: confirmedResult.error });
+      return;
+    }
+
+    emitSessionState({ roundSlug, session: confirmedResult.session, user });
+    ackSuccess(
+      ack,
+      toBanPickPayload(
+        confirmedResult.session,
+        resolveUserTeamSlot(user, confirmedResult.session),
+      ),
+    );
+    return;
+  }
+
+  emitActionError({ socket, ack, error: "Action không hợp lệ" });
 };
 
 export const registerBanPickSocket = async (httpServer) => {
@@ -174,6 +348,7 @@ export const registerBanPickSocket = async (httpServer) => {
       credentials: true,
     },
   });
+  setBanPickSocketServer(io);
 
   try {
     await ensureBanPickTables();
@@ -187,182 +362,110 @@ export const registerBanPickSocket = async (httpServer) => {
 
   io.on("connection", async (socket) => {
     const token = readTokenFromSocket(socket);
-    const user = await findUserByToken(token);
+    let user = null;
+
+    try {
+      user = await findUserByToken(token);
+    } catch (err) {
+      logger.error("[socket.io] Unable to resolve user from token", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     socket.on("banpick:join", async (payload = {}, ack) => {
       const ensured = await ensureSessionFromJoinPayload(payload);
 
       if (!ensured.ok) {
-        if (typeof ack === "function") {
-          ack({ ok: false, error: ensured.error });
-        }
-        socket.emit("banpick:error", { message: ensured.error });
+        emitActionError({ socket, ack, error: ensured.error });
         return;
       }
 
-      const roomName = getRoomName(ensured.roundSlug);
+      const roomName = getBanPickRoomName(ensured.roundSlug);
       socket.join(roomName);
       socket.data.roundSlug = ensured.roundSlug;
 
       emitSessionState({
-        io,
         roundSlug: ensured.roundSlug,
         session: ensured.session,
         user,
         socket,
       });
 
-      if (typeof ack === "function") {
-        ack({
-          ok: true,
-          data: toBanPickPayload(
-            ensured.session,
-            resolveUserTeamSlot(user, ensured.session),
-          ),
-        });
-      }
+      ackSuccess(
+        ack,
+        toBanPickPayload(ensured.session, resolveUserTeamSlot(user, ensured.session)),
+      );
     });
 
     socket.on("banpick:select_map", async (payload = {}, ack) => {
-      const roundSlug = String(
-        payload?.round_slug ?? socket.data.roundSlug ?? "",
-      ).trim();
-
-      const result = await mutateBanPickSession({
+      const roundSlug = resolveRoundSlug(payload, socket);
+      await mutateAndEmit({
         roundSlug,
         user,
         command: "select_map",
         mapId: payload?.map_id,
+        socket,
+        ack,
       });
-
-      if (!result.ok) {
-        if (typeof ack === "function") ack({ ok: false, error: result.error });
-        socket.emit("banpick:error", { message: result.error });
-        return;
-      }
-
-      emitSessionState({ io, roundSlug, session: result.session, user });
-      if (typeof ack === "function") {
-        ack({
-          ok: true,
-          data: toBanPickPayload(
-            result.session,
-            resolveUserTeamSlot(user, result.session),
-          ),
-        });
-      }
     });
 
     socket.on("banpick:confirm_action", async (payload = {}, ack) => {
-      const roundSlug = String(
-        payload?.round_slug ?? socket.data.roundSlug ?? "",
-      ).trim();
-
-      const result = await mutateBanPickSession({
+      const roundSlug = resolveRoundSlug(payload, socket);
+      await mutateAndEmit({
         roundSlug,
         user,
         command: "confirm_action",
+        socket,
+        ack,
       });
-
-      if (!result.ok) {
-        if (typeof ack === "function") ack({ ok: false, error: result.error });
-        socket.emit("banpick:error", { message: result.error });
-        return;
-      }
-
-      emitSessionState({ io, roundSlug, session: result.session, user });
-      if (typeof ack === "function") {
-        ack({
-          ok: true,
-          data: toBanPickPayload(
-            result.session,
-            resolveUserTeamSlot(user, result.session),
-          ),
-        });
-      }
     });
 
     socket.on("banpick:select_side", async (payload = {}, ack) => {
-      const roundSlug = String(
-        payload?.round_slug ?? socket.data.roundSlug ?? "",
-      ).trim();
-
-      const result = await mutateBanPickSession({
+      const roundSlug = resolveRoundSlug(payload, socket);
+      await mutateAndEmit({
         roundSlug,
         user,
         command: "select_side",
         side: payload?.side,
+        socket,
+        ack,
       });
-
-      if (!result.ok) {
-        if (typeof ack === "function") ack({ ok: false, error: result.error });
-        socket.emit("banpick:error", { message: result.error });
-        return;
-      }
-
-      emitSessionState({ io, roundSlug, session: result.session, user });
-      if (typeof ack === "function") {
-        ack({
-          ok: true,
-          data: toBanPickPayload(
-            result.session,
-            resolveUserTeamSlot(user, result.session),
-          ),
-        });
-      }
     });
 
     socket.on("banpick:reset", async (payload = {}, ack) => {
-      const roundSlug = String(
-        payload?.round_slug ?? socket.data.roundSlug ?? "",
-      ).trim();
-
-      const result = await mutateBanPickSession({
+      const roundSlug = resolveRoundSlug(payload, socket);
+      await mutateAndEmit({
         roundSlug,
         user,
         command: "reset",
+        socket,
+        ack,
       });
+    });
 
-      if (!result.ok) {
-        if (typeof ack === "function") ack({ ok: false, error: result.error });
-        socket.emit("banpick:error", { message: result.error });
-        return;
-      }
-
-      emitSessionState({ io, roundSlug, session: result.session, user });
-      if (typeof ack === "function") {
-        ack({
-          ok: true,
-          data: toBanPickPayload(
-            result.session,
-            resolveUserTeamSlot(user, result.session),
-          ),
-        });
-      }
+    socket.on("banpick:action", async (payload = {}, ack) => {
+      const roundSlug = resolveRoundSlug(payload, socket);
+      await handleLegacyAction({ roundSlug, payload, user, socket, ack });
     });
 
     socket.on("banpick:sync", async (payload = {}, ack) => {
-      const roundSlug = String(
-        payload?.round_slug ?? socket.data.roundSlug ?? "",
-      ).trim();
+      const roundSlug = resolveRoundSlug(payload, socket);
       const session = await getBanPickSessionByRoundSlug(roundSlug);
 
       if (!session) {
-        if (typeof ack === "function") {
-          ack({ ok: false, error: "Không tìm thấy phiên ban/pick" });
-        }
+        ackError(ack, "Không tìm thấy phiên ban/pick");
         return;
       }
 
+      const viewerTeamSlot = resolveUserTeamSlot(user, session);
       const payloadData = toBanPickPayload(
         session,
-        resolveUserTeamSlot(user, session),
+        viewerTeamSlot,
       );
 
       socket.emit("banpick:state", payloadData);
-      if (typeof ack === "function") {
-        ack({ ok: true, data: payloadData });
-      }
+      emitBanPickViewerContext({ socket, viewerTeamSlot, userId: user?.id });
+      ackSuccess(ack, payloadData);
     });
   });
 

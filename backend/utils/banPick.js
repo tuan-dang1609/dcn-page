@@ -842,9 +842,23 @@ export const mutateBanPickSession = async ({
     };
   }
 
+  const normalizedCommand = String(command ?? "").trim();
+  if (
+    normalizedCommand !== "select_map" &&
+    normalizedCommand !== "confirm_action" &&
+    normalizedCommand !== "select_side" &&
+    normalizedCommand !== "reset"
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Command không hợp lệ",
+    };
+  }
+
   let nextState = session.state;
 
-  if (command === "select_map") {
+  if (normalizedCommand === "select_map") {
     const currentAction = getCurrentAction(nextState);
     if (nextState.phase !== "ban_pick" || !currentAction) {
       return {
@@ -876,7 +890,7 @@ export const mutateBanPickSession = async ({
     });
   }
 
-  if (command === "confirm_action") {
+  if (normalizedCommand === "confirm_action") {
     const currentAction = getCurrentAction(nextState);
     if (nextState.phase !== "ban_pick" || !currentAction) {
       return {
@@ -912,7 +926,7 @@ export const mutateBanPickSession = async ({
     });
   }
 
-  if (command === "select_side") {
+  if (normalizedCommand === "select_side") {
     if (nextState.phase !== "side_select" || !nextState.sideSelectTeam) {
       return {
         ok: false,
@@ -948,7 +962,7 @@ export const mutateBanPickSession = async ({
     });
   }
 
-  if (command === "reset") {
+  if (normalizedCommand === "reset") {
     const mapPool = session.map_pool;
     const resetState = createInitialState({
       mapPool,
