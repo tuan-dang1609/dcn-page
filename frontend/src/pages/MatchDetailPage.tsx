@@ -1073,6 +1073,22 @@ const MatchDetailPage = () => {
   }, [baseMatch, preferredProvider, tftApiData, valorantApiData]);
 
   if (!match) {
+    const canOpenValorantBanPick =
+      normalizedRouteGame === "val" && Boolean(slug) && Boolean(numId);
+
+    const fallbackRoundSlug = canOpenValorantBanPick
+      ? buildRoundSlug({
+          tournamentSlug: slug,
+          roundNumber: null,
+          matchNo: numId,
+          matchId: numId,
+        })
+      : "";
+
+    const fallbackBanPickLink = canOpenValorantBanPick
+      ? `/round/${fallbackRoundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`
+      : "";
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -1082,9 +1098,21 @@ const MatchDetailPage = () => {
             </h2>
           ) : (
             <h2 className="text-2xl font-bold text-foreground">
-              Không tìm thấy trận đấu
+              {canOpenValorantBanPick
+                ? "Mở Ban/Pick trận Valorant"
+                : "Không tìm thấy trận đấu"}
             </h2>
           )}
+
+          {!isMatchListLoading && canOpenValorantBanPick && (
+            <Link
+              to={fallbackBanPickLink}
+              className="inline-flex h-9 items-center rounded-md border border-primary/60 px-4 text-xs font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 transition-colors"
+            >
+              Mở Ban/Pick
+            </Link>
+          )}
+
           <Link
             to={backTo}
             className="text-primary hover:underline text-[11px]"

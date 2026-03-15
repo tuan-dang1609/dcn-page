@@ -62,20 +62,24 @@ const normalizeScore = (value, fallback = 0) => {
 };
 
 const normalizeQuestionPayload = (item) => {
-  const questionId = toNumber(item?.id ?? item?.questionId ?? item?.question_id);
+  const questionId = toNumber(
+    item?.id ?? item?.questionId ?? item?.question_id,
+  );
 
   return {
     questionId,
     question: String(item?.question ?? "").trim(),
-    type: String(item?.type ?? "single").trim().toLowerCase() || "single",
+    type:
+      String(item?.type ?? "single")
+        .trim()
+        .toLowerCase() || "single",
     options: asJson(item?.options, []),
     score: normalizeScore(item?.score, 0),
     maxChoose: clampPositiveInt(item?.maxChoose ?? item?.max_choose, 1),
-    correctAnswer: asJson(
-      item?.correctAnswer ?? item?.correct_answer,
-      [],
-    ),
-    gameShort: item?.game_short ? String(item.game_short).trim().toLowerCase() : null,
+    correctAnswer: asJson(item?.correctAnswer ?? item?.correct_answer, []),
+    gameShort: item?.game_short
+      ? String(item.game_short).trim().toLowerCase()
+      : null,
     bracketId:
       item?.bracket_id !== undefined && item?.bracket_id !== null
         ? String(item.bracket_id)
@@ -89,7 +93,9 @@ const computeAnswerScore = ({ question, selectedOptions }) => {
   const score = normalizeScore(question?.score, 0);
   if (score <= 0) return 0;
 
-  const correct = normalizeOptions(question?.correct_answer ?? question?.correctAnswer);
+  const correct = normalizeOptions(
+    question?.correct_answer ?? question?.correctAnswer,
+  );
   if (correct.length === 0) return 0;
 
   const selected = normalizeOptions(selectedOptions);
@@ -357,7 +363,10 @@ export const upsertPickemResponse = async ({
     const questionId = toNumber(answer?.questionId ?? answer?.question_id);
     if (!questionId) continue;
 
-    const selectedOptions = asJson(answer?.selectedOptions ?? answer?.selected_options, []);
+    const selectedOptions = asJson(
+      answer?.selectedOptions ?? answer?.selected_options,
+      [],
+    );
     const openTime = toIsoOrNull(answer?.openTime ?? answer?.open_time);
     const closeTime = toIsoOrNull(answer?.closeTime ?? answer?.close_time);
 
@@ -379,7 +388,13 @@ export const upsertPickemResponse = async ({
         close_time = EXCLUDED.close_time,
         updated_at = NOW()
       `,
-      [responseId, questionId, JSON.stringify(selectedOptions), openTime, closeTime],
+      [
+        responseId,
+        questionId,
+        JSON.stringify(selectedOptions),
+        openTime,
+        closeTime,
+      ],
     );
   }
 
@@ -388,9 +403,7 @@ export const upsertPickemResponse = async ({
 
 export const gradePickemLeague = async (leagueId) => {
   const questions = await getPickemQuestionsByLeague(leagueId);
-  const questionMap = new Map(
-    questions.map((q) => [Number(q.question_id), q]),
-  );
+  const questionMap = new Map(questions.map((q) => [Number(q.question_id), q]));
 
   const { rows } = await pool.query(
     `
@@ -447,7 +460,11 @@ export const gradePickemLeague = async (leagueId) => {
           updated_at = NOW()
       WHERE id = $3
       `,
-      [totalScore, latestUpdate ? latestUpdate.toISOString() : null, responseId],
+      [
+        totalScore,
+        latestUpdate ? latestUpdate.toISOString() : null,
+        responseId,
+      ],
     );
   }
 

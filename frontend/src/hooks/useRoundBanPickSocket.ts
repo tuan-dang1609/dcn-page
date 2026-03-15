@@ -57,6 +57,30 @@ export const useRoundBanPickSocket = ({
     "team1" | "team2" | null
   >(null);
 
+  const syncSessionFromHttp = useCallback(async () => {
+    if (!roundSlug) return null;
+
+    const response = await getRoundBanPick(
+      roundSlug,
+      {
+        match_id: matchId ?? undefined,
+        format,
+        cache_bust: Date.now(),
+      },
+      token,
+    );
+
+    const payload = response.data?.data ?? null;
+    setSession(payload);
+    setViewerTeamSlot(response.data?.permissions?.viewer_team_slot ?? null);
+
+    if (payload) {
+      setError(null);
+    }
+
+    return payload;
+  }, [roundSlug, matchId, format, token]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -71,15 +95,9 @@ export const useRoundBanPickSocket = ({
       setError(null);
 
       try {
-        const response = await getRoundBanPick(roundSlug, {
-          match_id: matchId ?? undefined,
-          format,
-        });
-
         if (cancelled) return;
 
-        setSession(response.data?.data ?? null);
-        setViewerTeamSlot(response.data?.permissions?.viewer_team_slot ?? null);
+        await syncSessionFromHttp();
       } catch (err) {
         if (cancelled) return;
 
@@ -99,7 +117,7 @@ export const useRoundBanPickSocket = ({
     return () => {
       cancelled = true;
     };
-  }, [roundSlug, matchId, format]);
+  }, [roundSlug, syncSessionFromHttp]);
 
   const runHttpFallback = useCallback(
     async (action: RoundBanPickActionInput): Promise<AckResponse> => {
@@ -119,9 +137,17 @@ export const useRoundBanPickSocket = ({
 
         if (payload) {
           setSession(payload);
-          setError(null);
-          return { ok: true, data: payload };
+          setViewerTeamSlot(payload.viewer_team_slot ?? null);
         }
+
+        try {
+          await syncSessionFromHttp();
+        } catch {
+          // Keep local payload if sync fails.
+        }
+
+        setError(null);
+        if (payload) return { ok: true, data: payload };
 
         return { ok: true };
       } catch (err) {
@@ -130,7 +156,7 @@ export const useRoundBanPickSocket = ({
         return { ok: false, error: message };
       }
     },
-    [roundSlug, token],
+    [roundSlug, token, syncSessionFromHttp],
   );
 
   useEffect(() => {
@@ -138,7 +164,7 @@ export const useRoundBanPickSocket = ({
 
     const socket = io(API_BASE, {
       path: "/socket.io",
-      transports: ["polling", "websocket"],
+      transports: ["websocket"],
       auth: token ? { token: `Bearer ${token}` } : {},
       reconnection: true,
       reconnectionAttempts: 4,
@@ -201,7 +227,6 @@ export const useRoundBanPickSocket = ({
     };
 
     socket.on("banpick:state", onSessionPayload);
-    socket.on("banpick:update", onSessionPayload);
 
     socket.on("banpick:self", (payload) => {
       setViewerTeamSlot(payload?.viewer_team_slot ?? null);
@@ -238,14 +263,61 @@ export const useRoundBanPickSocket = ({
       }
 
       const ack = await new Promise<AckResponse>((resolve) => {
+        let settled = false;
+        const timeoutId = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          resolve({ ok: false, error: "Realtime timeout" });
+        }, 5000);
+
         socket.emit(eventName, payload, (socketAck: AckResponse) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeoutId);
           resolve(socketAck ?? { ok: true });
         });
       });
 
+      const isRealtimeTimeout =
+        ack?.ok === false && ack?.error === "Realtime timeout";
+
+      if (isRealtimeTimeout) {
+        try {
+          const synced = await syncSessionFromHttp();
+          if (synced) {
+            setError(null);
+            return { ok: true, data: synced };
+          }
+        } catch {
+          // If sync fails, continue to fallback mutation below.
+        }
+
+        if (fallbackAction) {
+          return runHttpFallback(fallbackAction);
+        }
+      }
+
       if (ack?.ok && ack.data) {
         setSession(ack.data);
+        setViewerTeamSlot(ack.data.viewer_team_slot ?? null);
+      }
+
+      if (ack?.ok) {
+        try {
+          const synced = await syncSessionFromHttp();
+          if (synced) {
+            setError(null);
+            return { ok: true, data: synced };
+          }
+        } catch {
+          // Keep last known state if sync fails.
+        }
+
         setError(null);
+      }
+
+      if (!ack?.ok && fallbackAction) {
+        return runHttpFallback(fallbackAction);
       }
 
       if (ack?.ok === false && ack?.error) {
@@ -254,53 +326,69 @@ export const useRoundBanPickSocket = ({
 
       return ack;
     },
-    [runHttpFallback],
+    [runHttpFallback, syncSessionFromHttp],
   );
 
   const selectMap = useCallback(
     async (mapId: string) => {
       if (!roundSlug) return;
-      await emitWithAck("banpick:select_map", {
-        round_slug: roundSlug,
-        map_id: mapId,
-      }, {
-        command: "select_map",
-        map_id: mapId,
-      });
+      await emitWithAck(
+        "banpick:select_map",
+        {
+          round_slug: roundSlug,
+          map_id: mapId,
+        },
+        {
+          command: "select_map",
+          map_id: mapId,
+        },
+      );
     },
     [emitWithAck, roundSlug],
   );
 
   const confirmAction = useCallback(async () => {
     if (!roundSlug) return;
-    await emitWithAck("banpick:confirm_action", {
-      round_slug: roundSlug,
-    }, {
-      command: "confirm_action",
-    });
+    await emitWithAck(
+      "banpick:confirm_action",
+      {
+        round_slug: roundSlug,
+      },
+      {
+        command: "confirm_action",
+      },
+    );
   }, [emitWithAck, roundSlug]);
 
   const selectSide = useCallback(
     async (side: "ATK" | "DEF") => {
       if (!roundSlug) return;
-      await emitWithAck("banpick:select_side", {
-        round_slug: roundSlug,
-        side,
-      }, {
-        command: "select_side",
-        side,
-      });
+      await emitWithAck(
+        "banpick:select_side",
+        {
+          round_slug: roundSlug,
+          side,
+        },
+        {
+          command: "select_side",
+          side,
+        },
+      );
     },
     [emitWithAck, roundSlug],
   );
 
   const reset = useCallback(async () => {
     if (!roundSlug) return;
-    await emitWithAck("banpick:reset", {
-      round_slug: roundSlug,
-    }, {
-      command: "reset",
-    });
+    await emitWithAck(
+      "banpick:reset",
+      {
+        round_slug: roundSlug,
+      },
+      {
+        command: "reset",
+      },
+    );
   }, [emitWithAck, roundSlug]);
 
   const canAct = useMemo(() => Boolean(viewerTeamSlot), [viewerTeamSlot]);

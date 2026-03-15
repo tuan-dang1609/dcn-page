@@ -17,14 +17,14 @@ const resolveListenResult = async (listenResult: unknown) => {
 const resolveHttpServerCandidates = (listenResult: any) => {
   const appAny = app as any;
   const rawCandidates = [
-    appAny?.server?.server,
-    appAny?.server?.raw,
-    appAny?.server,
     listenResult?.server?.server,
     listenResult?.server?.raw,
     listenResult?.server,
     listenResult?.raw,
     listenResult,
+    appAny?.server?.server,
+    appAny?.server?.raw,
+    appAny?.server,
   ];
 
   const candidates: any[] = [];
@@ -44,6 +44,13 @@ const describeCandidate = (candidate: any) => {
   return ctor ? String(ctor) : typeof candidate;
 };
 
+const describeCandidateCapabilities = (candidate: any) => ({
+  hasOn: typeof candidate?.on === "function",
+  hasEmit: typeof candidate?.emit === "function",
+  hasRemoveListener: typeof candidate?.removeListener === "function",
+  hasListen: typeof candidate?.listen === "function",
+});
+
 const tryRegisterBanPickSocket = async (listenResult: any) => {
   const candidates = resolveHttpServerCandidates(listenResult);
   if (candidates.length === 0) {
@@ -56,6 +63,11 @@ const tryRegisterBanPickSocket = async (listenResult: any) => {
   let lastError: unknown = null;
 
   for (const candidate of candidates) {
+    logger.info("[socket.io] probing candidate", {
+      candidate: describeCandidate(candidate),
+      capabilities: describeCandidateCapabilities(candidate),
+    });
+
     try {
       await registerBanPickSocket(candidate);
       logger.info(

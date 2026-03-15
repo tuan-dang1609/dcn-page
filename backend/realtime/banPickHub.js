@@ -22,8 +22,6 @@ export const setBanPickSocketServer = (io) => {
   banPickIo = io ?? null;
 };
 
-export const getBanPickSocketServer = () => banPickIo;
-
 export const emitBanPickRoomState = ({ roundSlug, session }) => {
   if (!banPickIo || !session) return false;
 
@@ -35,13 +33,15 @@ export const emitBanPickRoomState = ({ roundSlug, session }) => {
 
   // Primary state event used by the current frontend.
   banPickIo.to(roomName).emit("banpick:state", roomPayload);
-  // Compatibility event name for legacy clients.
-  banPickIo.to(roomName).emit("banpick:update", roomPayload);
 
   return true;
 };
 
-export const emitBanPickViewerContext = ({ socket, viewerTeamSlot, userId }) => {
+export const emitBanPickViewerContext = ({
+  socket,
+  viewerTeamSlot,
+  userId,
+}) => {
   if (!socket) return;
 
   socket.emit("banpick:self", {

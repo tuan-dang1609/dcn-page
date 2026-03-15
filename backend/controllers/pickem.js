@@ -58,9 +58,7 @@ const toTeamLogo = (value) => {
 };
 
 const getUserIdCandidates = (rows) =>
-  rows
-    .map((row) => String(row.user_id ?? "").trim())
-    .filter(Boolean);
+  rows.map((row) => String(row.user_id ?? "").trim()).filter(Boolean);
 
 const shapeLeaderboard = ({ rows, userMap }) => {
   const leaderboard = rows.map((row) => {
@@ -78,7 +76,8 @@ const shapeLeaderboard = ({ rows, userMap }) => {
       ).trim() || userId;
 
     const nickname =
-      String(dbUser?.nickname ?? userMeta.nickname ?? username).trim() || username;
+      String(dbUser?.nickname ?? userMeta.nickname ?? username).trim() ||
+      username;
 
     const team =
       String(
@@ -113,7 +112,9 @@ const shapeLeaderboard = ({ rows, userMap }) => {
       logoTeam,
       img,
       Score: Number(row.total_score ?? 0),
-      _lastUpdate: row.last_update ? new Date(row.last_update).getTime() : Number.MAX_SAFE_INTEGER,
+      _lastUpdate: row.last_update
+        ? new Date(row.last_update).getTime()
+        : Number.MAX_SAFE_INTEGER,
     };
   });
 
@@ -197,9 +198,9 @@ pickemRouter.get(
 );
 
 pickemRouter.post(
-  "/:league_id/addquestion",
+  "/:scope/addquestion",
   async ({ params, body, set }) => {
-    const leagueId = String(params.league_id ?? "").trim();
+    const leagueId = String(params.scope ?? "").trim();
     if (!leagueId) {
       set.status = 400;
       return { error: "league_id is required" };
@@ -232,7 +233,7 @@ pickemRouter.post(
 );
 
 pickemRouter.get(
-  "/:game_short/:league_id/question/:type",
+  "/:scope/:league_id/question/:type",
   async ({ params, set }) => {
     const leagueId = String(params.league_id ?? "").trim();
     if (!leagueId) {
@@ -240,8 +241,12 @@ pickemRouter.get(
       return { error: "league_id is required" };
     }
 
-    const gameShort = String(params.game_short ?? "").trim().toLowerCase();
-    const type = String(params.type ?? "").trim().toLowerCase();
+    const gameShort = String(params.scope ?? "")
+      .trim()
+      .toLowerCase();
+    const type = String(params.type ?? "")
+      .trim()
+      .toLowerCase();
 
     const includeAllGames = !gameShort || gameShort === "all";
     const includeAllTypes = !type || type === "all";
@@ -251,11 +256,15 @@ pickemRouter.get(
     const filtered = allQuestions.filter((q) => {
       const gameMatch = includeAllGames
         ? true
-        : String(q.game_short ?? "").trim().toLowerCase() === gameShort;
+        : String(q.game_short ?? "")
+            .trim()
+            .toLowerCase() === gameShort;
 
       const typeMatch = includeAllTypes
         ? true
-        : String(q.type ?? "").trim().toLowerCase() === type;
+        : String(q.type ?? "")
+            .trim()
+            .toLowerCase() === type;
 
       return gameMatch && typeMatch;
     });
@@ -282,18 +291,19 @@ pickemRouter.get(
     const leagueScope = allQuestions.filter((q) =>
       includeAllTypes
         ? true
-        : String(q.type ?? "").trim().toLowerCase() === type,
+        : String(q.type ?? "")
+            .trim()
+            .toLowerCase() === type,
     );
 
     const totalPointAll = leagueScope.reduce(
-      (sum, q) =>
-        sum + (Number(q.max_choose) || 0) * (Number(q.score) || 0),
+      (sum, q) => sum + (Number(q.max_choose) || 0) * (Number(q.score) || 0),
       0,
     );
 
     return {
       league_id: leagueId,
-      game_short: params.game_short,
+      game_short: params.scope,
       type: params.type,
       count: sanitized.length,
       questions: sanitized,
@@ -308,9 +318,9 @@ pickemRouter.get(
 );
 
 pickemRouter.post(
-  "/:league_id/submitPrediction",
+  "/:scope/submitPrediction",
   async ({ params, body, set }) => {
-    const leagueId = String(params.league_id ?? "").trim();
+    const leagueId = String(params.scope ?? "").trim();
     const userId = String(body?.userId ?? "").trim();
     const answers = Array.isArray(body?.answers) ? body.answers : null;
 
@@ -356,13 +366,12 @@ pickemRouter.post(
 );
 
 pickemRouter.get(
-  "/:league_id/myanswer",
+  "/:scope/myanswer",
   async ({ params, query, request, set }) => {
-    const leagueId = String(params.league_id ?? "").trim();
+    const leagueId = String(params.scope ?? "").trim();
     const userId =
-      String(
-        query?.userId ?? request.headers.get("x-user-id") ?? "",
-      ).trim() || null;
+      String(query?.userId ?? request.headers.get("x-user-id") ?? "").trim() ||
+      null;
 
     if (!leagueId || !userId) {
       set.status = 400;
@@ -394,7 +403,9 @@ pickemRouter.get(
 
     if (includeMeta) {
       const questions = await getPickemQuestionsByLeague(leagueId);
-      const questionMap = new Map(questions.map((q) => [Number(q.question_id), q]));
+      const questionMap = new Map(
+        questions.map((q) => [Number(q.question_id), q]),
+      );
 
       answers = answers.map((ans) => {
         const q = questionMap.get(Number(ans.questionId));
@@ -437,9 +448,9 @@ pickemRouter.get(
 );
 
 pickemRouter.get(
-  "/:league_id/pickem/:userid",
+  "/:scope/pickem/:userid",
   async ({ params, query, set }) => {
-    const leagueId = String(params.league_id ?? "").trim();
+    const leagueId = String(params.scope ?? "").trim();
     const userId = String(params.userid ?? "").trim();
 
     if (!leagueId || !userId) {
@@ -472,7 +483,9 @@ pickemRouter.get(
 
     if (includeMeta) {
       const questions = await getPickemQuestionsByLeague(leagueId);
-      const questionMap = new Map(questions.map((q) => [Number(q.question_id), q]));
+      const questionMap = new Map(
+        questions.map((q) => [Number(q.question_id), q]),
+      );
 
       answers = answers.map((ans) => {
         const q = questionMap.get(Number(ans.questionId));

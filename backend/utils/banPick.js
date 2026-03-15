@@ -549,12 +549,16 @@ const getBanPickRowBySlug = async (roundSlug) => {
            m.round_number,
            m.match_no,
            m.date_scheduled,
+           m.team_a_id AS match_team_a_id,
+           m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
-           tb.name AS team_b_name
+           tb.name AS team_b_name,
+           ta.created_by AS team_a_owner_id,
+           tb.created_by AS team_b_owner_id
     FROM ban_picks bp
     LEFT JOIN matches m ON m.id = bp.match_id
-    LEFT JOIN teams ta ON ta.id = bp.team_a_id
-    LEFT JOIN teams tb ON tb.id = bp.team_b_id
+    LEFT JOIN teams ta ON ta.id = COALESCE(m.team_a_id, bp.team_a_id)
+    LEFT JOIN teams tb ON tb.id = COALESCE(m.team_b_id, bp.team_b_id)
     WHERE bp.round_slug = $1
     LIMIT 1
     `,
@@ -590,11 +594,36 @@ export const getBanPickSessionByRoundSlug = async (roundSlug) => {
   const row = await getBanPickRowBySlug(roundSlug);
   if (!row) return null;
 
+  const effectiveTeamAId = toNumber(row.match_team_a_id) ?? toNumber(row.team_a_id);
+  const effectiveTeamBId = toNumber(row.match_team_b_id) ?? toNumber(row.team_b_id);
+
+  if (
+    effectiveTeamAId !== toNumber(row.team_a_id) ||
+    effectiveTeamBId !== toNumber(row.team_b_id)
+  ) {
+    await pool.query(
+      `
+      UPDATE ban_picks
+      SET team_a_id = $1,
+          team_b_id = $2,
+          updated_at = NOW()
+      WHERE id = $3
+      `,
+      [effectiveTeamAId, effectiveTeamBId, row.id],
+    );
+  }
+
+  const normalizedRow = {
+    ...row,
+    team_a_id: effectiveTeamAId,
+    team_b_id: effectiveTeamBId,
+  };
+
   const mapPool = await getMapPool("valorant");
-  const state = normalizeStoredState({ sessionRow: row, mapPool });
+  const state = normalizeStoredState({ sessionRow: normalizedRow, mapPool });
 
   return {
-    ...row,
+    ...normalizedRow,
     state,
     map_pool: mapPool,
   };
@@ -712,14 +741,25 @@ export const ensureSessionByRoundSlug = async ({
 };
 
 export const resolveUserTeamSlot = (user, session) => {
+  const userId = toNumber(user?.id);
   const userTeamId = toNumber(user?.team_id);
-  if (!userTeamId) return null;
+  if (!userId && !userTeamId) return null;
 
   const teamAId = toNumber(session.team_a_id);
   const teamBId = toNumber(session.team_b_id);
+  const teamAOwnerId = toNumber(session.team_a_owner_id);
+  const teamBOwnerId = toNumber(session.team_b_owner_id);
 
-  if (teamAId && userTeamId === teamAId) return "team1";
-  if (teamBId && userTeamId === teamBId) return "team2";
+  const canActAsTeam1 =
+    (teamAId && userTeamId === teamAId) ||
+    (teamAOwnerId && userId === teamAOwnerId);
+
+  const canActAsTeam2 =
+    (teamBId && userTeamId === teamBId) ||
+    (teamBOwnerId && userId === teamBOwnerId);
+
+  if (canActAsTeam1) return "team1";
+  if (canActAsTeam2) return "team2";
   return null;
 };
 

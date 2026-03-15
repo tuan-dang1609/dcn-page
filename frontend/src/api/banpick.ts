@@ -74,7 +74,12 @@ export interface RoundBanPickActionInput {
 
 export const getRoundBanPick = (
   roundSlug: string,
-  query?: { match_id?: number | string; format?: string },
+  query?: {
+    match_id?: number | string;
+    format?: string;
+    cache_bust?: number | string;
+  },
+  token?: string | null,
 ) => {
   const params = new URLSearchParams();
 
@@ -86,11 +91,22 @@ export const getRoundBanPick = (
     params.set("format", query.format);
   }
 
+  if (query?.cache_bust !== undefined) {
+    params.set("_ts", String(query.cache_bust));
+  }
+
   const qs = params.toString();
   const suffix = qs ? `?${qs}` : "";
 
+  const headers = token
+    ? {
+        Authorization: `Bearer ${token}`,
+      }
+    : undefined;
+
   return axios.get<RoundBanPickEnvelope>(
     `${API_BASE}/api/tournaments/round/${roundSlug}/ban-pick${suffix}`,
+    headers ? { headers } : undefined,
   );
 };
 

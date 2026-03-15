@@ -26,6 +26,7 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      ms: path.resolve(__dirname, "./src/shims/ms.js"),
     },
   },
 }));

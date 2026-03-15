@@ -175,12 +175,6 @@ export default function BanPickPage() {
         </div>
       )}
 
-      {error && (
-        <div className="border-b border-border px-4 py-2 text-center text-xs text-destructive">
-          {error}
-        </div>
-      )}
-
       {/* Phase indicator */}
       <div className="border-b border-border px-4 py-3">
         <div className="max-w-5xl mx-auto text-center">
