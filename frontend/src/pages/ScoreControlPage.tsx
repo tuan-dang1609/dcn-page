@@ -25,6 +25,7 @@ import {
   type Match,
   type MatchGameIdRecord,
 } from "@/api/tournaments";
+import { initRoundBanPick } from "@/api/banpick";
 import { tournamentsBaseUrl } from "@/api/tournaments/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -37,6 +38,14 @@ const providerOptions = [
   { value: "valorant", label: "Valorant" },
   { value: "lol", label: "LoL" },
   { value: "tft", label: "TFT" },
+];
+
+type BanPickFormat = "BO1" | "BO3" | "BO5";
+
+const banPickFormatOptions: Array<{ value: BanPickFormat; label: string }> = [
+  { value: "BO1", label: "BO1" },
+  { value: "BO3", label: "BO3" },
+  { value: "BO5", label: "BO5" },
 ];
 
 interface EditableMatch extends Match {
@@ -118,6 +127,24 @@ const formatDateTime = (value?: string | null) => {
   });
 };
 
+const buildScoreControlRoundSlug = ({
+  tournamentId,
+  roundNumber,
+  matchNo,
+  matchId,
+}: {
+  tournamentId?: number | null;
+  roundNumber?: number | null;
+  matchNo?: number | null;
+  matchId: number;
+}) => {
+  const safeTournament = toNumber(tournamentId) ?? 0;
+  const safeRound = toNumber(roundNumber) ?? 0;
+  const safeMatchNo = toNumber(matchNo) ?? matchId;
+
+  return `ops-t${safeTournament}-r${safeRound}-m${safeMatchNo}-${matchId}`;
+};
+
 const hydrateMatches = (matches: Match[]): EditableMatch[] =>
   matches.map((match) => ({
     ...match,
@@ -182,6 +209,12 @@ const ScoreControlPage = () => {
   const [editGameIdDraftByRow, setEditGameIdDraftByRow] = useState<
     Record<number, EditGameIdDraft>
   >({});
+  const [banPickFormatByMatch, setBanPickFormatByMatch] = useState<
+    Record<number, BanPickFormat>
+  >({});
+  const [settingUpBanPickByMatch, setSettingUpBanPickByMatch] = useState<
+    Record<number, boolean>
+  >({});
 
   const roleId = Number(user?.role_id);
   const hasAccess = allowedRoleIds.has(roleId);
@@ -225,6 +258,8 @@ const ScoreControlPage = () => {
       setLoadingGameIdsByMatch({});
       setNewGameIdDraftByMatch({});
       setEditGameIdDraftByRow({});
+      setBanPickFormatByMatch({});
+      setSettingUpBanPickByMatch({});
     } catch (error: any) {
       toast({
         title: "Không thể tải danh sách trận",
@@ -456,6 +491,8 @@ const ScoreControlPage = () => {
       setLoadingGameIdsByMatch({});
       setNewGameIdDraftByMatch({});
       setEditGameIdDraftByRow({});
+      setBanPickFormatByMatch({});
+      setSettingUpBanPickByMatch({});
 
       if (!nextBrackets.length) {
         setSelectedBracketId("");
@@ -527,6 +564,94 @@ const ScoreControlPage = () => {
         item.id === matchId ? { ...item, scheduleSaving } : item,
       ),
     );
+  };
+
+  const getDefaultBanPickFormatForMatch = (
+    match: EditableMatch,
+  ): BanPickFormat => {
+    const bestOf = toNumber((match as Match & { best_of?: unknown }).best_of);
+    if (bestOf === 1) return "BO1";
+    if (bestOf === 5) return "BO5";
+    return "BO3";
+  };
+
+  const getBanPickFormatForMatch = (match: EditableMatch): BanPickFormat =>
+    banPickFormatByMatch[match.id] ?? getDefaultBanPickFormatForMatch(match);
+
+  const setBanPickFormatForMatch = (matchId: number, format: BanPickFormat) => {
+    setBanPickFormatByMatch((prev) => ({
+      ...prev,
+      [matchId]: format,
+    }));
+  };
+
+  const setSettingUpBanPick = (matchId: number, value: boolean) => {
+    setSettingUpBanPickByMatch((prev) => ({
+      ...prev,
+      [matchId]: value,
+    }));
+  };
+
+  const getBanPickLinkForMatch = (
+    match: EditableMatch,
+    format: BanPickFormat,
+  ) => {
+    const roundSlug = buildScoreControlRoundSlug({
+      tournamentId: toNumber(tournamentIdInput),
+      roundNumber: toNumber(match.round_number),
+      matchNo: toNumber(match.match_no),
+      matchId: match.id,
+    });
+
+    const params = new URLSearchParams({
+      matchId: String(match.id),
+      format,
+    });
+
+    return `/round/${roundSlug}?${params.toString()}`;
+  };
+
+  const handleSetupBanPick = async (match: EditableMatch) => {
+    const selectedFormat = getBanPickFormatForMatch(match);
+    const roundSlug = buildScoreControlRoundSlug({
+      tournamentId: toNumber(tournamentIdInput),
+      roundNumber: toNumber(match.round_number),
+      matchNo: toNumber(match.match_no),
+      matchId: match.id,
+    });
+
+    setSettingUpBanPick(match.id, true);
+
+    try {
+      await initRoundBanPick(
+        roundSlug,
+        {
+          match_id: match.id,
+          format: selectedFormat,
+        },
+        token,
+      );
+
+      toast({
+        title: "Đã setup Ban/Pick",
+        description: `Match #${match.id} đã sẵn sàng với format ${selectedFormat}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Setup Ban/Pick thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setSettingUpBanPick(match.id, false);
+    }
+  };
+
+  const handleOpenBanPick = (match: EditableMatch) => {
+    const selectedFormat = getBanPickFormatForMatch(match);
+    const link = getBanPickLinkForMatch(match, selectedFormat);
+    navigate(link);
   };
 
   const handleSaveMatch = async (match: EditableMatch) => {
@@ -964,6 +1089,73 @@ const ScoreControlPage = () => {
                           </>
                         )}
                       </Button>
+                    </div>
+
+                    <div className="rounded-md border border-border bg-muted/20 p-3 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">Ban/Pick Setup</p>
+                          <p className="text-xstext-[#EEEEEE]">
+                            Tạo hoặc mở trang Ban/Pick riêng cho match này.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-2 md:grid-cols-[140px_auto_auto]">
+                        <select
+                          value={getBanPickFormatForMatch(match)}
+                          onChange={(event) =>
+                            setBanPickFormatForMatch(
+                              match.id,
+                              event.target.value as BanPickFormat,
+                            )
+                          }
+                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          {banPickFormatOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+
+                        <Button
+                          type="button"
+                          className="gap-2"
+                          onClick={() => void handleSetupBanPick(match)}
+                          disabled={Boolean(settingUpBanPickByMatch[match.id])}
+                        >
+                          {settingUpBanPickByMatch[match.id] ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Đang setup...
+                            </>
+                          ) : (
+                            <>
+                              <ShieldCheck className="h-4 w-4" />
+                              Setup Ban/Pick
+                            </>
+                          )}
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-2"
+                          onClick={() => handleOpenBanPick(match)}
+                        >
+                          <Link2 className="h-4 w-4" />
+                          Mở trang Ban/Pick
+                        </Button>
+                      </div>
+
+                      <p className="text-xstext-[#EEEEEE] break-all">
+                        Link:{" "}
+                        {getBanPickLinkForMatch(
+                          match,
+                          getBanPickFormatForMatch(match),
+                        )}
+                      </p>
                     </div>
 
                     <div className="rounded-md border border-border bg-muted/20 p-3 space-y-3">

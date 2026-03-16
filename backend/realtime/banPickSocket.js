@@ -12,6 +12,7 @@ import {
 import {
   emitBanPickRoomState,
   emitBanPickViewerContext,
+  getBanPickMatchRoomName,
   getBanPickRoomName,
   setBanPickSocketServer,
 } from "./banPickHub.js";
@@ -190,6 +191,7 @@ const emitSessionState = ({ roundSlug, session, user, socket }) => {
 
 const mutateAndEmit = async ({
   roundSlug,
+  matchId,
   user,
   command,
   mapId,
@@ -199,6 +201,7 @@ const mutateAndEmit = async ({
 }) => {
   const result = await mutateBanPickSession({
     roundSlug,
+    matchId,
     user,
     command,
     mapId,
@@ -288,9 +291,16 @@ export const registerBanPickSocket = async (httpServer) => {
         return;
       }
 
-      const roomName = getBanPickRoomName(ensured.roundSlug);
-      socket.join(roomName);
+      const roundRoomName = getBanPickRoomName(ensured.roundSlug);
+      socket.join(roundRoomName);
+
+      const matchRoomName = getBanPickMatchRoomName(ensured.session?.match_id);
+      if (matchRoomName) {
+        socket.join(matchRoomName);
+      }
+
       socket.data.roundSlug = ensured.roundSlug;
+      socket.data.matchId = toNumber(ensured.session?.match_id);
 
       emitSessionState({
         roundSlug: ensured.roundSlug,
@@ -310,8 +320,10 @@ export const registerBanPickSocket = async (httpServer) => {
 
     socket.on("banpick:select_map", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "select_map",
         mapId: payload?.map_id,
@@ -322,8 +334,10 @@ export const registerBanPickSocket = async (httpServer) => {
 
     socket.on("banpick:confirm_action", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "confirm_action",
         socket,
@@ -333,8 +347,10 @@ export const registerBanPickSocket = async (httpServer) => {
 
     socket.on("banpick:select_side", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "select_side",
         side: payload?.side,
@@ -345,8 +361,10 @@ export const registerBanPickSocket = async (httpServer) => {
 
     socket.on("banpick:reset", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "reset",
         socket,

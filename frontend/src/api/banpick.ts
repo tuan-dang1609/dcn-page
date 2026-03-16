@@ -66,10 +66,16 @@ interface RoundBanPickActionEnvelope {
   data: RoundBanPickPayload;
 }
 
+interface RoundBanPickInitInput {
+  match_id: number | string;
+  format?: "BO1" | "BO3" | "BO5";
+}
+
 export interface RoundBanPickActionInput {
   command: "select_map" | "confirm_action" | "select_side" | "reset";
   map_id?: string;
   side?: Side;
+  match_id?: number | string;
 }
 
 export const getRoundBanPick = (
@@ -123,6 +129,24 @@ export const mutateRoundBanPick = (
 
   return axios.post<RoundBanPickActionEnvelope>(
     `${API_BASE}/api/tournaments/round/${roundSlug}/ban-pick/action`,
+    payload,
+    headers ? { headers } : undefined,
+  );
+};
+
+export const initRoundBanPick = (
+  roundSlug: string,
+  payload: RoundBanPickInitInput,
+  token?: string | null,
+) => {
+  const headers = token
+    ? {
+        Authorization: `Bearer ${token}`,
+      }
+    : undefined;
+
+  return axios.post<RoundBanPickActionEnvelope>(
+    `${API_BASE}/api/tournaments/round/${roundSlug}/ban-pick/init`,
     payload,
     headers ? { headers } : undefined,
   );

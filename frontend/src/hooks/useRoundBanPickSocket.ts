@@ -164,7 +164,7 @@ export const useRoundBanPickSocket = ({
 
     const socket = io(API_BASE, {
       path: "/socket.io",
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
       auth: token ? { token: `Bearer ${token}` } : {},
       reconnection: true,
       reconnectionAttempts: 4,
@@ -213,7 +213,6 @@ export const useRoundBanPickSocket = ({
       // If server has no Socket.IO endpoint in this deployment, stop reconnect loop
       // and rely on HTTP fallback for mutating actions.
       if (
-        message.includes("xhr poll error") ||
         message.includes("unknown endpoint") ||
         description.includes("unknown endpoint")
       ) {
@@ -243,6 +242,55 @@ export const useRoundBanPickSocket = ({
       setIsConnected(false);
     };
   }, [roundSlug, matchId, format, token]);
+
+  // Polling fallback so UI still updates near realtime when Socket.IO is unavailable
+  // (common on runtimes where the socket server can't be attached).
+  useEffect(() => {
+    if (!roundSlug) return;
+
+    let disposed = false;
+    let inFlight = false;
+
+    const pollOnce = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+
+      try {
+        await syncSessionFromHttp();
+      } catch {
+        // Ignore transient polling failures; next tick can recover.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const intervalMs = isConnected ? 10000 : 2000;
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void pollOnce();
+      }
+    }, intervalMs);
+
+    const onFocus = () => {
+      void pollOnce();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void pollOnce();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [roundSlug, isConnected, syncSessionFromHttp]);
 
   const emitWithAck = useCallback(
     async (
@@ -337,14 +385,16 @@ export const useRoundBanPickSocket = ({
         {
           round_slug: roundSlug,
           map_id: mapId,
+          match_id: matchId ?? undefined,
         },
         {
           command: "select_map",
           map_id: mapId,
+          match_id: matchId ?? undefined,
         },
       );
     },
-    [emitWithAck, roundSlug],
+    [emitWithAck, matchId, roundSlug],
   );
 
   const confirmAction = useCallback(async () => {
@@ -353,12 +403,14 @@ export const useRoundBanPickSocket = ({
       "banpick:confirm_action",
       {
         round_slug: roundSlug,
+        match_id: matchId ?? undefined,
       },
       {
         command: "confirm_action",
+        match_id: matchId ?? undefined,
       },
     );
-  }, [emitWithAck, roundSlug]);
+  }, [emitWithAck, matchId, roundSlug]);
 
   const selectSide = useCallback(
     async (side: "ATK" | "DEF") => {
@@ -368,14 +420,16 @@ export const useRoundBanPickSocket = ({
         {
           round_slug: roundSlug,
           side,
+          match_id: matchId ?? undefined,
         },
         {
           command: "select_side",
           side,
+          match_id: matchId ?? undefined,
         },
       );
     },
-    [emitWithAck, roundSlug],
+    [emitWithAck, matchId, roundSlug],
   );
 
   const reset = useCallback(async () => {
@@ -384,12 +438,14 @@ export const useRoundBanPickSocket = ({
       "banpick:reset",
       {
         round_slug: roundSlug,
+        match_id: matchId ?? undefined,
       },
       {
         command: "reset",
+        match_id: matchId ?? undefined,
       },
     );
-  }, [emitWithAck, roundSlug]);
+  }, [emitWithAck, matchId, roundSlug]);
 
   const canAct = useMemo(() => Boolean(viewerTeamSlot), [viewerTeamSlot]);
 

@@ -1,8 +1,9 @@
-import { useParams, Link, useOutletContext } from "react-router-dom";
+import { Navigate, useParams, Link, useOutletContext } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Calendar } from "lucide-react";
 import type { MatchDetail } from "@/types/matchDetail";
+import { getRoundBanPick, type RoundBanPickPayload } from "@/api/banpick";
 import {
   getValorantMatchData,
   type ValorantApiMatchData,
@@ -14,8 +15,9 @@ import {
   type TftApiResponse,
 } from "@/api/tft";
 import {
+  getBracketsByTournamentId,
   getMatchGameIds,
-  getMatchesByTournamentId,
+  getMatchesByBracketId,
   type Match,
   type MatchGameIdRecord,
   type TournamentBySlugResponse,
@@ -56,6 +58,112 @@ const mapImages: Record<string, string> = {
     "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=800&h=200&fit=crop",
   "GAME 3":
     "https://images.unsplash.com/photo-1493711662062-fa541adb3fc8?w=800&h=200&fit=crop",
+};
+
+type BanPickTimelineItem = {
+  key: string;
+  mapName: string;
+  type: "BAN" | "PICK" | "DECIDER";
+  teamSlot: "team1" | "team2" | null;
+  sideLabel?: string;
+};
+
+const buildBanPickTimeline = (
+  payload?: RoundBanPickPayload | null,
+): BanPickTimelineItem[] => {
+  if (!payload?.state) return [];
+
+  const mapNameByCode = new Map(
+    (payload.map_pool ?? []).map((mapItem) => [
+      mapItem.map_code,
+      mapItem.map_name,
+    ]),
+  );
+
+  const mapStateById = new Map(
+    (payload.state.maps ?? []).map((mapState) => [mapState.mapId, mapState]),
+  );
+
+  const timelineFromActionLog = (payload.state.actionLog ?? [])
+    .slice()
+    .sort((a, b) => Number(a.step ?? 0) - Number(b.step ?? 0))
+    .reduce<BanPickTimelineItem[]>((acc, entry, index) => {
+      const normalizedAction = String(entry.action ?? "")
+        .trim()
+        .toLowerCase();
+      const actionType = normalizedAction.includes("ban")
+        ? "BAN"
+        : normalizedAction.includes("pick")
+          ? "PICK"
+          : null;
+
+      if (!actionType) return acc;
+
+      const mapState = mapStateById.get(entry.mapId);
+      const sideLabel =
+        mapState?.side?.team1 && mapState?.side?.team2
+          ? `${mapState.side.team1}/${mapState.side.team2}`
+          : undefined;
+
+      acc.push({
+        key: `log-${entry.step}-${entry.mapId}-${index}`,
+        mapName: mapNameByCode.get(entry.mapId) ?? entry.mapId,
+        type: actionType,
+        teamSlot: entry.team ?? null,
+        sideLabel,
+      });
+
+      return acc;
+    }, []);
+
+  const deciderMap = (payload.state.maps ?? []).find(
+    (mapState) => mapState.status === "decider",
+  );
+
+  if (deciderMap) {
+    const deciderMapName =
+      mapNameByCode.get(deciderMap.mapId) ?? deciderMap.mapId;
+    const alreadyHasDecider = timelineFromActionLog.some(
+      (item) => item.type === "DECIDER" && item.mapName === deciderMapName,
+    );
+
+    if (!alreadyHasDecider) {
+      timelineFromActionLog.push({
+        key: `decider-${deciderMap.mapId}`,
+        mapName: deciderMapName,
+        type: "DECIDER",
+        teamSlot: null,
+      });
+    }
+  }
+
+  if (timelineFromActionLog.length > 0) {
+    return timelineFromActionLog;
+  }
+
+  return (payload.state.maps ?? [])
+    .filter((mapState) => mapState.status !== "available")
+    .map((mapState, index) => {
+      const type =
+        mapState.status === "banned"
+          ? "BAN"
+          : mapState.status === "picked"
+            ? "PICK"
+            : "DECIDER";
+
+      const sideLabel =
+        mapState.side?.team1 && mapState.side?.team2
+          ? `${mapState.side.team1}/${mapState.side.team2}`
+          : undefined;
+
+      return {
+        key: `state-${mapState.mapId}-${index}`,
+        mapName: mapNameByCode.get(mapState.mapId) ?? mapState.mapId,
+        type,
+        teamSlot: mapState.actionBy ?? mapState.sideChosenBy ?? null,
+        sideLabel,
+      } satisfies BanPickTimelineItem;
+    });
 };
 
 const isUuid = (value?: string) =>
@@ -543,6 +651,86 @@ const MapScoreRow = ({
   );
 };
 
+const BanPickTimelinePanel = ({
+  timeline,
+  team1,
+  team2,
+}: {
+  timeline: BanPickTimelineItem[];
+  team1: MatchDetail["team1"];
+  team2: MatchDetail["team2"];
+}) => {
+  if (!timeline.length) return null;
+
+  const teamBySlot = {
+    team1,
+    team2,
+  } as const;
+
+  return (
+    <aside className="rounded-xl border border-border/60 bg-card/40 p-3 md:p-4">
+      <div className="mb-3">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-primary">
+          Ban/Pick Timeline
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {timeline.map((item) => {
+          const team = item.teamSlot ? teamBySlot[item.teamSlot] : null;
+          const badgeClass =
+            item.type === "BAN"
+              ? "text-rose-300 border-rose-500/40 bg-rose-500/10"
+              : item.type === "PICK"
+                ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
+                : "text-sky-300 border-sky-500/40 bg-sky-500/10";
+
+          return (
+            <div
+              key={item.key}
+              className="rounded-lg border border-border/50 bg-black/20 px-3 py-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-foreground truncate">
+                    {item.mapName}
+                  </p>
+                  {item.sideLabel && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Side: {item.sideLabel}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-extrabold uppercase tracking-[0.12em] ${badgeClass}`}
+                  >
+                    {item.type}
+                  </span>
+
+                  {team && (
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-black/25 px-1.5 py-1">
+                      <img
+                        src={team.logo}
+                        alt={team.tag}
+                        className="w-4 h-4 rounded-sm"
+                      />
+                      <span className="text-[10px] font-bold text-foreground uppercase tracking-wide">
+                        {team.tag}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+};
+
 /* ── FPS Stat Table ── */
 const FPSStatTable = ({ match }: { match: MatchDetail }) => {
   const [activeTab, setActiveTab] = useState(0);
@@ -924,13 +1112,37 @@ const MatchDetailPage = () => {
 
   const { data: tournamentMatchBundle, isLoading: isMatchListLoading } =
     useQuery({
-      queryKey: ["tournament-match-list", tournamentId],
+      queryKey: ["tournament-match-list-all-brackets", tournamentId],
       enabled: Boolean(tournamentId),
       staleTime: 1000 * 60,
       refetchOnWindowFocus: false,
       queryFn: async () => {
-        const response = await getMatchesByTournamentId(tournamentId!);
-        return response;
+        const bracketsResponse = await getBracketsByTournamentId(tournamentId!);
+        const bracketIds = (bracketsResponse.data?.data ?? [])
+          .map((bracket) => toNumber(bracket.id))
+          .filter((bracketId): bracketId is number => bracketId !== null);
+
+        if (!bracketIds.length) {
+          return { matches: [] as Match[] };
+        }
+
+        const matchResponses = await Promise.all(
+          bracketIds.map((bracketId) => getMatchesByBracketId(bracketId)),
+        );
+
+        const mergedMatches = matchResponses.flatMap(
+          (response) => response.data?.data ?? [],
+        );
+
+        const dedupedMatches = Array.from(
+          new Map(
+            mergedMatches.map((item) => [toNumber(item.id) ?? item.id, item]),
+          ).values(),
+        );
+
+        return {
+          matches: dedupedMatches,
+        };
       },
     });
 
@@ -955,6 +1167,14 @@ const MatchDetailPage = () => {
     return sortedMatches.find((item) => toNumber(item.id) === numId) ?? null;
   }, [numId, sortedMatches]);
 
+  const roundSlug = buildRoundSlug({
+    tournamentSlug: slug,
+    roundNumber: toNumber(currentMatchRow?.round_number),
+    matchNo: toNumber(currentMatchRow?.match_no),
+    matchId: toNumber(currentMatchRow?.id) ?? numId,
+  });
+  const banPickLink = `/round/${roundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`;
+
   const baseMatch = useMemo(() => {
     if (!currentMatchRow) return null;
     return buildMatchDetailFromApi({
@@ -964,7 +1184,11 @@ const MatchDetailPage = () => {
     });
   }, [currentMatchRow, tournament, normalizedRouteGame]);
 
-  const { data: matchGameIds } = useQuery({
+  const {
+    data: matchGameIds,
+    isLoading: isMatchGameIdsLoading,
+    isError: isMatchGameIdsError,
+  } = useQuery({
     queryKey: ["match-game-ids", numId],
     enabled: Boolean(numId),
     staleTime: 1000 * 60,
@@ -1000,10 +1224,6 @@ const MatchDetailPage = () => {
   }, [baseMatch?.gameType, matchGameIds]);
 
   const valorantApiMatchIds = useMemo(() => {
-    if (preferredProvider !== "val") {
-      return undefined;
-    }
-
     const idsFromMatchGames = getProviderMatchIds(matchGameIds ?? [], "val")
       .map((value) => String(value).trim())
       .filter((value): value is string => Boolean(value) && isUuid(value));
@@ -1013,7 +1233,12 @@ const MatchDetailPage = () => {
     }
 
     return undefined;
-  }, [matchGameIds, preferredProvider]);
+  }, [matchGameIds]);
+
+  const hasValorantMatchId = useMemo(
+    () => Boolean(valorantApiMatchIds && valorantApiMatchIds.length > 0),
+    [valorantApiMatchIds],
+  );
 
   const tftApiMatchIds = useMemo(() => {
     if (preferredProvider !== "tft") {
@@ -1030,7 +1255,9 @@ const MatchDetailPage = () => {
 
   const { data: valorantApiData } = useQuery({
     queryKey: ["valorant-match-detail", valorantApiMatchIds],
-    enabled: Boolean(valorantApiMatchIds && valorantApiMatchIds.length > 0),
+    enabled:
+      preferredProvider === "val" &&
+      Boolean(valorantApiMatchIds && valorantApiMatchIds.length > 0),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -1053,6 +1280,30 @@ const MatchDetailPage = () => {
       return responses.map((response) => response.data);
     },
   });
+
+  const { data: roundBanPickSession } = useQuery({
+    queryKey: ["round-banpick-session", roundSlug, numId],
+    enabled: Boolean(
+      roundSlug &&
+      numId &&
+      baseMatch?.gameType === "valorant" &&
+      hasValorantMatchId,
+    ),
+    staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const response = await getRoundBanPick(roundSlug, {
+        match_id: numId ?? undefined,
+      });
+
+      return response.data?.data ?? null;
+    },
+  });
+
+  const banPickTimeline = useMemo(
+    () => buildBanPickTimeline(roundBanPickSession),
+    [roundBanPickSession],
+  );
 
   const match = useMemo(() => {
     if (!baseMatch) return null;
@@ -1124,16 +1375,20 @@ const MatchDetailPage = () => {
     );
   }
 
+  const shouldRedirectToBanPick =
+    match.gameType === "valorant" &&
+    Boolean(numId) &&
+    !isMatchGameIdsLoading &&
+    !isMatchGameIdsError &&
+    !hasValorantMatchId;
+
+  if (shouldRedirectToBanPick) {
+    return <Navigate to={banPickLink} replace />;
+  }
+
   const currentIndex = sortedMatches.findIndex(
     (item) => toNumber(item.id) === numId,
   );
-  const roundSlug = buildRoundSlug({
-    tournamentSlug: slug,
-    roundNumber: toNumber(currentMatchRow?.round_number),
-    matchNo: toNumber(currentMatchRow?.match_no),
-    matchId: toNumber(currentMatchRow?.id),
-  });
-  const banPickLink = `/round/${roundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`;
   const currentBracketId =
     currentIndex >= 0
       ? toNumber(sortedMatches[currentIndex]?.bracket_id)
@@ -1157,6 +1412,7 @@ const MatchDetailPage = () => {
     match.team1Roster.players.length > 0 ||
     match.team2Roster.players.length > 0;
   const hasMapData = Boolean(match.maps?.length);
+  const hasBanPickTimeline = banPickTimeline.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -1220,14 +1476,6 @@ const MatchDetailPage = () => {
             <p className="text-[11px] lg:text-[12px] text-[#EEEEEE] mt-0.5">
               {match.roundName} · {match.format}
             </p>
-            {match.gameType === "valorant" && (
-              <Link
-                to={banPickLink}
-                className="inline-flex mt-2 h-7 items-center rounded-md border border-primary/60 px-3 text-[10px] font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 transition-colors"
-              >
-                Mở Ban/Pick
-              </Link>
-            )}
           </div>
 
           <div className="order-3 flex justify-end items-center gap-2 min-w-0">
@@ -1327,24 +1575,48 @@ const MatchDetailPage = () => {
         </div>
       </div>
 
-      {/* ── Map Scores with background images ── */}
-      {match.maps && match.maps.length > 0 && (
+      {/* ── Map Scores + Ban/Pick timeline ── */}
+      {(hasMapData || hasBanPickTimeline) && (
         <div className="">
-          <div className="mx-auto px-4 md:px-8 py-6 space-y-2.5">
-            {match.maps.map((map, i) => (
-              <MapScoreRow
-                key={i}
-                map={map}
-                team1Logo={match.team1.logo}
-                team2Logo={match.team2.logo}
-              />
-            ))}
+          <div className="mx-auto px-4 md:px-8 py-6">
+            <div
+              className={`grid gap-4 ${
+                hasBanPickTimeline
+                  ? "grid-cols-1 xl:grid-cols-[minmax(0,1.6fr)_minmax(300px,1fr)]"
+                  : "grid-cols-1"
+              }`}
+            >
+              <div className="space-y-2.5">
+                {match.maps?.map((map, i) => (
+                  <MapScoreRow
+                    key={i}
+                    map={map}
+                    team1Logo={match.team1.logo}
+                    team2Logo={match.team2.logo}
+                  />
+                ))}
+
+                {!hasMapData && (
+                  <div className="rounded-xl border border-border/60 bg-card/30 px-4 py-3 text-xs text-muted-foreground">
+                    Chưa có dữ liệu tỉ số từng map.
+                  </div>
+                )}
+              </div>
+
+              {hasBanPickTimeline && (
+                <BanPickTimelinePanel
+                  timeline={banPickTimeline}
+                  team1={match.team1}
+                  team2={match.team2}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
 
       <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
-        {!hasRosterData && !hasMapData ? (
+        {!hasRosterData && !hasMapData && !hasBanPickTimeline ? (
           <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-smtext-[#EEEEEE]">
             Chua co du lieu chi tiet cho tran dau nay.
           </section>

@@ -54,13 +54,14 @@ const describeCandidateCapabilities = (candidate: any) => ({
 const tryRegisterBanPickSocket = async (listenResult: any) => {
   const candidates = resolveHttpServerCandidates(listenResult);
   if (candidates.length === 0) {
-    logger.error(
+    logger.info(
       "[socket.io] Unable to initialize because no server candidate was found",
     );
     return false;
   }
 
   let lastError: unknown = null;
+  let hasNonCompatibilityError = false;
 
   for (const candidate of candidates) {
     logger.info("[socket.io] probing candidate", {
@@ -75,15 +76,27 @@ const tryRegisterBanPickSocket = async (listenResult: any) => {
       );
       return true;
     } catch (err) {
-      lastError = err;
-      logger.error(
-        `[socket.io] candidate ${describeCandidate(candidate)} failed:`,
-        err instanceof Error ? err.message : String(err),
+      const message = err instanceof Error ? err.message : String(err);
+      const isCompatibilityError = message.includes(
+        "Incompatible HTTP server candidate",
       );
+
+      if (!isCompatibilityError) {
+        hasNonCompatibilityError = true;
+        lastError = err;
+        logger.error(
+          `[socket.io] candidate ${describeCandidate(candidate)} failed:`,
+          message,
+        );
+      } else {
+        logger.info(
+          `[socket.io] candidate ${describeCandidate(candidate)} skipped: ${message}`,
+        );
+      }
     }
   }
 
-  if (lastError) {
+  if (hasNonCompatibilityError && lastError) {
     throw lastError;
   }
 
@@ -99,8 +112,8 @@ const tryRegisterBanPickSocket = async (listenResult: any) => {
     try {
       const attached = await tryRegisterBanPickSocket(listenResult);
       if (!attached) {
-        logger.error(
-          "[socket.io] Unable to initialize after trying all server candidates",
+        logger.info(
+          "[socket.io] Socket.IO unavailable on current runtime. Falling back to HTTP polling on frontend.",
         );
       }
     } catch (socketError) {

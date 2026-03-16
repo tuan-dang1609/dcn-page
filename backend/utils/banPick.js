@@ -575,12 +575,16 @@ const getBanPickRowByMatchId = async (matchId) => {
            m.round_number,
            m.match_no,
            m.date_scheduled,
+           m.team_a_id AS match_team_a_id,
+           m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
-           tb.name AS team_b_name
+           tb.name AS team_b_name,
+           ta.created_by AS team_a_owner_id,
+           tb.created_by AS team_b_owner_id
     FROM ban_picks bp
     LEFT JOIN matches m ON m.id = bp.match_id
-    LEFT JOIN teams ta ON ta.id = bp.team_a_id
-    LEFT JOIN teams tb ON tb.id = bp.team_b_id
+    LEFT JOIN teams ta ON ta.id = COALESCE(m.team_a_id, bp.team_a_id)
+    LEFT JOIN teams tb ON tb.id = COALESCE(m.team_b_id, bp.team_b_id)
     WHERE bp.match_id = $1
     LIMIT 1
     `,
@@ -590,12 +594,13 @@ const getBanPickRowByMatchId = async (matchId) => {
   return rows[0] ?? null;
 };
 
-export const getBanPickSessionByRoundSlug = async (roundSlug) => {
-  const row = await getBanPickRowBySlug(roundSlug);
+const hydrateSessionFromRow = async (row) => {
   if (!row) return null;
 
-  const effectiveTeamAId = toNumber(row.match_team_a_id) ?? toNumber(row.team_a_id);
-  const effectiveTeamBId = toNumber(row.match_team_b_id) ?? toNumber(row.team_b_id);
+  const effectiveTeamAId =
+    toNumber(row.match_team_a_id) ?? toNumber(row.team_a_id);
+  const effectiveTeamBId =
+    toNumber(row.match_team_b_id) ?? toNumber(row.team_b_id);
 
   if (
     effectiveTeamAId !== toNumber(row.team_a_id) ||
@@ -629,27 +634,93 @@ export const getBanPickSessionByRoundSlug = async (roundSlug) => {
   };
 };
 
+const getBanPickSessionByMatchId = async (matchId) => {
+  const row = await getBanPickRowByMatchId(matchId);
+  return hydrateSessionFromRow(row);
+};
+
+export const getBanPickSessionByRoundSlug = async (roundSlug) => {
+  const row = await getBanPickRowBySlug(roundSlug);
+  return hydrateSessionFromRow(row);
+};
+
+const reinitializeSessionWithFormatIfNeeded = async ({ session, format }) => {
+  const hasRequestedFormat =
+    format !== null && format !== undefined && String(format).trim() !== "";
+
+  if (!hasRequestedFormat || !session) {
+    return session;
+  }
+
+  const nextFormat = normalizeFormat(format, "BO3");
+  const currentFormat = normalizeFormat(
+    session.state?.format ?? session.format,
+    "BO3",
+  );
+
+  if (nextFormat === currentFormat) {
+    return session;
+  }
+
+  const mapPool =
+    Array.isArray(session.map_pool) && session.map_pool.length > 0
+      ? session.map_pool
+      : await getMapPool("valorant");
+
+  const resetState = createInitialState({
+    mapPool,
+    format: nextFormat,
+    teamNames: toTeamNames(session),
+  });
+
+  await pool.query(
+    `
+    UPDATE ban_picks
+    SET format = $1,
+        phase = $2,
+        current_step = $3,
+        selected_map_code = NULL,
+        side_select_map_code = NULL,
+        side_select_team = NULL,
+        status = 'active',
+        state = $4::jsonb,
+        updated_at = NOW()
+    WHERE id = $5
+    `,
+    [
+      nextFormat,
+      resetState.phase,
+      toNumber(resetState.currentStep) ?? 0,
+      JSON.stringify(resetState),
+      session.id,
+    ],
+  );
+
+  await pool.query(
+    `
+    DELETE FROM ban_pick_actions
+    WHERE ban_pick_id = $1
+    `,
+    [session.id],
+  );
+
+  return getBanPickSessionByRoundSlug(session.round_slug);
+};
+
 export const createBanPickSession = async ({ matchId, roundSlug, format }) => {
   const match = await getMatchContext(matchId);
   if (!match) return null;
 
   const existingByMatch = await getBanPickRowByMatchId(matchId);
   if (existingByMatch) {
-    if (roundSlug && existingByMatch.round_slug !== roundSlug) {
-      await pool.query(
-        `
-        UPDATE ban_picks
-        SET round_slug = $1,
-            updated_at = NOW()
-        WHERE id = $2
-        `,
-        [roundSlug, existingByMatch.id],
-      );
-    }
-
-    return getBanPickSessionByRoundSlug(
-      roundSlug ?? existingByMatch.round_slug,
+    const existingSession = await getBanPickSessionByRoundSlug(
+      existingByMatch.round_slug,
     );
+
+    return reinitializeSessionWithFormatIfNeeded({
+      session: existingSession,
+      format,
+    });
   }
 
   const normalizedFormat = normalizeFormat(format ?? match.best_of ?? 3, "BO3");
@@ -728,7 +799,12 @@ export const ensureSessionByRoundSlug = async ({
   format,
 }) => {
   const existing = await getBanPickSessionByRoundSlug(roundSlug);
-  if (existing) return existing;
+  if (existing) {
+    return reinitializeSessionWithFormatIfNeeded({
+      session: existing,
+      format,
+    });
+  }
 
   const matchIdAsNumber = toNumber(matchId);
   if (!matchIdAsNumber) return null;
@@ -863,12 +939,25 @@ const persistSessionState = async ({
 
 export const mutateBanPickSession = async ({
   roundSlug,
+  matchId,
   user,
   command,
   mapId,
   side,
 }) => {
-  const session = await getBanPickSessionByRoundSlug(roundSlug);
+  const normalizedRoundSlug = String(roundSlug ?? "")
+    .trim()
+    .toLowerCase();
+
+  let session = normalizedRoundSlug
+    ? await getBanPickSessionByRoundSlug(normalizedRoundSlug)
+    : null;
+
+  const matchIdAsNumber = toNumber(matchId);
+  if (!session && matchIdAsNumber) {
+    session = await getBanPickSessionByMatchId(matchIdAsNumber);
+  }
+
   if (!session) {
     return { ok: false, status: 404, error: "Không tìm thấy phiên ban/pick" };
   }
@@ -1023,7 +1112,7 @@ export const mutateBanPickSession = async ({
     });
   }
 
-  const refreshed = await getBanPickSessionByRoundSlug(roundSlug);
+  const refreshed = await getBanPickSessionByRoundSlug(session.round_slug);
 
   return {
     ok: true,
