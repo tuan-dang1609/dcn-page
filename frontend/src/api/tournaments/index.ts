@@ -4,6 +4,7 @@ import type {
   Bracket,
   DataEnvelope,
   Match,
+  TournamentTeamPlayersResponse,
   Tournament,
   TournamentBySlugResponse,
   TournamentPayload,
@@ -40,6 +41,11 @@ export const getBracketsByTournamentId = (tournamentId: number | string) =>
 export const getMatchesByBracketId = (bracketId: number | string) =>
   axios.get<DataEnvelope<Match[]>>(
     `${tournamentsBaseUrl}/matches/brackets/${bracketId}/matches`,
+  );
+
+export const getTournamentTeamPlayers = (tournamentTeamId: number | string) =>
+  axios.get<TournamentTeamPlayersResponse>(
+    `${tournamentsBaseUrl}/team/players/${tournamentTeamId}`,
   );
 
 export const getMatchesByTournamentId = async (
@@ -448,6 +454,7 @@ export type {
   Bracket,
   DataEnvelope,
   Match,
+  TournamentTeamPlayersResponse,
   Tournament,
   TournamentBySlugResponse,
   TournamentPayload,

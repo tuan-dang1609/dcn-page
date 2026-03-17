@@ -33,10 +33,27 @@ export interface ValorantApiMatchInfo {
   gameStartMillis?: number;
 }
 
+export interface ValorantApiRoundResult {
+  roundNum?: number;
+  winningTeam?: string;
+  winningTeamRole?: string;
+  roundCeremony?: string;
+  roundResult?: string;
+  roundResultCode?: string;
+  roundResultType?: string;
+  roundResultReason?: string;
+  roundEndType?: string;
+  roundOutcome?: string;
+  roundWinMethod?: string;
+  winType?: string;
+  endType?: string;
+}
+
 export interface ValorantApiMatchData {
   matchInfo?: ValorantApiMatchInfo;
   players?: ValorantApiPlayer[];
   teams?: ValorantApiTeam[];
+  roundResults?: ValorantApiRoundResult[];
 }
 
 export interface ValorantMatchDataResponse {
