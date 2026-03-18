@@ -163,7 +163,7 @@ const TournamentCard = ({
           className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-700"
           loading="lazy"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-card via-card/30 to-transparent" />
+        <div className="absolute inset-0 bg-linear-to-t from-card via-card/30 to-transparent" />
         <div className="absolute top-3 left-3">
           <span
             className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${status.cls}`}
@@ -377,7 +377,7 @@ const SeriesPage = () => {
             backgroundPosition: "center",
           }}
         />
-        <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2" />
+        <div className="absolute top-0 left-0 w-150 h-150 bg-primary/5 rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2" />
 
         <div className="max-w-6xl mx-auto px-6 md:px-10 pt-16 pb-14 md:pt-24 md:pb-20 relative">
           <h1 className="text-4xl md:text-6xl font-bold leading-[1.1] max-w-3xl mb-5 text-foreground">
@@ -407,6 +407,21 @@ const SeriesPage = () => {
               </div>
             ))}
           </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button asChild>
+              <Link to={`/series/${canonicalSeriesSlug}/pickem`}>
+                Choi Pick'em Series
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link
+                to={`/ops/series-pickem-setup?series=${encodeURIComponent(canonicalSeriesSlug)}`}
+              >
+                Tao Pick'em
+              </Link>
+            </Button>
+          </div>
         </div>
       </section>
 
@@ -418,8 +433,8 @@ const SeriesPage = () => {
           </p>
         </div>
         <div className="relative overflow-hidden">
-          <div className="absolute left-0 top-0 bottom-0 w-20 bg-gradient-to-r from-background to-transparent z-10" />
-          <div className="absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-background to-transparent z-10" />
+          <div className="absolute left-0 top-0 bottom-0 w-20 bg-linear-to-r from-background to-transparent z-10" />
+          <div className="absolute right-0 top-0 bottom-0 w-20 bg-linear-to-l from-background to-transparent z-10" />
           <div className="marquee-track">
             {marqueeTeams.map((team, i) => (
               <div
@@ -572,7 +587,7 @@ const SeriesPage = () => {
           <div className="bg-card border border-border rounded-2xl overflow-x-auto">
             {/* Header */}
             <div
-              className="grid gap-0 min-w-[700px]"
+              className="grid gap-0 min-w-175"
               style={{
                 gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
               }}
@@ -616,7 +631,7 @@ const SeriesPage = () => {
               return (
                 <div
                   key={entry.team}
-                  className="grid gap-0 min-w-[700px] items-center transition-colors hover:bg-secondary/50"
+                  className="grid gap-0 min-w-175 items-center transition-colors hover:bg-secondary/50"
                   style={{
                     gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
                   }}

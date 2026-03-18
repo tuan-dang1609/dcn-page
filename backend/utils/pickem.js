@@ -27,16 +27,60 @@ const asJson = (value, fallback) => {
   return value;
 };
 
-const flattenValue = (value) => {
-  if (Array.isArray(value)) return value.flatMap((item) => flattenValue(item));
-  if (value && typeof value === "object") {
-    return Object.values(value).flatMap((item) => flattenValue(item));
+const asObject = (value, fallback = {}) => {
+  const parsed = asJson(value, fallback);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return fallback;
   }
-  return [value];
+  return parsed;
+};
+
+const extractOptionTokens = (value) => {
+  const initial = asJson(value, []);
+  const stack = [initial];
+  const tokens = [];
+
+  while (stack.length) {
+    const item = stack.pop();
+
+    if (Array.isArray(item)) {
+      for (const entry of item) stack.push(entry);
+      continue;
+    }
+
+    if (item && typeof item === "object") {
+      const preferredValue =
+        item.value ??
+        item.option_value ??
+        item.team_id ??
+        item.user_id ??
+        item.id ??
+        null;
+
+      if (preferredValue !== null && preferredValue !== undefined) {
+        tokens.push(preferredValue);
+        continue;
+      }
+
+      if (item.label !== undefined || item.name !== undefined) {
+        tokens.push(item.label ?? item.name);
+        continue;
+      }
+
+      for (const entry of Object.values(item)) {
+        stack.push(entry);
+      }
+      continue;
+    }
+
+    tokens.push(item);
+  }
+
+  return tokens;
 };
 
 export const normalizeOptions = (value) => {
-  const raw = flattenValue(asJson(value, []));
+  const raw = extractOptionTokens(value);
   const unique = new Set();
 
   raw.forEach((item) => {
@@ -84,6 +128,7 @@ const normalizeQuestionPayload = (item) => {
       item?.bracket_id !== undefined && item?.bracket_id !== null
         ? String(item.bracket_id)
         : null,
+    meta: asObject(item?.meta, {}),
     openTime: toIsoOrNull(item?.openTime ?? item?.open_time),
     closeTime: toIsoOrNull(item?.closeTime ?? item?.close_time),
   };
@@ -145,6 +190,7 @@ export const ensurePickemTables = async () => {
         score NUMERIC(10,2) NOT NULL DEFAULT 0,
         max_choose INT NOT NULL DEFAULT 1,
         correct_answer JSONB NOT NULL DEFAULT '[]'::jsonb,
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb,
         game_short TEXT NULL,
         bracket_id TEXT NULL,
         open_time TIMESTAMPTZ NULL,
@@ -153,6 +199,13 @@ export const ensurePickemTables = async () => {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE (challenge_id, question_id)
       )
+      `,
+    );
+
+    await pool.query(
+      `
+      ALTER TABLE pickem_questions
+      ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb
       `,
     );
 
@@ -257,13 +310,14 @@ export const upsertPickemQuestions = async ({ leagueId, questions }) => {
         score,
         max_choose,
         correct_answer,
+        meta,
         game_short,
         bracket_id,
         open_time,
         close_time,
         updated_at
       )
-      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10, $11, $12, NOW())
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13, NOW())
       ON CONFLICT (challenge_id, question_id)
       DO UPDATE SET
         question = EXCLUDED.question,
@@ -272,6 +326,7 @@ export const upsertPickemQuestions = async ({ leagueId, questions }) => {
         score = EXCLUDED.score,
         max_choose = EXCLUDED.max_choose,
         correct_answer = EXCLUDED.correct_answer,
+        meta = EXCLUDED.meta,
         game_short = EXCLUDED.game_short,
         bracket_id = EXCLUDED.bracket_id,
         open_time = EXCLUDED.open_time,
@@ -288,6 +343,7 @@ export const upsertPickemQuestions = async ({ leagueId, questions }) => {
         normalized.score,
         normalized.maxChoose,
         JSON.stringify(normalized.correctAnswer ?? []),
+        JSON.stringify(normalized.meta ?? {}),
         normalized.gameShort,
         normalized.bracketId,
         normalized.openTime,
@@ -317,6 +373,7 @@ export const getPickemQuestionsByLeague = async (leagueId) => {
       q.score,
       q.max_choose,
       q.correct_answer,
+      q.meta,
       q.game_short,
       q.bracket_id,
       q.open_time,
@@ -557,4 +614,988 @@ export const getUsersByIds = async (userIds) => {
   );
 
   return new Map(rows.map((row) => [String(row.id), row]));
+};
+
+const normalizeText = (value) => String(value ?? "").trim();
+
+const normalizeGameShort = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "val" || normalized === "valorantv2") {
+    return "valorant";
+  }
+  if (normalized === "leagueoflegends" || normalized === "league_of_legends") {
+    return "lol";
+  }
+  if (normalized === "teamfighttactics" || normalized === "teamfight_tactics") {
+    return "tft";
+  }
+  return normalized;
+};
+
+const uniqueStrings = (values) => {
+  const seen = new Set();
+  const result = [];
+
+  for (const value of values) {
+    const text = normalizeText(value);
+    if (!text) continue;
+
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    result.push(text);
+  }
+
+  return result;
+};
+
+const buildTeamLabel = ({ id, name, shortName }) => {
+  const fullName = normalizeText(name);
+  const short = normalizeText(shortName);
+
+  if (fullName && short && fullName.toLowerCase() !== short.toLowerCase()) {
+    return `${fullName} (${short})`;
+  }
+
+  if (fullName) return fullName;
+  if (short) return short;
+
+  const teamId = toNumber(id);
+  return teamId ? `Team #${teamId}` : "";
+};
+
+const buildPlayerLabel = ({ id, name }) => {
+  const displayName = normalizeText(name);
+  const userId = toNumber(id);
+
+  if (displayName && userId) return `${displayName} (#${userId})`;
+  if (displayName) return displayName;
+  if (userId) return `Player #${userId}`;
+  return "";
+};
+
+const getTournamentContext = async (tournamentId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT t.id, t.name, g.short_name AS game_short
+    FROM tournaments t
+    LEFT JOIN games g ON g.id = t.game_id
+    WHERE t.id = $1
+    LIMIT 1
+    `,
+    [tournamentId],
+  );
+
+  return rows[0] ?? null;
+};
+
+const getSeriesContext = async (seriesId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT id, slug, name
+    FROM series
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [seriesId],
+  );
+
+  return rows[0] ?? null;
+};
+
+const getSeriesTournaments = async (seriesId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      t.id,
+      t.name,
+      g.short_name AS game_short
+    FROM tournaments t
+    LEFT JOIN games g ON g.id = t.game_id
+    WHERE t.series_id = $1
+    ORDER BY t.id ASC
+    `,
+    [seriesId],
+  );
+
+  return rows;
+};
+
+const getSeriesTeamsByTournamentIds = async (tournamentIds) => {
+  if (!Array.isArray(tournamentIds) || !tournamentIds.length) {
+    return [];
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT DISTINCT
+      t.id,
+      t.name,
+      t.short_name
+    FROM tournament_teams tt
+    JOIN teams t ON t.id = tt.team_id
+    WHERE tt.tournament_id = ANY($1::int[])
+    ORDER BY t.name ASC, t.id ASC
+    `,
+    [tournamentIds],
+  );
+
+  return rows;
+};
+
+const getSeriesPlayersByTournamentIds = async (tournamentIds) => {
+  if (!Array.isArray(tournamentIds) || !tournamentIds.length) {
+    return [];
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT DISTINCT
+      u.id,
+      COALESCE(
+        NULLIF(TRIM(u.nickname), ''),
+        NULLIF(TRIM(u.username), ''),
+        CONCAT('Player ', u.id::text)
+      ) AS display_name
+    FROM tournament_teams tt
+    JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+    JOIN users u ON u.id = ttp.user_id
+    WHERE tt.tournament_id = ANY($1::int[])
+    ORDER BY display_name ASC, u.id ASC
+    `,
+    [tournamentIds],
+  );
+
+  return rows;
+};
+
+const getTournamentTeams = async (tournamentId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      t.id,
+      t.name,
+      t.short_name,
+      t.logo_url
+    FROM tournament_teams tt
+    JOIN teams t ON t.id = tt.team_id
+    WHERE tt.tournament_id = $1
+    ORDER BY tt.id ASC
+    `,
+    [tournamentId],
+  );
+
+  return rows;
+};
+
+const getTournamentPlayers = async (tournamentId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT DISTINCT
+      u.id,
+      COALESCE(
+        NULLIF(TRIM(u.nickname), ''),
+        NULLIF(TRIM(u.username), ''),
+        CONCAT('Player ', u.id::text)
+      ) AS display_name
+    FROM tournament_teams tt
+    JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+    JOIN users u ON u.id = ttp.user_id
+    WHERE tt.tournament_id = $1
+    ORDER BY display_name ASC, u.id ASC
+    `,
+    [tournamentId],
+  );
+
+  return rows;
+};
+
+const getTournamentBrackets = async (tournamentId) => {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      b.id,
+      b.name,
+      b.stage,
+      b.format_id,
+      f.type AS format_type,
+      f.has_losers_bracket
+    FROM brackets b
+    JOIN formats f ON f.id = b.format_id
+    WHERE b.tournament_id = $1
+    ORDER BY b.id ASC
+    `,
+    [tournamentId],
+  );
+
+  return rows;
+};
+
+const getMatchesByBracketIds = async (bracketIds) => {
+  if (!Array.isArray(bracketIds) || bracketIds.length === 0) {
+    return [];
+  }
+
+  const { rows } = await pool.query(
+    `
+    SELECT
+      m.id,
+      m.bracket_id,
+      m.round_number,
+      m.match_no,
+      m.team_a_id,
+      m.team_b_id,
+      m.winner_team_id,
+      m.status,
+      t1.name AS team_a_name,
+      t1.short_name AS team_a_short_name,
+      t2.name AS team_b_name,
+      t2.short_name AS team_b_short_name
+    FROM matches m
+    LEFT JOIN teams t1 ON t1.id = m.team_a_id
+    LEFT JOIN teams t2 ON t2.id = m.team_b_id
+    WHERE m.bracket_id = ANY($1::int[])
+    ORDER BY m.bracket_id ASC, m.round_number ASC, m.match_no ASC, m.id ASC
+    `,
+    [bracketIds],
+  );
+
+  return rows;
+};
+
+const getTopTeamLabelsByPlacement = async (tournamentId, limit) => {
+  if (!limit || limit <= 0) return [];
+
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT
+        r.team_id,
+        t.name,
+        t.short_name
+      FROM tournament_team_results r
+      JOIN teams t ON t.id = r.team_id
+      WHERE r.tournament_id = $1
+        AND r.placement IS NOT NULL
+      ORDER BY r.placement ASC, r.team_id ASC
+      LIMIT $2
+      `,
+      [tournamentId, limit],
+    );
+
+    return uniqueStrings(
+      rows.map((row) =>
+        buildTeamLabel({
+          id: row.team_id,
+          name: row.name,
+          shortName: row.short_name,
+        }),
+      ),
+    );
+  } catch {
+    return [];
+  }
+};
+
+const resolveBracketKind = (bracket) => {
+  const formatType = normalizeText(bracket?.format_type).toLowerCase();
+
+  if (formatType === "swiss") return "swiss";
+  if (formatType !== "elimination") return null;
+
+  return bracket?.has_losers_bracket ? "double" : "single";
+};
+
+const toBracketGroupLabel = (kind, stage) => {
+  if (kind === "single") return "Single Elimination";
+
+  if (kind === "double") {
+    const normalizedStage = normalizeText(stage);
+    if (normalizedStage) {
+      return `Double Elimination (${normalizedStage})`;
+    }
+    return "Double Elimination";
+  }
+
+  return "Bracket";
+};
+
+const buildMatchWinnerQuestion = ({
+  bracket,
+  kind,
+  match,
+  gameShort,
+  tournamentId,
+  tournamentName,
+}) => {
+  const matchId = toNumber(match?.id);
+  const bracketId = toNumber(bracket?.id);
+  const teamAId = toNumber(match?.team_a_id);
+  const teamBId = toNumber(match?.team_b_id);
+
+  if (!matchId || !bracketId || !teamAId || !teamBId) return null;
+
+  const teamAName = buildTeamLabel({
+    id: teamAId,
+    name: match?.team_a_name,
+    shortName: match?.team_a_short_name,
+  });
+  const teamBName = buildTeamLabel({
+    id: teamBId,
+    name: match?.team_b_name,
+    shortName: match?.team_b_short_name,
+  });
+
+  if (!teamAName || !teamBName) return null;
+
+  const roundNumber = toNumber(match?.round_number) ?? 1;
+  const matchNo = toNumber(match?.match_no) ?? 1;
+  const winnerTeamId = toNumber(match?.winner_team_id);
+
+  let correctAnswer = [];
+  if (winnerTeamId === teamAId) correctAnswer = [teamAName];
+  if (winnerTeamId === teamBId) correctAnswer = [teamBName];
+
+  const sectionLabel = toBracketGroupLabel(kind, bracket?.stage);
+  const tournamentLabel = normalizeText(tournamentName)
+    ? `[${normalizeText(tournamentName)}] `
+    : "";
+
+  return {
+    id: matchId,
+    question: `${tournamentLabel}${sectionLabel} - Round ${roundNumber} Match ${matchNo}: Đội nào thắng?`,
+    type: kind === "single" ? "single-elim-match" : "double-elim-match",
+    options: [teamAName, teamBName],
+    score: 1,
+    maxChoose: 1,
+    correctAnswer,
+    game_short: gameShort || null,
+    bracket_id: String(bracketId),
+    meta: {
+      section: kind === "single" ? "single-elim" : "double-elim",
+      bracketId,
+      bracketName: normalizeText(bracket?.name) || null,
+      stage: normalizeText(bracket?.stage) || null,
+      roundNumber,
+      matchNo,
+      matchId,
+      tournamentId: toNumber(tournamentId),
+      tournamentName: normalizeText(tournamentName) || null,
+    },
+  };
+};
+
+const SWISS_QUESTION_ID_BASE = 1000000000;
+
+const getPropGameCode = (gameShort) => {
+  const normalized = normalizeGameShort(gameShort);
+  if (normalized === "valorant") return 11;
+  if (normalized === "lol") return 12;
+  if (normalized === "tft") return 13;
+  return 19;
+};
+
+const buildPropQuestionId = ({ tournamentId, gameShort, index }) => {
+  const safeTournamentId = Math.max(toNumber(tournamentId) ?? 0, 0) % 1000000;
+  const safeIndex = Math.max(toNumber(index) ?? 0, 0);
+  const base = getPropGameCode(gameShort) * 100000000;
+
+  return -1 * (base + safeTournamentId * 100 + safeIndex);
+};
+
+const VALORANT_AGENT_OPTIONS = [
+  "Jett",
+  "Raze",
+  "Omen",
+  "Sova",
+  "Viper",
+  "Skye",
+  "Killjoy",
+  "Cypher",
+  "Breach",
+  "KAY/O",
+  "Fade",
+  "Gekko",
+  "Iso",
+  "Clove",
+  "Tejo",
+];
+
+const createPropQuestion = ({
+  questionId,
+  question,
+  type,
+  options,
+  gameShort,
+  tournamentId,
+  tournamentName,
+  statKey,
+  correctAnswer = [],
+}) => ({
+  id: questionId,
+  question,
+  type,
+  options,
+  score: 2,
+  maxChoose: 1,
+  correctAnswer,
+  game_short: gameShort || null,
+  bracket_id: null,
+  meta: {
+    section: "prop",
+    statKey,
+    tournamentId: toNumber(tournamentId),
+    tournamentName: normalizeText(tournamentName) || null,
+  },
+});
+
+const toTextOptions = (value) =>
+  uniqueStrings(
+    extractOptionTokens(value)
+      .map((item) => normalizeText(item))
+      .filter(Boolean),
+  );
+
+const keepCorrectAnswersWithinOptions = (correctAnswer, options) => {
+  const normalizedOptionSet = new Set(
+    (options ?? []).map((option) => normalizeText(option).toLowerCase()),
+  );
+
+  return toTextOptions(correctAnswer).filter((item) =>
+    normalizedOptionSet.has(item.toLowerCase()),
+  );
+};
+
+const applySeriesOptionPoolsToQuestion = ({
+  question,
+  seriesTeamOptions,
+  seriesPlayerOptions,
+}) => {
+  if (!question || typeof question !== "object") return question;
+
+  const section = normalizeText(question?.meta?.section).toLowerCase();
+  const type = normalizeText(question?.type).toLowerCase();
+  const statKey = normalizeText(question?.meta?.statKey).toLowerCase();
+
+  let optionPool = null;
+
+  if (section === "swiss" || type.includes("swiss")) {
+    optionPool = seriesTeamOptions;
+  } else if (section === "prop") {
+    if (statKey === "most-picked-agent") {
+      return question;
+    }
+
+    if (statKey === "champion" || type.includes("champion")) {
+      optionPool = seriesTeamOptions;
+    } else {
+      optionPool =
+        seriesPlayerOptions.length > 0 ? seriesPlayerOptions : seriesTeamOptions;
+    }
+  }
+
+  if (!optionPool || optionPool.length === 0) {
+    return question;
+  }
+
+  const maxChoose = clampPositiveInt(
+    question?.maxChoose ?? question?.max_choose,
+    1,
+  );
+
+  return {
+    ...question,
+    options: optionPool,
+    maxChoose: Math.min(maxChoose, optionPool.length),
+    correctAnswer: keepCorrectAnswersWithinOptions(
+      question?.correctAnswer ?? question?.correct_answer ?? [],
+      optionPool,
+    ),
+  };
+};
+
+export const generatePickemQuestionsForTournament = async ({
+  leagueId,
+  tournamentId,
+  gameShort,
+}) => {
+  const normalizedLeagueId = normalizeText(leagueId);
+  const normalizedTournamentId = toNumber(tournamentId);
+
+  if (!normalizedLeagueId || !normalizedTournamentId) {
+    return {
+      leagueId: normalizedLeagueId,
+      tournamentId: normalizedTournamentId,
+      gameShort: normalizeGameShort(gameShort),
+      questions: [],
+      summary: {
+        total: 0,
+        singleMatchQuestions: 0,
+        doubleMatchQuestions: 0,
+        swissQuestions: 0,
+        propQuestions: 0,
+      },
+    };
+  }
+
+  const tournament = await getTournamentContext(normalizedTournamentId);
+  if (!tournament) {
+    return {
+      leagueId: normalizedLeagueId,
+      tournamentId: normalizedTournamentId,
+      gameShort: normalizeGameShort(gameShort),
+      questions: [],
+      summary: {
+        total: 0,
+        singleMatchQuestions: 0,
+        doubleMatchQuestions: 0,
+        swissQuestions: 0,
+        propQuestions: 0,
+      },
+    };
+  }
+
+  const resolvedGameShort =
+    normalizeGameShort(gameShort) || normalizeGameShort(tournament.game_short);
+  const normalizedTournamentName = normalizeText(tournament.name);
+  const tournamentLabel = normalizedTournamentName
+    ? `[${normalizedTournamentName}] `
+    : "";
+
+  const [teams, players, brackets, topEightTeams] = await Promise.all([
+    getTournamentTeams(normalizedTournamentId),
+    getTournamentPlayers(normalizedTournamentId),
+    getTournamentBrackets(normalizedTournamentId),
+    getTopTeamLabelsByPlacement(normalizedTournamentId, 8),
+  ]);
+
+  const teamOptions = uniqueStrings(
+    teams.map((team) =>
+      buildTeamLabel({
+        id: team.id,
+        name: team.name,
+        shortName: team.short_name,
+      }),
+    ),
+  );
+
+  const playerOptions = uniqueStrings(
+    players.map((player) =>
+      buildPlayerLabel({ id: player.id, name: player.display_name }),
+    ),
+  );
+
+  const bracketIds = brackets
+    .map((bracket) => toNumber(bracket.id))
+    .filter((id) => Number.isFinite(id));
+
+  const matches = await getMatchesByBracketIds(bracketIds);
+  const matchesByBracket = new Map();
+  for (const match of matches) {
+    const bracketId = toNumber(match?.bracket_id);
+    if (!bracketId) continue;
+    if (!matchesByBracket.has(bracketId)) matchesByBracket.set(bracketId, []);
+    matchesByBracket.get(bracketId).push(match);
+  }
+
+  const generatedQuestions = [];
+  const summary = {
+    total: 0,
+    singleMatchQuestions: 0,
+    doubleMatchQuestions: 0,
+    swissQuestions: 0,
+    propQuestions: 0,
+  };
+
+  for (const bracket of brackets) {
+    const bracketId = toNumber(bracket.id);
+    if (!bracketId) continue;
+
+    const kind = resolveBracketKind(bracket);
+    if (kind === "single" || kind === "double") {
+      const bracketMatches = matchesByBracket.get(bracketId) ?? [];
+      for (const match of bracketMatches) {
+        const question = buildMatchWinnerQuestion({
+          bracket,
+          kind,
+          match,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+        });
+
+        if (!question) continue;
+        generatedQuestions.push(question);
+
+        if (kind === "single") summary.singleMatchQuestions += 1;
+        if (kind === "double") summary.doubleMatchQuestions += 1;
+      }
+      continue;
+    }
+
+    if (kind === "swiss") {
+      if (!teamOptions.length) continue;
+
+      const expectedPickCount = teamOptions.length > 8 ? 8 : 4;
+      const pickCount = Math.min(expectedPickCount, teamOptions.length);
+      if (pickCount <= 0) continue;
+
+      const correctAnswer =
+        topEightTeams.length >= pickCount ? topEightTeams.slice(0, pickCount) : [];
+
+      generatedQuestions.push({
+        id: SWISS_QUESTION_ID_BASE + bracketId,
+        question: `${tournamentLabel}Swiss: Chọn ${pickCount} đội đi tiếp`,
+        type: "swiss-pick",
+        options: teamOptions,
+        score: 1,
+        maxChoose: pickCount,
+        correctAnswer,
+        game_short: resolvedGameShort || null,
+        bracket_id: String(bracketId),
+        meta: {
+          section: "swiss",
+          bracketId,
+          bracketName: normalizeText(bracket.name) || null,
+          pickCount,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName || null,
+        },
+      });
+
+      summary.swissQuestions += 1;
+    }
+  }
+
+  const playerOrTeamOptions =
+    playerOptions.length > 0 ? playerOptions : teamOptions;
+
+  if (resolvedGameShort === "valorant") {
+    generatedQuestions.push(
+      createPropQuestion({
+        questionId: buildPropQuestionId({
+          tournamentId: normalizedTournamentId,
+          gameShort: resolvedGameShort,
+          index: 1,
+        }),
+        question: `${tournamentLabel}Agent xuất hiện nhiều nhất giải là ai?`,
+        type: "valorant-prop",
+        options: VALORANT_AGENT_OPTIONS,
+        gameShort: resolvedGameShort,
+        tournamentId: normalizedTournamentId,
+        tournamentName: normalizedTournamentName,
+        statKey: "most-picked-agent",
+      }),
+    );
+
+    if (playerOrTeamOptions.length > 0) {
+      generatedQuestions.push(
+        createPropQuestion({
+          questionId: buildPropQuestionId({
+            tournamentId: normalizedTournamentId,
+            gameShort: resolvedGameShort,
+            index: 2,
+          }),
+          question: `${tournamentLabel}Ai sẽ là MVP của giải Valorant?`,
+          type: "valorant-prop",
+          options: playerOrTeamOptions,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+          statKey: "mvp",
+        }),
+      );
+
+      generatedQuestions.push(
+        createPropQuestion({
+          questionId: buildPropQuestionId({
+            tournamentId: normalizedTournamentId,
+            gameShort: resolvedGameShort,
+            index: 3,
+          }),
+          question: `${tournamentLabel}Ai có tổng kill nhiều nhất?`,
+          type: "valorant-prop",
+          options: playerOrTeamOptions,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+          statKey: "most-kills",
+        }),
+      );
+
+      generatedQuestions.push(
+        createPropQuestion({
+          questionId: buildPropQuestionId({
+            tournamentId: normalizedTournamentId,
+            gameShort: resolvedGameShort,
+            index: 4,
+          }),
+          question: `${tournamentLabel}Ai có HS% cao nhất?`,
+          type: "valorant-prop",
+          options: playerOrTeamOptions,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+          statKey: "highest-hs-percent",
+        }),
+      );
+    }
+  }
+
+  if (resolvedGameShort === "lol") {
+    if (playerOrTeamOptions.length > 0) {
+      generatedQuestions.push(
+        createPropQuestion({
+          questionId: buildPropQuestionId({
+            tournamentId: normalizedTournamentId,
+            gameShort: resolvedGameShort,
+            index: 1,
+          }),
+          question: `${tournamentLabel}Ai sẽ là MVP của giải LoL?`,
+          type: "lol-prop",
+          options: playerOrTeamOptions,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+          statKey: "mvp",
+        }),
+      );
+
+      generatedQuestions.push(
+        createPropQuestion({
+          questionId: buildPropQuestionId({
+            tournamentId: normalizedTournamentId,
+            gameShort: resolvedGameShort,
+            index: 2,
+          }),
+          question: `${tournamentLabel}Ai có tổng mạng hạ gục cao nhất?`,
+          type: "lol-prop",
+          options: playerOrTeamOptions,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+          statKey: "most-kills",
+        }),
+      );
+
+      generatedQuestions.push(
+        createPropQuestion({
+          questionId: buildPropQuestionId({
+            tournamentId: normalizedTournamentId,
+            gameShort: resolvedGameShort,
+            index: 3,
+          }),
+          question: `${tournamentLabel}Ai có KDA cao nhất?`,
+          type: "lol-prop",
+          options: playerOrTeamOptions,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+          statKey: "highest-kda",
+        }),
+      );
+
+      generatedQuestions.push(
+        createPropQuestion({
+          questionId: buildPropQuestionId({
+            tournamentId: normalizedTournamentId,
+            gameShort: resolvedGameShort,
+            index: 4,
+          }),
+          question: `${tournamentLabel}Ai có tổng hỗ trợ cao nhất?`,
+          type: "lol-prop",
+          options: playerOrTeamOptions,
+          gameShort: resolvedGameShort,
+          tournamentId: normalizedTournamentId,
+          tournamentName: normalizedTournamentName,
+          statKey: "most-assists",
+        }),
+      );
+    }
+  }
+
+  if (resolvedGameShort === "tft" && teamOptions.length > 0) {
+    const champion = topEightTeams.length > 0 ? [topEightTeams[0]] : [];
+
+    generatedQuestions.push(
+      createPropQuestion({
+        questionId: buildPropQuestionId({
+          tournamentId: normalizedTournamentId,
+          gameShort: resolvedGameShort,
+          index: 1,
+        }),
+        question: `${tournamentLabel}Đội nào sẽ vô địch giải TFT?`,
+        type: "tft-champion",
+        options: teamOptions,
+        gameShort: resolvedGameShort,
+        tournamentId: normalizedTournamentId,
+        tournamentName: normalizedTournamentName,
+        statKey: "champion",
+        correctAnswer: champion,
+      }),
+    );
+  }
+
+  summary.total = generatedQuestions.length;
+  summary.propQuestions = Math.max(
+    generatedQuestions.length -
+      summary.singleMatchQuestions -
+      summary.doubleMatchQuestions -
+      summary.swissQuestions,
+    0,
+  );
+
+  return {
+    leagueId: normalizedLeagueId,
+    tournamentId: normalizedTournamentId,
+    gameShort: resolvedGameShort,
+    questions: generatedQuestions,
+    summary,
+  };
+};
+
+export const generatePickemQuestionsForSeries = async ({
+  leagueId,
+  seriesId,
+  gameShort,
+}) => {
+  const normalizedLeagueId = normalizeText(leagueId);
+  const normalizedSeriesId = toNumber(seriesId);
+  const requestedGameShort = normalizeGameShort(gameShort);
+
+  if (!normalizedLeagueId || !normalizedSeriesId) {
+    return {
+      leagueId: normalizedLeagueId,
+      seriesId: normalizedSeriesId,
+      gameShort: requestedGameShort,
+      questions: [],
+      summary: {
+        total: 0,
+        tournaments: 0,
+        singleMatchQuestions: 0,
+        doubleMatchQuestions: 0,
+        swissQuestions: 0,
+        propQuestions: 0,
+      },
+    };
+  }
+
+  const series = await getSeriesContext(normalizedSeriesId);
+  if (!series) {
+    return {
+      leagueId: normalizedLeagueId,
+      seriesId: normalizedSeriesId,
+      gameShort: requestedGameShort,
+      questions: [],
+      summary: {
+        total: 0,
+        tournaments: 0,
+        singleMatchQuestions: 0,
+        doubleMatchQuestions: 0,
+        swissQuestions: 0,
+        propQuestions: 0,
+      },
+    };
+  }
+
+  const seriesTournaments = await getSeriesTournaments(normalizedSeriesId);
+  const selectedTournaments = seriesTournaments.filter((item) => {
+    if (!requestedGameShort || requestedGameShort === "all") return true;
+    const tournamentGame = normalizeGameShort(item?.game_short);
+    return tournamentGame === requestedGameShort;
+  });
+
+  const selectedTournamentIds = selectedTournaments
+    .map((item) => toNumber(item?.id))
+    .filter((id) => Number.isFinite(id));
+
+  const [seriesTeams, seriesPlayers] = await Promise.all([
+    getSeriesTeamsByTournamentIds(selectedTournamentIds),
+    getSeriesPlayersByTournamentIds(selectedTournamentIds),
+  ]);
+
+  const seriesTeamOptions = uniqueStrings(
+    seriesTeams.map((team) =>
+      buildTeamLabel({
+        id: team.id,
+        name: team.name,
+        shortName: team.short_name,
+      }),
+    ),
+  );
+
+  const seriesPlayerOptions = uniqueStrings(
+    seriesPlayers.map((player) =>
+      buildPlayerLabel({
+        id: player.id,
+        name: player.display_name,
+      }),
+    ),
+  );
+
+  const allQuestions = [];
+  const summary = {
+    total: 0,
+    tournaments: selectedTournaments.length,
+    singleMatchQuestions: 0,
+    doubleMatchQuestions: 0,
+    swissQuestions: 0,
+    propQuestions: 0,
+  };
+
+  for (const tournament of selectedTournaments) {
+    const tournamentResult = await generatePickemQuestionsForTournament({
+      leagueId: normalizedLeagueId,
+      tournamentId: tournament.id,
+      gameShort: normalizeGameShort(tournament.game_short),
+    });
+
+    if (Array.isArray(tournamentResult.questions)) {
+      const patchedQuestions = tournamentResult.questions.map((question) =>
+        applySeriesOptionPoolsToQuestion({
+          question,
+          seriesTeamOptions,
+          seriesPlayerOptions,
+        }),
+      );
+
+      allQuestions.push(...patchedQuestions);
+    }
+
+    summary.singleMatchQuestions += Number(
+      tournamentResult.summary?.singleMatchQuestions ?? 0,
+    );
+    summary.doubleMatchQuestions += Number(
+      tournamentResult.summary?.doubleMatchQuestions ?? 0,
+    );
+    summary.swissQuestions += Number(
+      tournamentResult.summary?.swissQuestions ?? 0,
+    );
+    summary.propQuestions += Number(tournamentResult.summary?.propQuestions ?? 0);
+  }
+
+  const questionById = new Map();
+  for (const question of allQuestions) {
+    const questionId = toNumber(question?.id);
+    if (!questionId) continue;
+    questionById.set(questionId, question);
+  }
+
+  const dedupedQuestions = Array.from(questionById.values()).sort((a, b) =>
+    Number(a.id) - Number(b.id),
+  );
+
+  summary.total = dedupedQuestions.length;
+
+  return {
+    leagueId: normalizedLeagueId,
+    seriesId: normalizedSeriesId,
+    seriesSlug: normalizeText(series.slug) || null,
+    seriesName: normalizeText(series.name) || null,
+    gameShort: requestedGameShort,
+    questions: dedupedQuestions,
+    summary,
+  };
 };

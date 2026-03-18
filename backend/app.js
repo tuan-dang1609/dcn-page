@@ -56,6 +56,7 @@ const defaultAllowedOrigins = [
   "http://localhost:8080",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://localhost:3000",
   "http://127.0.0.1:3000",
   "http://localhost:3001",
   "http://127.0.0.1:3001",
@@ -89,7 +90,8 @@ const buildCorsHeaders = (origin) => ({
   "access-control-allow-origin": normalizeOrigin(origin),
   "access-control-allow-credentials": "true",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  "access-control-allow-headers": "Content-Type, Authorization",
+  "access-control-allow-headers":
+    "Content-Type, Authorization, X-API-Key, X-User-Id",
   vary: "Origin",
 });
 

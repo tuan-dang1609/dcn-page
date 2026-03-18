@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS pickem_questions (
   score NUMERIC(10,2) NOT NULL DEFAULT 0,
   max_choose INT NOT NULL DEFAULT 1,
   correct_answer JSONB NOT NULL DEFAULT '[]'::jsonb,
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb,
   game_short TEXT NULL,
   bracket_id TEXT NULL,
   open_time TIMESTAMPTZ NULL,
@@ -26,6 +27,9 @@ CREATE TABLE IF NOT EXISTS pickem_questions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (challenge_id, question_id)
 );
+
+ALTER TABLE pickem_questions
+ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS pickem_responses (
   id BIGSERIAL PRIMARY KEY,
