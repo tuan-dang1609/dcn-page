@@ -36,7 +36,7 @@ export const API_BASE =
   apiBaseFromBun ??
   apiBaseFromProcess ??
   fallbackFromWindow ??
-  "https://dcn-page.onrender.com";
+  "http://localhost:8080";
 
 export const apiUrl = (path: string) => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;

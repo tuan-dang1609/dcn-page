@@ -66,15 +66,26 @@ interface RoundBanPickActionEnvelope {
   data: RoundBanPickPayload;
 }
 
+interface RoundBanPickInitInput {
+  match_id: number | string;
+  format?: "BO1" | "BO3" | "BO5";
+}
+
 export interface RoundBanPickActionInput {
   command: "select_map" | "confirm_action" | "select_side" | "reset";
   map_id?: string;
   side?: Side;
+  match_id?: number | string;
 }
 
 export const getRoundBanPick = (
   roundSlug: string,
-  query?: { match_id?: number | string; format?: string },
+  query?: {
+    match_id?: number | string;
+    format?: string;
+    cache_bust?: number | string;
+  },
+  token?: string | null,
 ) => {
   const params = new URLSearchParams();
 
@@ -86,11 +97,22 @@ export const getRoundBanPick = (
     params.set("format", query.format);
   }
 
+  if (query?.cache_bust !== undefined) {
+    params.set("_ts", String(query.cache_bust));
+  }
+
   const qs = params.toString();
   const suffix = qs ? `?${qs}` : "";
 
+  const headers = token
+    ? {
+        Authorization: `Bearer ${token}`,
+      }
+    : undefined;
+
   return axios.get<RoundBanPickEnvelope>(
     `${API_BASE}/api/tournaments/round/${roundSlug}/ban-pick${suffix}`,
+    headers ? { headers } : undefined,
   );
 };
 
@@ -107,6 +129,24 @@ export const mutateRoundBanPick = (
 
   return axios.post<RoundBanPickActionEnvelope>(
     `${API_BASE}/api/tournaments/round/${roundSlug}/ban-pick/action`,
+    payload,
+    headers ? { headers } : undefined,
+  );
+};
+
+export const initRoundBanPick = (
+  roundSlug: string,
+  payload: RoundBanPickInitInput,
+  token?: string | null,
+) => {
+  const headers = token
+    ? {
+        Authorization: `Bearer ${token}`,
+      }
+    : undefined;
+
+  return axios.post<RoundBanPickActionEnvelope>(
+    `${API_BASE}/api/tournaments/round/${roundSlug}/ban-pick/init`,
     payload,
     headers ? { headers } : undefined,
   );

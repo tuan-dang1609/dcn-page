@@ -4,9 +4,7 @@ import logger from "../utils/logger.js";
 import { pool } from "../utils/db.js";
 import {
   ensureBanPickTables,
-  getCurrentAction,
   ensureSessionByRoundSlug,
-  getBanPickSessionByRoundSlug,
   mutateBanPickSession,
   resolveUserTeamSlot,
   toBanPickPayload,
@@ -14,6 +12,7 @@ import {
 import {
   emitBanPickRoomState,
   emitBanPickViewerContext,
+  getBanPickMatchRoomName,
   getBanPickRoomName,
   setBanPickSocketServer,
 } from "./banPickHub.js";
@@ -123,6 +122,14 @@ const findUserByToken = async (token) => {
   return rows[0] ?? null;
 };
 
+const isCompatibleHttpServer = (candidate) =>
+  Boolean(
+    candidate &&
+    typeof candidate.on === "function" &&
+    typeof candidate.emit === "function" &&
+    typeof candidate.removeListener === "function",
+  );
+
 const ackError = (ack, error) => {
   if (typeof ack === "function") {
     ack({ ok: false, error });
@@ -184,6 +191,7 @@ const emitSessionState = ({ roundSlug, session, user, socket }) => {
 
 const mutateAndEmit = async ({
   roundSlug,
+  matchId,
   user,
   command,
   mapId,
@@ -193,6 +201,7 @@ const mutateAndEmit = async ({
 }) => {
   const result = await mutateBanPickSession({
     roundSlug,
+    matchId,
     user,
     command,
     mapId,
@@ -204,134 +213,22 @@ const mutateAndEmit = async ({
     return result;
   }
 
-  emitSessionState({ roundSlug, session: result.session, user });
-  ackSuccess(ack, toBanPickPayload(result.session, resolveUserTeamSlot(user, result.session)));
+  emitSessionState({ roundSlug, session: result.session, user, socket });
+  ackSuccess(
+    ack,
+    toBanPickPayload(result.session, resolveUserTeamSlot(user, result.session)),
+  );
 
   return result;
 };
 
-const normalizeLegacySide = (value) => {
-  const normalized = String(value ?? "")
-    .trim()
-    .toUpperCase();
-
-  if (normalized === "ATTACK" || normalized === "ATTACKER") return "ATK";
-  if (normalized === "DEFENSE" || normalized === "DEFENDER") return "DEF";
-
-  return normalized;
-};
-
-const handleLegacyAction = async ({ roundSlug, payload, user, socket, ack }) => {
-  const action = String(payload?.action ?? "")
-    .trim()
-    .toLowerCase();
-
-  if (!action) {
-    emitActionError({ socket, ack, error: "Thiếu action" });
-    return;
-  }
-
-  if (action === "reset") {
-    await mutateAndEmit({
-      roundSlug,
-      user,
-      command: "reset",
-      socket,
-      ack,
-    });
-    return;
-  }
-
-  if (action === "side" || action === "select_side") {
-    await mutateAndEmit({
-      roundSlug,
-      user,
-      command: "select_side",
-      side: normalizeLegacySide(payload?.side),
-      socket,
-      ack,
-    });
-    return;
-  }
-
-  if (action === "confirm" || action === "confirm_action") {
-    await mutateAndEmit({
-      roundSlug,
-      user,
-      command: "confirm_action",
-      socket,
-      ack,
-    });
-    return;
-  }
-
-  if (action === "select_map") {
-    await mutateAndEmit({
-      roundSlug,
-      user,
-      command: "select_map",
-      mapId: payload?.map_id ?? payload?.map,
-      socket,
-      ack,
-    });
-    return;
-  }
-
-  if (action === "ban" || action === "pick") {
-    const session = await getBanPickSessionByRoundSlug(roundSlug);
-    if (!session) {
-      emitActionError({ socket, ack, error: "Không tìm thấy phiên ban/pick" });
-      return;
-    }
-
-    const expectedAction = getCurrentAction(session.state)?.type;
-    if ((action === "ban" || action === "pick") && expectedAction && expectedAction !== action) {
-      emitActionError({
-        socket,
-        ack,
-        error: `Action không hợp lệ ở lượt hiện tại. Đang chờ ${expectedAction.toUpperCase()}`,
-      });
-      return;
-    }
-
-    const selectedResult = await mutateBanPickSession({
-      roundSlug,
-      user,
-      command: "select_map",
-      mapId: payload?.map_id ?? payload?.map,
-    });
-
-    if (!selectedResult.ok) {
-      emitActionError({ socket, ack, error: selectedResult.error });
-      return;
-    }
-
-    const confirmedResult = await mutateBanPickSession({
-      roundSlug,
-      user,
-      command: "confirm_action",
-    });
-
-    if (!confirmedResult.ok) {
-      emitActionError({ socket, ack, error: confirmedResult.error });
-      return;
-    }
-
-    emitSessionState({ roundSlug, session: confirmedResult.session, user });
-    ackSuccess(
-      ack,
-      toBanPickPayload(
-        confirmedResult.session,
-        resolveUserTeamSlot(user, confirmedResult.session),
-      ),
-    );
-    return;
-  }
-
-  emitActionError({ socket, ack, error: "Action không hợp lệ" });
-};
-
 export const registerBanPickSocket = async (httpServer) => {
+  if (!isCompatibleHttpServer(httpServer)) {
+    throw new Error(
+      "Incompatible HTTP server candidate for Socket.IO attachment",
+    );
+  }
+
   const io = new Server(httpServer, {
     path: "/socket.io",
     transports: ["websocket", "polling"],
@@ -348,6 +245,20 @@ export const registerBanPickSocket = async (httpServer) => {
       credentials: true,
     },
   });
+
+  const attachedHttpServer = io.httpServer ?? io.engine?.httpServer ?? null;
+  if (!attachedHttpServer) {
+    try {
+      io.close();
+    } catch {
+      // Ignore close errors when attachment did not happen.
+    }
+
+    throw new Error(
+      "Socket.IO initialized without attaching to an HTTP server",
+    );
+  }
+
   setBanPickSocketServer(io);
 
   try {
@@ -380,9 +291,16 @@ export const registerBanPickSocket = async (httpServer) => {
         return;
       }
 
-      const roomName = getBanPickRoomName(ensured.roundSlug);
-      socket.join(roomName);
+      const roundRoomName = getBanPickRoomName(ensured.roundSlug);
+      socket.join(roundRoomName);
+
+      const matchRoomName = getBanPickMatchRoomName(ensured.session?.match_id);
+      if (matchRoomName) {
+        socket.join(matchRoomName);
+      }
+
       socket.data.roundSlug = ensured.roundSlug;
+      socket.data.matchId = toNumber(ensured.session?.match_id);
 
       emitSessionState({
         roundSlug: ensured.roundSlug,
@@ -393,14 +311,19 @@ export const registerBanPickSocket = async (httpServer) => {
 
       ackSuccess(
         ack,
-        toBanPickPayload(ensured.session, resolveUserTeamSlot(user, ensured.session)),
+        toBanPickPayload(
+          ensured.session,
+          resolveUserTeamSlot(user, ensured.session),
+        ),
       );
     });
 
     socket.on("banpick:select_map", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "select_map",
         mapId: payload?.map_id,
@@ -411,8 +334,10 @@ export const registerBanPickSocket = async (httpServer) => {
 
     socket.on("banpick:confirm_action", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "confirm_action",
         socket,
@@ -422,8 +347,10 @@ export const registerBanPickSocket = async (httpServer) => {
 
     socket.on("banpick:select_side", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "select_side",
         side: payload?.side,
@@ -434,38 +361,15 @@ export const registerBanPickSocket = async (httpServer) => {
 
     socket.on("banpick:reset", async (payload = {}, ack) => {
       const roundSlug = resolveRoundSlug(payload, socket);
+      const matchId = toNumber(payload?.match_id ?? socket.data.matchId);
       await mutateAndEmit({
         roundSlug,
+        matchId,
         user,
         command: "reset",
         socket,
         ack,
       });
-    });
-
-    socket.on("banpick:action", async (payload = {}, ack) => {
-      const roundSlug = resolveRoundSlug(payload, socket);
-      await handleLegacyAction({ roundSlug, payload, user, socket, ack });
-    });
-
-    socket.on("banpick:sync", async (payload = {}, ack) => {
-      const roundSlug = resolveRoundSlug(payload, socket);
-      const session = await getBanPickSessionByRoundSlug(roundSlug);
-
-      if (!session) {
-        ackError(ack, "Không tìm thấy phiên ban/pick");
-        return;
-      }
-
-      const viewerTeamSlot = resolveUserTeamSlot(user, session);
-      const payloadData = toBanPickPayload(
-        session,
-        viewerTeamSlot,
-      );
-
-      socket.emit("banpick:state", payloadData);
-      emitBanPickViewerContext({ socket, viewerTeamSlot, userId: user?.id });
-      ackSuccess(ack, payloadData);
     });
   });
 

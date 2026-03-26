@@ -1,12 +1,17 @@
-import { useParams, Link, useOutletContext } from "react-router-dom";
+import { Navigate, useParams, Link, useOutletContext } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Calendar } from "lucide-react";
-import type { MatchDetail } from "@/types/matchDetail";
+import { ArrowLeft } from "lucide-react";
+import axios from "axios";
+import type { MatchDetail, RoundHistoryEntry } from "@/types/matchDetail";
+import { useAuth, type User as AuthUser } from "@/contexts/AuthContext";
+import { getRoundBanPick, type RoundBanPickPayload } from "@/api/banpick";
+import { API_BASE } from "@/lib/apiBase";
 import {
   getValorantMatchData,
   type ValorantApiMatchData,
   type ValorantApiPlayer,
+  type ValorantApiRoundResult,
 } from "@/api/valorant";
 import {
   getTftMatchData,
@@ -14,12 +19,15 @@ import {
   type TftApiResponse,
 } from "@/api/tft";
 import {
+  getBracketsByTournamentId,
   getMatchGameIds,
-  getMatchesByTournamentId,
+  getMatchesByBracketId,
+  getTournamentTeamPlayers,
   type Match,
   type MatchGameIdRecord,
   type TournamentBySlugResponse,
 } from "@/api/tournaments";
+import type { TournamentTeamPlayersResponse } from "@/api/tournaments/types";
 
 const formatDate = (d: string) =>
   new Date(d).toLocaleDateString("vi-VN", {
@@ -56,6 +64,327 @@ const mapImages: Record<string, string> = {
     "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=800&h=200&fit=crop",
   "GAME 3":
     "https://images.unsplash.com/photo-1493711662062-fa541adb3fc8?w=800&h=200&fit=crop",
+};
+
+type RoundWinReason = NonNullable<RoundHistoryEntry["winReason"]>;
+type TeamSide = "team1" | "team2";
+type LinkedUserProfile = AuthUser;
+
+type LinkedTeamContext = {
+  team1Players: TournamentTeamPlayersResponse["players"];
+  team2Players: TournamentTeamPlayersResponse["players"];
+  team1RiotAccounts: Set<string>;
+  team2RiotAccounts: Set<string>;
+  nicknameByRiotAccount: Map<string, string>;
+  avatarByRiotAccount: Map<string, string>;
+};
+
+type ValorantSideMapping = {
+  team1ApiTeamId: string;
+  team2ApiTeamId: string;
+};
+
+const TRACKER_ICON_PREFIX =
+  "https://imgsvc.trackercdn.com/url/max-width(36),quality(70)/https%3A%2F%2Ftrackercdn.com%2Fcdn%2Ftracker.gg%2Fvalorant%2Ficons%2F";
+
+const ROUND_REASON_ICON_MAP: Record<
+  RoundWinReason,
+  { win: string; loss: string }
+> = {
+  time: {
+    win: `${TRACKER_ICON_PREFIX}timewin1.png/image.png`,
+    loss: `${TRACKER_ICON_PREFIX}timeloss1.png/image.png`,
+  },
+  default: {
+    win: `${TRACKER_ICON_PREFIX}eliminationwin1.png/image.png`,
+    loss: `${TRACKER_ICON_PREFIX}eliminationloss1.png/image.png`,
+  },
+  defuse: {
+    win: `${TRACKER_ICON_PREFIX}diffusewin1.png/image.png`,
+    loss: `${TRACKER_ICON_PREFIX}diffuseloss1.png/image.png`,
+  },
+  explosion: {
+    win: `${TRACKER_ICON_PREFIX}explosionwin1.png/image.png`,
+    loss: `${TRACKER_ICON_PREFIX}explosionloss1.png/image.png`,
+  },
+};
+
+const sanitizeRiotSegment = (value?: string | null) =>
+  String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .replace(/^[`'"“”‘’]+|[`'"“”‘’]+$/g, "")
+    .replace(/\s+/g, " ");
+
+const normalizeRiotAccount = (value?: string | null) => {
+  const rawValue = sanitizeRiotSegment(value).replace(/\s*#\s*/g, "#");
+
+  if (!rawValue) return "";
+
+  const [gameNameRaw, ...tagLineParts] = rawValue.split("#");
+  const gameName = sanitizeRiotSegment(gameNameRaw);
+  const tagLine = sanitizeRiotSegment(
+    tagLineParts.join("#").replace(/^#+/, ""),
+  );
+
+  if (!gameName || !tagLine) {
+    return rawValue.toLowerCase();
+  }
+
+  return `${gameName}#${tagLine}`.toLowerCase();
+};
+
+const buildRiotAccount = (gameName?: string, tagLine?: string) => {
+  const normalizedGameName = sanitizeRiotSegment(gameName);
+  const normalizedTagLine = sanitizeRiotSegment(
+    String(tagLine ?? "").replace(/^#+/, ""),
+  );
+
+  if (normalizedGameName && normalizedTagLine) {
+    return `${normalizedGameName}#${normalizedTagLine}`;
+  }
+
+  if (normalizedGameName.includes("#")) {
+    const [namePart, ...tagPartList] = normalizedGameName.split("#");
+    const safeName = sanitizeRiotSegment(namePart);
+    const safeTag = sanitizeRiotSegment(
+      tagPartList.join("#").replace(/^#+/, ""),
+    );
+
+    if (safeName && safeTag) {
+      return `${safeName}#${safeTag}`;
+    }
+  }
+
+  return "";
+};
+
+const createEmptyLinkedTeamContext = (): LinkedTeamContext => ({
+  team1Players: [],
+  team2Players: [],
+  team1RiotAccounts: new Set(),
+  team2RiotAccounts: new Set(),
+  nicknameByRiotAccount: new Map(),
+  avatarByRiotAccount: new Map(),
+});
+
+const isLinkedTournamentPlayer = (
+  value: unknown,
+): value is NonNullable<TournamentTeamPlayersResponse["players"]>[number] => {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.nickname === "string" ||
+    typeof candidate.profile_picture === "string" ||
+    typeof candidate.riot_account === "string"
+  );
+};
+
+const extractTournamentTeamPlayers = (
+  payload: unknown,
+): TournamentTeamPlayersResponse["players"] => {
+  if (Array.isArray(payload)) {
+    return payload.filter(isLinkedTournamentPlayer);
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const candidate = payload as {
+    players?: unknown;
+    data?: unknown;
+  };
+
+  if (Array.isArray(candidate.players)) {
+    return candidate.players.filter(isLinkedTournamentPlayer);
+  }
+
+  if (candidate.data && typeof candidate.data === "object") {
+    const nestedData = candidate.data as { players?: unknown };
+    if (Array.isArray(nestedData.players)) {
+      return nestedData.players.filter(isLinkedTournamentPlayer);
+    }
+  }
+
+  if (isLinkedTournamentPlayer(payload)) {
+    return [payload];
+  }
+
+  return [];
+};
+
+const hydrateLinkedPlayersWithUserProfiles = async (
+  players: TournamentTeamPlayersResponse["players"],
+): Promise<TournamentTeamPlayersResponse["players"]> => {
+  const safePlayers = players ?? [];
+
+  if (safePlayers.length === 0) {
+    return [];
+  }
+
+  const userIds = Array.from(
+    new Set(
+      safePlayers
+        .map((player) => toNumber(player?.user_id))
+        .filter((id): id is number => id !== null),
+    ),
+  );
+
+  if (userIds.length === 0) {
+    return safePlayers;
+  }
+
+  const profileResults = await Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        const response = await axios.get<LinkedUserProfile>(
+          `${API_BASE}/api/users/${userId}`,
+        );
+        return [userId, response.data] as const;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const userProfileById = new Map<number, LinkedUserProfile>();
+  profileResults.forEach((entry) => {
+    if (!entry) return;
+    userProfileById.set(entry[0], entry[1]);
+  });
+
+  return safePlayers.map((player) => {
+    const userId = toNumber(player?.user_id);
+    const linkedUser =
+      userId !== null ? (userProfileById.get(userId) ?? null) : null;
+
+    const nickname = String(
+      linkedUser?.nickname ?? player?.nickname ?? "",
+    ).trim();
+    const profilePicture = String(
+      linkedUser?.profile_picture ?? player?.profile_picture ?? "",
+    ).trim();
+    const riotAccount = String(
+      linkedUser?.riot_account ?? player?.riot_account ?? "",
+    ).trim();
+
+    return {
+      ...player,
+      user_id: linkedUser?.id ?? player?.user_id,
+      nickname: nickname || undefined,
+      profile_picture: profilePicture || undefined,
+      riot_account: riotAccount || null,
+    };
+  });
+};
+
+type BanPickTimelineItem = {
+  key: string;
+  mapName: string;
+  type: "BAN" | "PICK" | "DECIDER";
+  teamSlot: "team1" | "team2" | null;
+  sideLabel?: string;
+};
+
+const buildBanPickTimeline = (
+  payload?: RoundBanPickPayload | null,
+): BanPickTimelineItem[] => {
+  if (!payload?.state) return [];
+
+  const mapNameByCode = new Map(
+    (payload.map_pool ?? []).map((mapItem) => [
+      mapItem.map_code,
+      mapItem.map_name,
+    ]),
+  );
+
+  const mapStateById = new Map(
+    (payload.state.maps ?? []).map((mapState) => [mapState.mapId, mapState]),
+  );
+
+  const timelineFromActionLog = (payload.state.actionLog ?? [])
+    .slice()
+    .sort((a, b) => Number(a.step ?? 0) - Number(b.step ?? 0))
+    .reduce<BanPickTimelineItem[]>((acc, entry, index) => {
+      const normalizedAction = String(entry.action ?? "")
+        .trim()
+        .toLowerCase();
+      const actionType = normalizedAction.includes("ban")
+        ? "BAN"
+        : normalizedAction.includes("pick")
+          ? "PICK"
+          : null;
+
+      if (!actionType) return acc;
+
+      const mapState = mapStateById.get(entry.mapId);
+      const sideLabel =
+        mapState?.side?.team1 && mapState?.side?.team2
+          ? `${mapState.side.team1}/${mapState.side.team2}`
+          : undefined;
+
+      acc.push({
+        key: `log-${entry.step}-${entry.mapId}-${index}`,
+        mapName: mapNameByCode.get(entry.mapId) ?? entry.mapId,
+        type: actionType,
+        teamSlot: entry.team ?? null,
+        sideLabel,
+      });
+
+      return acc;
+    }, []);
+
+  const deciderMap = (payload.state.maps ?? []).find(
+    (mapState) => mapState.status === "decider",
+  );
+
+  if (deciderMap) {
+    const deciderMapName =
+      mapNameByCode.get(deciderMap.mapId) ?? deciderMap.mapId;
+    const alreadyHasDecider = timelineFromActionLog.some(
+      (item) => item.type === "DECIDER" && item.mapName === deciderMapName,
+    );
+
+    if (!alreadyHasDecider) {
+      timelineFromActionLog.push({
+        key: `decider-${deciderMap.mapId}`,
+        mapName: deciderMapName,
+        type: "DECIDER",
+        teamSlot: null,
+      });
+    }
+  }
+
+  if (timelineFromActionLog.length > 0) {
+    return timelineFromActionLog;
+  }
+
+  return (payload.state.maps ?? [])
+    .filter((mapState) => mapState.status !== "available")
+    .map((mapState, index) => {
+      const type =
+        mapState.status === "banned"
+          ? "BAN"
+          : mapState.status === "picked"
+            ? "PICK"
+            : "DECIDER";
+
+      const sideLabel =
+        mapState.side?.team1 && mapState.side?.team2
+          ? `${mapState.side.team1}/${mapState.side.team2}`
+          : undefined;
+
+      return {
+        key: `state-${mapState.mapId}-${index}`,
+        mapName: mapNameByCode.get(mapState.mapId) ?? mapState.mapId,
+        type,
+        teamSlot: mapState.actionBy ?? mapState.sideChosenBy ?? null,
+        sideLabel,
+      } satisfies BanPickTimelineItem;
+    });
 };
 
 const isUuid = (value?: string) =>
@@ -221,43 +550,148 @@ const extractTftParticipants = (
   return [];
 };
 
+const toTeamPlayerStat = (
+  player:
+    | {
+        nickname?: string;
+        profile_picture?: string;
+        riot_account?: string | null;
+      }
+    | undefined,
+  fallbackIndex: number,
+) => {
+  const normalizedNickname = String(player?.nickname ?? "").trim();
+  const normalizedRiot = String(player?.riot_account ?? "").trim();
+
+  return {
+    name: normalizedNickname || normalizedRiot || `Player ${fallbackIndex + 1}`,
+    icon: `https://placehold.co/24x24/111827/ffffff?text=${fallbackIndex + 1}`,
+    avatar: String(player?.profile_picture ?? "").trim() || undefined,
+  };
+};
+
+const hydrateRostersWithLinkedPlayers = (
+  baseMatch: MatchDetail,
+  linkedContext: LinkedTeamContext,
+): MatchDetail => {
+  const hasAnyLinkedPlayer =
+    linkedContext.team1Players.length > 0 ||
+    linkedContext.team2Players.length > 0;
+
+  if (!hasAnyLinkedPlayer) return baseMatch;
+
+  const hasTeam1Roster = baseMatch.team1Roster.players.length > 0;
+  const hasTeam2Roster = baseMatch.team2Roster.players.length > 0;
+
+  if (hasTeam1Roster || hasTeam2Roster) {
+    return baseMatch;
+  }
+
+  return {
+    ...baseMatch,
+    team1Roster: {
+      ...baseMatch.team1Roster,
+      players: linkedContext.team1Players.map((player, index) =>
+        toTeamPlayerStat(player, index),
+      ),
+    },
+    team2Roster: {
+      ...baseMatch.team2Roster,
+      players: linkedContext.team2Players.map((player, index) =>
+        toTeamPlayerStat(player, index),
+      ),
+    },
+  };
+};
+
 const mergeTftApiIntoMatch = (
   baseMatch: MatchDetail,
   tftPayload: TftApiResponse,
+  linkedContext: LinkedTeamContext,
 ): MatchDetail => {
-  const participants = extractTftParticipants(tftPayload)
+  const parsedParticipants = extractTftParticipants(tftPayload)
     .map((participant, index) => {
       const gameName = String(participant.riotIdGameName ?? "").trim();
       const tagLine = String(participant.riotIdTagline ?? "").trim();
+      const riotAccount = buildRiotAccount(gameName, tagLine);
+      const normalizedRiotAccount = normalizeRiotAccount(riotAccount);
+      const linkedNickname = normalizedRiotAccount
+        ? linkedContext.nicknameByRiotAccount.get(normalizedRiotAccount)
+        : undefined;
+      const linkedAvatar = normalizedRiotAccount
+        ? linkedContext.avatarByRiotAccount.get(normalizedRiotAccount)
+        : undefined;
+      const inferredSide: TeamSide | null = linkedContext.team1RiotAccounts.has(
+        normalizedRiotAccount,
+      )
+        ? "team1"
+        : linkedContext.team2RiotAccounts.has(normalizedRiotAccount)
+          ? "team2"
+          : null;
       const name =
-        gameName && tagLine
+        linkedNickname ||
+        (gameName && tagLine
           ? `${gameName}#${tagLine}`
-          : gameName || `Player ${index + 1}`;
+          : gameName || `Player ${index + 1}`);
 
       return {
         name,
-        icon: `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
+        icon:
+          linkedAvatar ||
+          `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
+        avatar: linkedAvatar,
         placement: toNumber(participant.placement) ?? 8,
+        side: inferredSide,
       };
     })
     .sort((a, b) => (a.placement ?? 8) - (b.placement ?? 8));
 
-  if (participants.length === 0) {
+  if (parsedParticipants.length === 0) {
     return baseMatch;
   }
 
-  const splitIndex = Math.ceil(participants.length / 2);
+  const mappedTeam1 = parsedParticipants.filter(
+    (participant) => participant.side === "team1",
+  );
+  const mappedTeam2 = parsedParticipants.filter(
+    (participant) => participant.side === "team2",
+  );
+  const unassigned = parsedParticipants.filter(
+    (participant) => participant.side === null,
+  );
+
+  const splitIndex = Math.ceil(parsedParticipants.length / 2);
+  const team1Players = [...mappedTeam1];
+  const team2Players = [...mappedTeam2];
+
+  if (mappedTeam1.length > 0 || mappedTeam2.length > 0) {
+    unassigned.forEach((participant) => {
+      const shouldPushTeam1 =
+        team1Players.length < splitIndex &&
+        (team1Players.length <= team2Players.length ||
+          team2Players.length >= splitIndex);
+
+      if (shouldPushTeam1) {
+        team1Players.push(participant);
+      } else {
+        team2Players.push(participant);
+      }
+    });
+  } else {
+    team1Players.push(...parsedParticipants.slice(0, splitIndex));
+    team2Players.push(...parsedParticipants.slice(splitIndex));
+  }
 
   return {
     ...baseMatch,
     gameType: "tft",
     team1Roster: {
       ...baseMatch.team1Roster,
-      players: participants.slice(0, splitIndex),
+      players: team1Players,
     },
     team2Roster: {
       ...baseMatch.team2Roster,
-      players: participants.slice(splitIndex),
+      players: team2Players,
     },
     statTabs: ["All Games"],
   };
@@ -282,30 +716,266 @@ const getProviderMatchIds = (
   return Array.from(new Set(ids));
 };
 
+const normalizeTeamId = (value?: string | null) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
 const getTeamRoundScore = (
   apiData: ValorantApiMatchData,
-  teamId: "Red" | "Blue",
+  teamId: string,
   fallback: number,
-) =>
-  apiData.teams?.find((team) => team.teamId === teamId)?.roundsWon ??
-  apiData.teams?.find((team) => team.teamId === teamId)?.numPoints ??
-  fallback;
+) => {
+  const normalizedTarget = normalizeTeamId(teamId);
+  const team = apiData.teams?.find(
+    (entry) => normalizeTeamId(entry.teamId) === normalizedTarget,
+  );
+
+  return team?.roundsWon ?? team?.numPoints ?? fallback;
+};
+
+const resolveRoundWinner = (
+  winningTeam?: string,
+): RoundHistoryEntry["winner"] => {
+  const normalized = String(winningTeam ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (["red", "team1", "left"].includes(normalized)) return "team1";
+  if (["blue", "team2", "right"].includes(normalized)) return "team2";
+
+  return null;
+};
+
+const resolveRoundWinnerWithMapping = (
+  winningTeam: string | undefined,
+  sideMapping: ValorantSideMapping,
+): RoundHistoryEntry["winner"] => {
+  const normalizedWinningTeam = normalizeTeamId(winningTeam);
+
+  if (!normalizedWinningTeam) return null;
+  if (normalizedWinningTeam === normalizeTeamId(sideMapping.team1ApiTeamId)) {
+    return "team1";
+  }
+  if (normalizedWinningTeam === normalizeTeamId(sideMapping.team2ApiTeamId)) {
+    return "team2";
+  }
+
+  return resolveRoundWinner(winningTeam);
+};
+
+const defaultValorantSideMapping = (
+  teamIds: string[],
+): ValorantSideMapping | null => {
+  if (!teamIds.length) return null;
+
+  const redId = teamIds.find((id) => normalizeTeamId(id) === "red");
+  const blueId = teamIds.find((id) => normalizeTeamId(id) === "blue");
+
+  if (redId && blueId) {
+    return {
+      team1ApiTeamId: redId,
+      team2ApiTeamId: blueId,
+    };
+  }
+
+  if (teamIds.length >= 2) {
+    return {
+      team1ApiTeamId: teamIds[0],
+      team2ApiTeamId: teamIds[1],
+    };
+  }
+
+  return {
+    team1ApiTeamId: teamIds[0],
+    team2ApiTeamId: "__unknown__",
+  };
+};
+
+const resolveValorantSideMapping = (
+  mapPlayers: ValorantApiPlayer[],
+  linkedContext: LinkedTeamContext,
+  previousMapping: ValorantSideMapping | null,
+): ValorantSideMapping | null => {
+  const teamFrequency = new Map<string, number>();
+
+  mapPlayers.forEach((player) => {
+    const teamId = String(player.teamId ?? "").trim();
+    if (!teamId) return;
+    teamFrequency.set(teamId, (teamFrequency.get(teamId) ?? 0) + 1);
+  });
+
+  const sortedTeamIds = Array.from(teamFrequency.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([teamId]) => teamId);
+
+  if (sortedTeamIds.length === 0) {
+    return previousMapping;
+  }
+
+  if (sortedTeamIds.length === 1) {
+    if (previousMapping) return previousMapping;
+    return defaultValorantSideMapping(sortedTeamIds);
+  }
+
+  const idA = sortedTeamIds[0];
+  const idB = sortedTeamIds[1];
+
+  const scoreMapping = (team1ApiTeamId: string, team2ApiTeamId: string) => {
+    const team1Normalized = normalizeTeamId(team1ApiTeamId);
+    const team2Normalized = normalizeTeamId(team2ApiTeamId);
+    let score = 0;
+
+    mapPlayers.forEach((player) => {
+      const riotAccount = normalizeRiotAccount(
+        buildRiotAccount(player.gameName, player.tagLine),
+      );
+      if (!riotAccount) return;
+
+      const playerTeamId = normalizeTeamId(player.teamId);
+      const inTeam1 = linkedContext.team1RiotAccounts.has(riotAccount);
+      const inTeam2 = linkedContext.team2RiotAccounts.has(riotAccount);
+
+      if (!inTeam1 && !inTeam2) return;
+
+      if (playerTeamId === team1Normalized) {
+        if (inTeam1) score += 2;
+        if (inTeam2) score -= 2;
+      }
+
+      if (playerTeamId === team2Normalized) {
+        if (inTeam2) score += 2;
+        if (inTeam1) score -= 2;
+      }
+    });
+
+    return score;
+  };
+
+  const optionA: ValorantSideMapping = {
+    team1ApiTeamId: idA,
+    team2ApiTeamId: idB,
+  };
+  const optionB: ValorantSideMapping = {
+    team1ApiTeamId: idB,
+    team2ApiTeamId: idA,
+  };
+
+  const optionAScore = scoreMapping(
+    optionA.team1ApiTeamId,
+    optionA.team2ApiTeamId,
+  );
+  const optionBScore = scoreMapping(
+    optionB.team1ApiTeamId,
+    optionB.team2ApiTeamId,
+  );
+  const bestOption = optionAScore >= optionBScore ? optionA : optionB;
+  const bestScore = Math.max(optionAScore, optionBScore);
+
+  if (bestScore > 0) return bestOption;
+
+  if (
+    previousMapping &&
+    sortedTeamIds.some(
+      (id) =>
+        normalizeTeamId(id) === normalizeTeamId(previousMapping.team1ApiTeamId),
+    ) &&
+    sortedTeamIds.some(
+      (id) =>
+        normalizeTeamId(id) === normalizeTeamId(previousMapping.team2ApiTeamId),
+    )
+  ) {
+    return previousMapping;
+  }
+
+  return defaultValorantSideMapping(sortedTeamIds);
+};
+
+const inferRoundWinReason = (
+  roundResult: ValorantApiRoundResult,
+): RoundWinReason => {
+  const reasonText = [
+    roundResult.roundResult,
+    roundResult.roundResultCode,
+    roundResult.roundResultType,
+    roundResult.roundResultReason,
+    roundResult.roundEndType,
+    roundResult.roundOutcome,
+    roundResult.roundWinMethod,
+    roundResult.winType,
+    roundResult.endType,
+    roundResult.roundCeremony,
+  ]
+    .map((value) => String(value ?? "").toLowerCase())
+    .join(" ");
+
+  if (/(defus|diffus)/.test(reasonText)) return "defuse";
+  if (/(explos|detonat|spike\s*deton|bomb\s*explod)/.test(reasonText)) {
+    return "explosion";
+  }
+  if (/(time|timeout|clock|timer)/.test(reasonText)) return "time";
+
+  return "default";
+};
+
+const getRoundResultIcon = (
+  reason: RoundHistoryEntry["winReason"],
+  variant: "win" | "loss",
+) => ROUND_REASON_ICON_MAP[reason ?? "default"][variant];
+
+const buildRoundHistoryFromApi = (
+  roundResults?: ValorantApiRoundResult[],
+  winnerResolver?: (winningTeam?: string) => RoundHistoryEntry["winner"],
+): RoundHistoryEntry[] => {
+  if (!Array.isArray(roundResults) || roundResults.length === 0) return [];
+
+  return roundResults
+    .map((roundResult, index) => ({
+      roundNum: toNumber(roundResult.roundNum) ?? index,
+      winner: winnerResolver
+        ? winnerResolver(roundResult.winningTeam)
+        : resolveRoundWinner(roundResult.winningTeam),
+      winningRole: roundResult.winningTeamRole,
+      ceremony: roundResult.roundCeremony,
+      winReason: inferRoundWinReason(roundResult),
+    }))
+    .sort((a, b) => a.roundNum - b.roundNum);
+};
 
 const buildValorantRosterFromApi = (
   baseRoster: MatchDetail["team1Roster"],
   players: ValorantApiPlayer[],
+  nicknameByRiotAccount?: Map<string, string>,
+  avatarByRiotAccount?: Map<string, string>,
 ): MatchDetail["team1Roster"] => ({
   ...baseRoster,
   players: Array.from(
     players
       .reduce(
         (acc, player) => {
-          const key = `${player.gameName}#${player.tagLine}`.toLowerCase();
+          const riotAccount = normalizeRiotAccount(
+            buildRiotAccount(player.gameName, player.tagLine),
+          );
+          const key =
+            riotAccount ||
+            `${String(player.gameName ?? "")}-${String(player.tagLine ?? "")}-${String(player.characterName ?? "")}`
+              .toLowerCase()
+              .trim();
+          const linkedNickname = riotAccount
+            ? nicknameByRiotAccount?.get(riotAccount)
+            : undefined;
+          const linkedAvatar = riotAccount
+            ? avatarByRiotAccount?.get(riotAccount)
+            : undefined;
           const stats = player.stats ?? {};
           const current = acc.get(key) ?? {
-            name: player.gameName,
+            name:
+              linkedNickname ||
+              String(player.gameName ?? "").trim() ||
+              riotAccount ||
+              "Unknown",
             icon: player.imgCharacter,
-            avatar: player.imgCharacter,
+            avatar: linkedAvatar || undefined,
             role: player.characterName,
             kills: 0,
             deaths: 0,
@@ -339,10 +1009,18 @@ const buildValorantRosterFromApi = (
             current.hsCount += 1;
           }
 
+          if (linkedNickname) {
+            current.name = linkedNickname;
+          }
+
+          if (linkedAvatar) {
+            current.avatar = linkedAvatar;
+          }
+
           if (player.imgCharacter) {
             current.icon = player.imgCharacter;
-            current.avatar = player.imgCharacter;
           }
+
           if (player.characterName) {
             current.role = player.characterName;
           }
@@ -399,6 +1077,7 @@ const buildValorantRosterFromApi = (
 const mergeValorantApiIntoMatch = (
   baseMatch: MatchDetail,
   apiMatches: ValorantApiMatchData[],
+  linkedContext: LinkedTeamContext,
 ): MatchDetail => {
   if (apiMatches.length === 0) {
     return baseMatch;
@@ -410,14 +1089,88 @@ const mergeValorantApiIntoMatch = (
       (b.matchInfo?.gameStartMillis ?? Number.MAX_SAFE_INTEGER),
   );
 
-  const maps = sortedMatches.map((apiData, index) => {
-    const redTeamScore = getTeamRoundScore(apiData, "Red", 0);
-    const blueTeamScore = getTeamRoundScore(apiData, "Blue", 0);
+  let stickySideMapping: ValorantSideMapping | null = null;
+
+  const mappedMatches = sortedMatches.map((apiData) => {
+    const mapPlayers = apiData.players ?? [];
+    const sideMapping =
+      resolveValorantSideMapping(
+        mapPlayers,
+        linkedContext,
+        stickySideMapping,
+      ) ?? stickySideMapping;
+
+    if (sideMapping) {
+      stickySideMapping = sideMapping;
+    }
+
+    const effectiveSideMapping =
+      sideMapping ??
+      defaultValorantSideMapping(
+        Array.from(
+          new Set(
+            mapPlayers
+              .map((player) => String(player.teamId ?? "").trim())
+              .filter(Boolean),
+          ),
+        ),
+      );
+
+    const mapTeam1Players = effectiveSideMapping
+      ? mapPlayers.filter(
+          (player) =>
+            normalizeTeamId(player.teamId) ===
+            normalizeTeamId(effectiveSideMapping.team1ApiTeamId),
+        )
+      : mapPlayers.filter((player) => normalizeTeamId(player.teamId) === "red");
+
+    const mapTeam2Players = effectiveSideMapping
+      ? mapPlayers.filter(
+          (player) =>
+            normalizeTeamId(player.teamId) ===
+            normalizeTeamId(effectiveSideMapping.team2ApiTeamId),
+        )
+      : mapPlayers.filter(
+          (player) => normalizeTeamId(player.teamId) === "blue",
+        );
+
+    const team1Score = getTeamRoundScore(
+      apiData,
+      effectiveSideMapping?.team1ApiTeamId ?? "Red",
+      0,
+    );
+    const team2Score = getTeamRoundScore(
+      apiData,
+      effectiveSideMapping?.team2ApiTeamId ?? "Blue",
+      0,
+    );
+
+    const roundHistory = buildRoundHistoryFromApi(
+      apiData.roundResults,
+      effectiveSideMapping
+        ? (winningTeam) =>
+            resolveRoundWinnerWithMapping(winningTeam, effectiveSideMapping)
+        : undefined,
+    );
+
+    return {
+      apiData,
+      mapTeam1Players,
+      mapTeam2Players,
+      team1Score,
+      team2Score,
+      roundHistory,
+    };
+  });
+
+  const maps = mappedMatches.map((mappedMatch, index) => {
+    const { apiData, team1Score, team2Score, roundHistory } = mappedMatch;
 
     return {
       mapName: apiData.matchInfo?.mapName?.toUpperCase() ?? `GAME ${index + 1}`,
-      team1Score: redTeamScore,
-      team2Score: blueTeamScore,
+      team1Score,
+      team2Score,
+      roundHistory,
     };
   });
 
@@ -430,37 +1183,44 @@ const mergeValorantApiIntoMatch = (
     return count === 1 ? baseLabel : `${baseLabel} ${count}`;
   });
 
-  const fpsMapRosters = sortedMatches.map((apiData, index) => {
-    const mapPlayers = apiData.players ?? [];
-    const mapRedPlayers = mapPlayers.filter(
-      (player) => player.teamId === "Red",
-    );
-    const mapBluePlayers = mapPlayers.filter(
-      (player) => player.teamId === "Blue",
-    );
+  const fpsMapRosters = mappedMatches.map((mappedMatch, index) => {
+    const { mapTeam1Players, mapTeam2Players } = mappedMatch;
 
     return {
       label: mapLabels[index],
       team1Roster:
-        mapRedPlayers.length > 0
-          ? buildValorantRosterFromApi(baseMatch.team1Roster, mapRedPlayers)
+        mapTeam1Players.length > 0
+          ? buildValorantRosterFromApi(
+              baseMatch.team1Roster,
+              mapTeam1Players,
+              linkedContext.nicknameByRiotAccount,
+              linkedContext.avatarByRiotAccount,
+            )
           : baseMatch.team1Roster,
       team2Roster:
-        mapBluePlayers.length > 0
-          ? buildValorantRosterFromApi(baseMatch.team2Roster, mapBluePlayers)
+        mapTeam2Players.length > 0
+          ? buildValorantRosterFromApi(
+              baseMatch.team2Roster,
+              mapTeam2Players,
+              linkedContext.nicknameByRiotAccount,
+              linkedContext.avatarByRiotAccount,
+            )
           : baseMatch.team2Roster,
     };
   });
 
-  const allPlayers = sortedMatches.flatMap((apiData) => apiData.players ?? []);
-  const redPlayers = allPlayers.filter((player) => player.teamId === "Red");
-  const bluePlayers = allPlayers.filter((player) => player.teamId === "Blue");
+  const team1Players = mappedMatches.flatMap(
+    (mappedMatch) => mappedMatch.mapTeam1Players,
+  );
+  const team2Players = mappedMatches.flatMap(
+    (mappedMatch) => mappedMatch.mapTeam2Players,
+  );
 
-  const redSeriesWins = maps.reduce(
+  const team1SeriesWins = maps.reduce(
     (wins, map) => wins + (map.team1Score > map.team2Score ? 1 : 0),
     0,
   );
-  const blueSeriesWins = maps.reduce(
+  const team2SeriesWins = maps.reduce(
     (wins, map) => wins + (map.team2Score > map.team1Score ? 1 : 0),
     0,
   );
@@ -476,22 +1236,32 @@ const mergeValorantApiIntoMatch = (
     date: dateFromApi,
     team1: {
       ...baseMatch.team1,
-      score: redSeriesWins,
+      score: team1SeriesWins,
     },
     team2: {
       ...baseMatch.team2,
-      score: blueSeriesWins,
+      score: team2SeriesWins,
     },
     maps,
     statTabs: ["All Maps", ...mapLabels],
     fpsMapRosters,
     team1Roster:
-      redPlayers.length > 0
-        ? buildValorantRosterFromApi(baseMatch.team1Roster, redPlayers)
+      team1Players.length > 0
+        ? buildValorantRosterFromApi(
+            baseMatch.team1Roster,
+            team1Players,
+            linkedContext.nicknameByRiotAccount,
+            linkedContext.avatarByRiotAccount,
+          )
         : baseMatch.team1Roster,
     team2Roster:
-      bluePlayers.length > 0
-        ? buildValorantRosterFromApi(baseMatch.team2Roster, bluePlayers)
+      team2Players.length > 0
+        ? buildValorantRosterFromApi(
+            baseMatch.team2Roster,
+            team2Players,
+            linkedContext.nicknameByRiotAccount,
+            linkedContext.avatarByRiotAccount,
+          )
         : baseMatch.team2Roster,
   };
 };
@@ -499,12 +1269,12 @@ const mergeValorantApiIntoMatch = (
 /* ── Map Score Row (blast.tv style with bg image) ── */
 const MapScoreRow = ({
   map,
-  team1Logo,
-  team2Logo,
+  team1,
+  team2,
 }: {
-  map: { mapName: string; team1Score: number; team2Score: number };
-  team1Logo: string;
-  team2Logo: string;
+  map: NonNullable<MatchDetail["maps"]>[number];
+  team1: MatchDetail["team1"];
+  team2: MatchDetail["team2"];
 }) => {
   const t1Win = map.team1Score > map.team2Score;
   const bgImg = mapImages[map.mapName];
@@ -518,7 +1288,7 @@ const MapScoreRow = ({
 
       <div className="relative z-10 grid grid-cols-[1fr_auto_1fr] items-center w-full px-4 h-full">
         <div className="flex items-center gap-3">
-          <img src={team1Logo} alt="" className="w-5 h-5 rounded" />
+          <img src={team1.logo} alt="" className="w-5 h-5 rounded" />
           <span
             className={`text-lg font-black tabular-nums ${t1Win ? "text-primary" : "text-muted-foreground"}`}
           >
@@ -526,7 +1296,7 @@ const MapScoreRow = ({
           </span>
         </div>
 
-        <span className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-foreground px-3 py-1  min-w-[132px] text-center">
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-foreground px-3 py-1 min-w-33 text-center">
           {map.mapName}
         </span>
 
@@ -536,10 +1306,90 @@ const MapScoreRow = ({
           >
             {map.team2Score}
           </span>
-          <img src={team2Logo} alt="" className="w-5 h-5 rounded" />
+          <img src={team2.logo} alt="" className="w-5 h-5 rounded" />
         </div>
       </div>
     </div>
+  );
+};
+
+const BanPickTimelinePanel = ({
+  timeline,
+  team1,
+  team2,
+}: {
+  timeline: BanPickTimelineItem[];
+  team1: MatchDetail["team1"];
+  team2: MatchDetail["team2"];
+}) => {
+  if (!timeline.length) return null;
+
+  const teamBySlot = {
+    team1,
+    team2,
+  } as const;
+
+  return (
+    <aside>
+      <div className="mb-3">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-primary">
+          Ban/Pick Timeline
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {timeline.map((item) => {
+          const team = item.teamSlot ? teamBySlot[item.teamSlot] : null;
+          const badgeClass =
+            item.type === "BAN"
+              ? "text-rose-300 border-rose-500/40 bg-rose-500/10"
+              : item.type === "PICK"
+                ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
+                : "text-sky-300 border-sky-500/40 bg-sky-500/10";
+
+          return (
+            <div
+              key={item.key}
+              className="rounded-lg border border-border/50 bg-black/20 px-3 py-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-foreground truncate">
+                    {item.mapName}
+                  </p>
+                  {item.sideLabel && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Side: {item.sideLabel}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-extrabold uppercase tracking-[0.12em] ${badgeClass}`}
+                  >
+                    {item.type}
+                  </span>
+
+                  {team && (
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-black/25 px-1.5 py-1">
+                      <img
+                        src={team.logo}
+                        alt={team.tag}
+                        className="w-4 h-4 rounded-sm"
+                      />
+                      <span className="text-[10px] font-bold text-foreground uppercase tracking-wide">
+                        {team.tag}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </aside>
   );
 };
 
@@ -559,6 +1409,15 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
           mapRosterTabs[currentTab - 1]?.team1Roster ?? match.team1Roster,
           mapRosterTabs[currentTab - 1]?.team2Roster ?? match.team2Roster,
         ];
+  const selectedMapForRounds =
+    currentTab === 0
+      ? (match.maps?.[0] ?? null)
+      : (match.maps?.[currentTab - 1] ?? null);
+  const selectedRoundHistory = selectedMapForRounds?.roundHistory
+    ? [...selectedMapForRounds.roundHistory].sort(
+        (a, b) => a.roundNum - b.roundNum,
+      )
+    : [];
 
   return (
     <div className="space-y-5">
@@ -567,7 +1426,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
             Match Stats
           </h3>
-          <p className="text-xstext-[#EEEEEE] mt-0.5">
+          <p className="text-xs text-[#EEEEEE] mt-0.5">
             Thống kê chi tiết từng người chơi
           </p>
         </div>
@@ -579,7 +1438,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
               className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
                 currentTab === i
                   ? "bg-foreground text-background border-foreground"
-                  : "bg-transparent border-bordertext-[#EEEEEE] hover:text-foreground hover:border-foreground/30"
+                  : "bg-transparent border-border text-[#EEEEEE] hover:text-foreground hover:border-foreground/30"
               }`}
             >
               {tab}
@@ -587,6 +1446,98 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
           ))}
         </div>
       </div>
+
+      {selectedMapForRounds && selectedRoundHistory.length > 0 && (
+        <div className="w-full rounded-md border border-cyan-400/10 px-3 py-2">
+          <div className="grid w-full grid-cols-[84px_minmax(0,1fr)] items-start gap-3">
+            <div className="shrink-0 min-w-18.5">
+              <div className="flex items-center justify-between text-[11px] leading-none">
+                <span className="font-semibold text-slate-100 uppercase tracking-wide">
+                  {match.team1.tag}
+                </span>
+                <span className="font-black tabular-nums text-lg text-cyan-300">
+                  {selectedMapForRounds.team1Score}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[11px] leading-none">
+                <span className="font-semibold text-slate-100 uppercase tracking-wide">
+                  {match.team2.tag}
+                </span>
+                <span className="font-black tabular-nums text-lg text-rose-300">
+                  {selectedMapForRounds.team2Score}
+                </span>
+              </div>
+            </div>
+
+            <div className="w-full overflow-x-auto pb-1">
+              <div
+                className="grid min-w-max gap-x-3"
+                style={{
+                  gridTemplateColumns: `repeat(${selectedRoundHistory.length}, minmax(1.6rem, 1fr))`,
+                }}
+              >
+                {selectedRoundHistory.map((round) => {
+                  const isTeam1Win = round.winner === "team1";
+                  const isTeam2Win = round.winner === "team2";
+                  const team1Icon = getRoundResultIcon(round.winReason, "win");
+                  const team2Icon = getRoundResultIcon(round.winReason, "loss");
+                  const tooltipText = [
+                    `Round ${round.roundNum + 1}`,
+                    round.winningRole,
+                    round.ceremony,
+                  ]
+                    .filter(Boolean)
+                    .join(" | ");
+
+                  return (
+                    <div
+                      key={`fps-round-col-${selectedMapForRounds.mapName}-${round.roundNum}`}
+                      title={tooltipText}
+                      className="flex flex-col items-center gap-1"
+                    >
+                      <span
+                        className={`inline-flex h-4 w-4 items-center justify-center ${
+                          isTeam1Win ? "text-cyan-300" : "text-slate-600"
+                        }`}
+                      >
+                        {isTeam1Win ? (
+                          <img
+                            src={team1Icon}
+                            alt="team1-round-win"
+                            className="h-3.5 w-3.5 object-contain"
+                          />
+                        ) : (
+                          <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
+                        )}
+                      </span>
+
+                      <span
+                        className={`inline-flex h-4 w-4 items-center justify-center ${
+                          isTeam2Win ? "text-rose-400" : "text-slate-600"
+                        }`}
+                      >
+                        {isTeam2Win ? (
+                          <img
+                            src={team2Icon}
+                            alt="team2-round-win"
+                            className="h-3.5 w-3.5 object-contain"
+                          />
+                        ) : (
+                          <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
+                        )}
+                      </span>
+
+                      <span className="mt-0.5 text-[10px] text-slate-500 tabular-nums">
+                        {round.roundNum + 1}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {activeRosters.map((roster) => (
@@ -598,7 +1549,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] border-collapse">
                   <thead>
-                    <tr className="border-b border-border/40 text-[11px] font-bold uppercase tracking-widertext-[#EEEEEE]">
+                    <tr className="border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-[#EEEEEE]">
                       <th className="!w-[180px] sticky left-0 z-20 bg-card px-4 py-3 text-left normal-case text-base font-bold text-foreground border-r border-border/40">
                         <div className="flex items-center gap-2 min-w-0">
                           <img
@@ -636,7 +1587,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
                                 className="w-6 h-6 rounded"
                               />
                             ) : (
-                              <div className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-[11px] font-boldtext-[#EEEEEE]">
+                              <div className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-[11px] font-bold text-[#EEEEEE]">
                                 {p.name.charAt(0)}
                               </div>
                             )}
@@ -705,7 +1656,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
             Match Stats
           </h3>
-          <p className="text-xstext-[#EEEEEE] mt-0.5">
+          <p className="text-xs text-[#EEEEEE] mt-0.5">
             Thống kê chi tiết từng người chơi
           </p>
         </div>
@@ -717,7 +1668,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
               className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
                 activeTab === i
                   ? "bg-foreground text-background border-foreground"
-                  : "bg-transparent border-bordertext-[#EEEEEE] hover:text-foreground"
+                  : "bg-transparent border-border text-[#EEEEEE] hover:text-foreground"
               }`}
             >
               {tab}
@@ -734,7 +1685,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
             <div className="overflow-x-auto">
               <div className="min-w-[560px]">
                 <div
-                  className="grid gap-0 px-4 py-3 border-b border-border/40 text-[11px] font-bold uppercase tracking-widertext-[#EEEEEE]"
+                  className="grid gap-0 px-4 py-3 border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-[#EEEEEE]"
                   style={{
                     gridTemplateColumns: "1fr 2.5rem 2.5rem 2.5rem 3.5rem 4rem",
                   }}
@@ -805,7 +1756,7 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
       <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
         Kết quả TFT
       </h3>
-      <p className="text-xstext-[#EEEEEE] mt-0.5">
+      <p className="text-xs text-[#EEEEEE] mt-0.5">
         Hạng trung bình của từng người chơi
       </p>
     </div>
@@ -828,7 +1779,7 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
           <div className="overflow-x-auto">
             <div className="min-w-[320px]">
               <div
-                className="grid gap-0 px-4 py-2 border-b border-border/40 text-[11px] font-bold uppercase tracking-widertext-[#EEEEEE]"
+                className="grid gap-0 px-4 py-2 border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-[#EEEEEE]"
                 style={{ gridTemplateColumns: "1fr 4rem" }}
               >
                 <span className="sticky left-0 z-20 bg-card pr-4 border-r border-border/40"></span>
@@ -841,7 +1792,17 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
                   style={{ gridTemplateColumns: "1fr 4rem" }}
                 >
                   <div className="sticky left-0 z-10 bg-card pr-4 border-r border-border/20 flex items-center gap-2">
-                    <img src={p.icon} />
+                    {p.icon ? (
+                      <img
+                        src={p.icon}
+                        alt={p.name}
+                        className="h-6 w-6 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="h-6 w-6 rounded bg-secondary flex items-center justify-center text-[10px] font-bold text-[#EEEEEE]">
+                        {p.name.charAt(0)}
+                      </div>
+                    )}
                     <span className="text-[11px] font-semibold text-foreground">
                       {p.name}
                     </span>
@@ -881,8 +1842,16 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
               key={p.name}
               className="min-h-[120px] flex flex-col items-center justify-start gap-2 px-2 py-3"
             >
-              <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-base font-boldtext-[#EEEEEE]">
-                {p.name.charAt(0)}
+              <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-base font-bold text-[#EEEEEE]">
+                {p.avatar || p.icon ? (
+                  <img
+                    src={p.avatar || p.icon}
+                    alt={p.name}
+                    className="h-full w-full rounded-lg object-cover"
+                  />
+                ) : (
+                  <span>{p.name.charAt(0)}</span>
+                )}
               </div>
               <div className="text-center w-full">
                 <div className="flex items-center justify-center gap-1">
@@ -906,6 +1875,7 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
 
 /* ── Main Page ── */
 const MatchDetailPage = () => {
+  const { user } = useAuth();
   const { tournament } = useOutletContext<{
     tournament?: TournamentBySlugResponse["info"];
   }>();
@@ -924,13 +1894,37 @@ const MatchDetailPage = () => {
 
   const { data: tournamentMatchBundle, isLoading: isMatchListLoading } =
     useQuery({
-      queryKey: ["tournament-match-list", tournamentId],
+      queryKey: ["tournament-match-list-all-brackets", tournamentId],
       enabled: Boolean(tournamentId),
       staleTime: 1000 * 60,
       refetchOnWindowFocus: false,
       queryFn: async () => {
-        const response = await getMatchesByTournamentId(tournamentId!);
-        return response;
+        const bracketsResponse = await getBracketsByTournamentId(tournamentId!);
+        const bracketIds = (bracketsResponse.data?.data ?? [])
+          .map((bracket) => toNumber(bracket.id))
+          .filter((bracketId): bracketId is number => bracketId !== null);
+
+        if (!bracketIds.length) {
+          return { matches: [] as Match[] };
+        }
+
+        const matchResponses = await Promise.all(
+          bracketIds.map((bracketId) => getMatchesByBracketId(bracketId)),
+        );
+
+        const mergedMatches = matchResponses.flatMap(
+          (response) => response.data?.data ?? [],
+        );
+
+        const dedupedMatches = Array.from(
+          new Map(
+            mergedMatches.map((item) => [toNumber(item.id) ?? item.id, item]),
+          ).values(),
+        );
+
+        return {
+          matches: dedupedMatches,
+        };
       },
     });
 
@@ -955,6 +1949,172 @@ const MatchDetailPage = () => {
     return sortedMatches.find((item) => toNumber(item.id) === numId) ?? null;
   }, [numId, sortedMatches]);
 
+  const currentMatchTeamIds = useMemo(() => {
+    const leftTeamId =
+      toNumber(currentMatchRow?.team_a?.id) ??
+      toNumber(currentMatchRow?.team_a_id);
+    const rightTeamId =
+      toNumber(currentMatchRow?.team_b?.id) ??
+      toNumber(currentMatchRow?.team_b_id);
+
+    return {
+      team1TeamId: leftTeamId,
+      team2TeamId: rightTeamId,
+    };
+  }, [currentMatchRow]);
+
+  const tournamentTeamIdByTeamId = useMemo(() => {
+    const map = new Map<number, number>();
+
+    (tournament?.registered ?? []).forEach((entry) => {
+      const teamId = toNumber(entry.team_id);
+      const tournamentTeamId = toNumber(entry.id);
+
+      if (teamId === null || tournamentTeamId === null) return;
+      map.set(teamId, tournamentTeamId);
+    });
+
+    return map;
+  }, [tournament?.registered]);
+
+  const linkedTournamentTeamIds = useMemo(
+    () => ({
+      team1TournamentTeamId:
+        currentMatchTeamIds.team1TeamId !== null
+          ? (tournamentTeamIdByTeamId.get(currentMatchTeamIds.team1TeamId) ??
+            null)
+          : null,
+      team2TournamentTeamId:
+        currentMatchTeamIds.team2TeamId !== null
+          ? (tournamentTeamIdByTeamId.get(currentMatchTeamIds.team2TeamId) ??
+            null)
+          : null,
+    }),
+    [currentMatchTeamIds, tournamentTeamIdByTeamId],
+  );
+
+  const { data: linkedTeamPlayers } = useQuery({
+    queryKey: [
+      "match-linked-team-players",
+      linkedTournamentTeamIds.team1TournamentTeamId,
+      linkedTournamentTeamIds.team2TournamentTeamId,
+    ],
+    enabled: Boolean(
+      linkedTournamentTeamIds.team1TournamentTeamId ||
+      linkedTournamentTeamIds.team2TournamentTeamId,
+    ),
+    staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const [team1Response, team2Response] = await Promise.all([
+        linkedTournamentTeamIds.team1TournamentTeamId
+          ? getTournamentTeamPlayers(
+              linkedTournamentTeamIds.team1TournamentTeamId,
+            )
+          : Promise.resolve(null),
+        linkedTournamentTeamIds.team2TournamentTeamId
+          ? getTournamentTeamPlayers(
+              linkedTournamentTeamIds.team2TournamentTeamId,
+            )
+          : Promise.resolve(null),
+      ]);
+
+      const team1PlayersRaw = extractTournamentTeamPlayers(team1Response?.data);
+      const team2PlayersRaw = extractTournamentTeamPlayers(team2Response?.data);
+
+      const [team1Players, team2Players] = await Promise.all([
+        hydrateLinkedPlayersWithUserProfiles(team1PlayersRaw),
+        hydrateLinkedPlayersWithUserProfiles(team2PlayersRaw),
+      ]);
+
+      return {
+        team1Players,
+        team2Players,
+      };
+    },
+  });
+
+  const linkedTeamContext = useMemo(() => {
+    const context = createEmptyLinkedTeamContext();
+    context.team1Players = linkedTeamPlayers?.team1Players ?? [];
+    context.team2Players = linkedTeamPlayers?.team2Players ?? [];
+
+    const collectRiotAccounts = (
+      players: TournamentTeamPlayersResponse["players"],
+      side: TeamSide,
+    ) => {
+      players?.forEach((player) => {
+        const riotAccount = normalizeRiotAccount(player?.riot_account);
+        if (!riotAccount) return;
+
+        if (side === "team1") {
+          context.team1RiotAccounts.add(riotAccount);
+        } else {
+          context.team2RiotAccounts.add(riotAccount);
+        }
+
+        const nickname = String(player?.nickname ?? "").trim();
+        if (nickname && !context.nicknameByRiotAccount.has(riotAccount)) {
+          context.nicknameByRiotAccount.set(riotAccount, nickname);
+        }
+
+        const avatar = String(player?.profile_picture ?? "").trim();
+        if (avatar && !context.avatarByRiotAccount.has(riotAccount)) {
+          context.avatarByRiotAccount.set(riotAccount, avatar);
+        }
+      });
+    };
+
+    collectRiotAccounts(context.team1Players, "team1");
+    collectRiotAccounts(context.team2Players, "team2");
+
+    const currentUserRiotAccount = normalizeRiotAccount(user?.riot_account);
+    if (currentUserRiotAccount) {
+      const currentUserNickname = String(user?.nickname ?? "").trim();
+      const currentUserAvatar = String(user?.profile_picture ?? "").trim();
+      const currentUserTeamId = toNumber(user?.team_id);
+
+      const inferredSide: TeamSide | null =
+        currentUserTeamId !== null &&
+        currentUserTeamId === currentMatchTeamIds.team1TeamId
+          ? "team1"
+          : currentUserTeamId !== null &&
+              currentUserTeamId === currentMatchTeamIds.team2TeamId
+            ? "team2"
+            : null;
+
+      if (inferredSide === "team1") {
+        context.team1RiotAccounts.add(currentUserRiotAccount);
+      } else if (inferredSide === "team2") {
+        context.team2RiotAccounts.add(currentUserRiotAccount);
+      }
+
+      if (currentUserNickname) {
+        context.nicknameByRiotAccount.set(
+          currentUserRiotAccount,
+          currentUserNickname,
+        );
+      }
+
+      if (currentUserAvatar) {
+        context.avatarByRiotAccount.set(
+          currentUserRiotAccount,
+          currentUserAvatar,
+        );
+      }
+    }
+
+    return context;
+  }, [currentMatchTeamIds, linkedTeamPlayers, user]);
+
+  const roundSlug = buildRoundSlug({
+    tournamentSlug: slug,
+    roundNumber: toNumber(currentMatchRow?.round_number),
+    matchNo: toNumber(currentMatchRow?.match_no),
+    matchId: toNumber(currentMatchRow?.id) ?? numId,
+  });
+  const banPickLink = `/round/${roundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`;
+
   const baseMatch = useMemo(() => {
     if (!currentMatchRow) return null;
     return buildMatchDetailFromApi({
@@ -964,7 +2124,11 @@ const MatchDetailPage = () => {
     });
   }, [currentMatchRow, tournament, normalizedRouteGame]);
 
-  const { data: matchGameIds } = useQuery({
+  const {
+    data: matchGameIds,
+    isLoading: isMatchGameIdsLoading,
+    isError: isMatchGameIdsError,
+  } = useQuery({
     queryKey: ["match-game-ids", numId],
     enabled: Boolean(numId),
     staleTime: 1000 * 60,
@@ -1000,10 +2164,6 @@ const MatchDetailPage = () => {
   }, [baseMatch?.gameType, matchGameIds]);
 
   const valorantApiMatchIds = useMemo(() => {
-    if (preferredProvider !== "val") {
-      return undefined;
-    }
-
     const idsFromMatchGames = getProviderMatchIds(matchGameIds ?? [], "val")
       .map((value) => String(value).trim())
       .filter((value): value is string => Boolean(value) && isUuid(value));
@@ -1013,7 +2173,12 @@ const MatchDetailPage = () => {
     }
 
     return undefined;
-  }, [matchGameIds, preferredProvider]);
+  }, [matchGameIds]);
+
+  const hasValorantMatchId = useMemo(
+    () => Boolean(valorantApiMatchIds && valorantApiMatchIds.length > 0),
+    [valorantApiMatchIds],
+  );
 
   const tftApiMatchIds = useMemo(() => {
     if (preferredProvider !== "tft") {
@@ -1030,7 +2195,9 @@ const MatchDetailPage = () => {
 
   const { data: valorantApiData } = useQuery({
     queryKey: ["valorant-match-detail", valorantApiMatchIds],
-    enabled: Boolean(valorantApiMatchIds && valorantApiMatchIds.length > 0),
+    enabled:
+      preferredProvider === "val" &&
+      Boolean(valorantApiMatchIds && valorantApiMatchIds.length > 0),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
     queryFn: async () => {
@@ -1054,25 +2221,88 @@ const MatchDetailPage = () => {
     },
   });
 
+  const { data: roundBanPickSession } = useQuery({
+    queryKey: ["round-banpick-session", roundSlug, numId],
+    enabled: Boolean(
+      roundSlug &&
+      numId &&
+      baseMatch?.gameType === "valorant" &&
+      hasValorantMatchId,
+    ),
+    staleTime: 1000 * 60,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const response = await getRoundBanPick(roundSlug, {
+        match_id: numId ?? undefined,
+      });
+
+      return response.data?.data ?? null;
+    },
+  });
+
+  const banPickTimeline = useMemo(
+    () => buildBanPickTimeline(roundBanPickSession),
+    [roundBanPickSession],
+  );
+
   const match = useMemo(() => {
     if (!baseMatch) return null;
 
+    const hydratedBaseMatch = hydrateRostersWithLinkedPlayers(
+      baseMatch,
+      linkedTeamContext,
+    );
+
     if (preferredProvider === "tft" && tftApiData && tftApiData.length > 0) {
-      return mergeTftApiIntoMatch(baseMatch, tftApiData[0]);
+      return mergeTftApiIntoMatch(
+        hydratedBaseMatch,
+        tftApiData[0],
+        linkedTeamContext,
+      );
     }
 
     if (baseMatch.gameType === "valorant" && valorantApiData) {
-      return mergeValorantApiIntoMatch(baseMatch, valorantApiData);
+      return mergeValorantApiIntoMatch(
+        hydratedBaseMatch,
+        valorantApiData,
+        linkedTeamContext,
+      );
     }
 
     if (preferredProvider === "val" && valorantApiData) {
-      return mergeValorantApiIntoMatch(baseMatch, valorantApiData);
+      return mergeValorantApiIntoMatch(
+        hydratedBaseMatch,
+        valorantApiData,
+        linkedTeamContext,
+      );
     }
 
-    return baseMatch;
-  }, [baseMatch, preferredProvider, tftApiData, valorantApiData]);
+    return hydratedBaseMatch;
+  }, [
+    baseMatch,
+    linkedTeamContext,
+    preferredProvider,
+    tftApiData,
+    valorantApiData,
+  ]);
 
   if (!match) {
+    const canOpenValorantBanPick =
+      normalizedRouteGame === "val" && Boolean(slug) && Boolean(numId);
+
+    const fallbackRoundSlug = canOpenValorantBanPick
+      ? buildRoundSlug({
+          tournamentSlug: slug,
+          roundNumber: null,
+          matchNo: numId,
+          matchId: numId,
+        })
+      : "";
+
+    const fallbackBanPickLink = canOpenValorantBanPick
+      ? `/round/${fallbackRoundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`
+      : "";
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -1082,9 +2312,21 @@ const MatchDetailPage = () => {
             </h2>
           ) : (
             <h2 className="text-2xl font-bold text-foreground">
-              Không tìm thấy trận đấu
+              {canOpenValorantBanPick
+                ? "Mở Ban/Pick trận Valorant"
+                : "Không tìm thấy trận đấu"}
             </h2>
           )}
+
+          {!isMatchListLoading && canOpenValorantBanPick && (
+            <Link
+              to={fallbackBanPickLink}
+              className="inline-flex h-9 items-center rounded-md border border-primary/60 px-4 text-xs font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 transition-colors"
+            >
+              Mở Ban/Pick
+            </Link>
+          )}
+
           <Link
             to={backTo}
             className="text-primary hover:underline text-[11px]"
@@ -1096,16 +2338,20 @@ const MatchDetailPage = () => {
     );
   }
 
+  const shouldRedirectToBanPick =
+    match.gameType === "valorant" &&
+    Boolean(numId) &&
+    !isMatchGameIdsLoading &&
+    !isMatchGameIdsError &&
+    !hasValorantMatchId;
+
+  if (shouldRedirectToBanPick) {
+    return <Navigate to={banPickLink} replace />;
+  }
+
   const currentIndex = sortedMatches.findIndex(
     (item) => toNumber(item.id) === numId,
   );
-  const roundSlug = buildRoundSlug({
-    tournamentSlug: slug,
-    roundNumber: toNumber(currentMatchRow?.round_number),
-    matchNo: toNumber(currentMatchRow?.match_no),
-    matchId: toNumber(currentMatchRow?.id),
-  });
-  const banPickLink = `/round/${roundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`;
   const currentBracketId =
     currentIndex >= 0
       ? toNumber(sortedMatches[currentIndex]?.bracket_id)
@@ -1129,6 +2375,7 @@ const MatchDetailPage = () => {
     match.team1Roster.players.length > 0 ||
     match.team2Roster.players.length > 0;
   const hasMapData = Boolean(match.maps?.length);
+  const hasBanPickTimeline = banPickTimeline.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -1192,14 +2439,6 @@ const MatchDetailPage = () => {
             <p className="text-[11px] lg:text-[12px] text-[#EEEEEE] mt-0.5">
               {match.roundName} · {match.format}
             </p>
-            {match.gameType === "valorant" && (
-              <Link
-                to={banPickLink}
-                className="inline-flex mt-2 h-7 items-center rounded-md border border-primary/60 px-3 text-[10px] font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 transition-colors"
-              >
-                Mở Ban/Pick
-              </Link>
-            )}
           </div>
 
           <div className="order-3 flex justify-end items-center gap-2 min-w-0">
@@ -1299,25 +2538,49 @@ const MatchDetailPage = () => {
         </div>
       </div>
 
-      {/* ── Map Scores with background images ── */}
-      {match.maps && match.maps.length > 0 && (
+      {/* ── Map Scores + Ban/Pick timeline ── */}
+      {(hasMapData || hasBanPickTimeline) && (
         <div className="">
-          <div className="mx-auto px-4 md:px-8 py-6 space-y-2.5">
-            {match.maps.map((map, i) => (
-              <MapScoreRow
-                key={i}
-                map={map}
-                team1Logo={match.team1.logo}
-                team2Logo={match.team2.logo}
-              />
-            ))}
+          <div className="mx-auto px-4 md:px-8 py-6">
+            <div
+              className={`grid gap-4 ${
+                hasBanPickTimeline
+                  ? "grid-cols-1 xl:grid-cols-[minmax(280px,1fr)_minmax(0,1.6fr)]"
+                  : "grid-cols-1"
+              }`}
+            >
+              {hasBanPickTimeline && (
+                <BanPickTimelinePanel
+                  timeline={banPickTimeline}
+                  team1={match.team1}
+                  team2={match.team2}
+                />
+              )}
+
+              <div className="space-y-2.5">
+                {match.maps?.map((map, i) => (
+                  <MapScoreRow
+                    key={i}
+                    map={map}
+                    team1={match.team1}
+                    team2={match.team2}
+                  />
+                ))}
+
+                {!hasMapData && (
+                  <div className="rounded-xl border border-border/60 bg-card/30 px-4 py-3 text-xs text-muted-foreground">
+                    Chưa có dữ liệu tỉ số từng map.
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
-        {!hasRosterData && !hasMapData ? (
-          <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-smtext-[#EEEEEE]">
+        {!hasRosterData && !hasMapData && !hasBanPickTimeline ? (
+          <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-sm text-[#EEEEEE]">
             Chua co du lieu chi tiet cho tran dau nay.
           </section>
         ) : (

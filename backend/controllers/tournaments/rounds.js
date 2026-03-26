@@ -164,6 +164,7 @@ roundRouter.post(
     }
 
     const command = String(body?.command ?? "").trim();
+    const matchId = toNumber(body?.match_id);
     if (!command) {
       set.status = 400;
       return { error: "Thiếu command" };
@@ -171,6 +172,7 @@ roundRouter.post(
 
     const result = await mutateBanPickSession({
       roundSlug: params.round_slug,
+      matchId,
       user,
       command,
       mapId: body?.map_id,

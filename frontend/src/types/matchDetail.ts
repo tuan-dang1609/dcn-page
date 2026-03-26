@@ -5,6 +5,15 @@ export interface MapScore {
   mapImage?: string;
   team1Score: number;
   team2Score: number;
+  roundHistory?: RoundHistoryEntry[];
+}
+
+export interface RoundHistoryEntry {
+  roundNum: number;
+  winner: "team1" | "team2" | null;
+  winningRole?: string;
+  ceremony?: string;
+  winReason?: "time" | "default" | "defuse" | "explosion";
 }
 
 export interface PlayerStat {

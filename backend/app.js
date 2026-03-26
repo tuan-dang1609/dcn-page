@@ -17,6 +17,7 @@ import playerTourRoute from "./controllers/tournaments/tournament_team_player.js
 import matchRouter from "./controllers/tournaments/matches.js";
 import bracketRouter from "./controllers/tournaments/brackets.js";
 import seriesRouter from "./controllers/series.js";
+import pickemRouter from "./controllers/pickem.js";
 
 const serializeQuery = (query = {}) => {
   const params = new URLSearchParams();
@@ -55,6 +56,7 @@ const defaultAllowedOrigins = [
   "http://localhost:8080",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://localhost:3000",
   "http://127.0.0.1:3000",
   "http://localhost:3001",
   "http://127.0.0.1:3001",
@@ -88,7 +90,8 @@ const buildCorsHeaders = (origin) => ({
   "access-control-allow-origin": normalizeOrigin(origin),
   "access-control-allow-credentials": "true",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  "access-control-allow-headers": "Content-Type, Authorization",
+  "access-control-allow-headers":
+    "Content-Type, Authorization, X-API-Key, X-User-Id",
   vary: "Origin",
 });
 
@@ -177,6 +180,7 @@ const app = new Elysia()
   .group("/api/login", (app) => app.use(loginRouter))
   .group("/api/teams", (app) => app.use(teamRouter))
   .group("/api/series", (app) => app.use(seriesRouter))
+  .group("/api/pickem", (app) => app.use(pickemRouter))
   .group("/api/tournaments", (app) => app.use(tournamentRouter))
   .group("/api/tournaments/milestones", (app) => app.use(milestoneRouter))
   .group("/api/tournaments/rules", (app) => app.use(ruleRouter))

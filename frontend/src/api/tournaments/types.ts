@@ -103,3 +103,19 @@ export interface Match {
 export interface DataEnvelope<T> {
   data: T;
 }
+
+export interface TournamentTeamPlayer {
+  user_id?: number | string;
+  nickname?: string;
+  profile_picture?: string;
+  riot_account?: string | null;
+  role_in_team?: string;
+}
+
+export interface TournamentTeamPlayersResponse {
+  name?: string;
+  short_name?: string;
+  logo_url?: string;
+  team_color_hex?: string;
+  players?: TournamentTeamPlayer[];
+}

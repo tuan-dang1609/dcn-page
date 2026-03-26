@@ -1,6 +1,7 @@
 import { toBanPickPayload } from "../utils/banPick.js";
 
 const ROOM_PREFIX = "banpick:round:";
+const MATCH_ROOM_PREFIX = "banpick:match:";
 
 const normalizeRoundSlug = (value) =>
   String(value ?? "")
@@ -18,30 +19,44 @@ let banPickIo = null;
 export const getBanPickRoomName = (roundSlug) =>
   `${ROOM_PREFIX}${normalizeRoundSlug(roundSlug)}`;
 
+export const getBanPickMatchRoomName = (matchId) => {
+  const normalizedMatchId = toNumber(matchId);
+  if (!normalizedMatchId) return null;
+  return `${MATCH_ROOM_PREFIX}${normalizedMatchId}`;
+};
+
 export const setBanPickSocketServer = (io) => {
   banPickIo = io ?? null;
 };
-
-export const getBanPickSocketServer = () => banPickIo;
 
 export const emitBanPickRoomState = ({ roundSlug, session }) => {
   if (!banPickIo || !session) return false;
 
   const normalizedRoundSlug = normalizeRoundSlug(roundSlug);
-  if (!normalizedRoundSlug) return false;
-
-  const roomName = getBanPickRoomName(normalizedRoundSlug);
   const roomPayload = toBanPickPayload(session, null);
 
-  // Primary state event used by the current frontend.
-  banPickIo.to(roomName).emit("banpick:state", roomPayload);
-  // Compatibility event name for legacy clients.
-  banPickIo.to(roomName).emit("banpick:update", roomPayload);
+  let emitted = false;
 
-  return true;
+  if (normalizedRoundSlug) {
+    const roomName = getBanPickRoomName(normalizedRoundSlug);
+    banPickIo.to(roomName).emit("banpick:state", roomPayload);
+    emitted = true;
+  }
+
+  const matchRoomName = getBanPickMatchRoomName(session.match_id);
+  if (matchRoomName) {
+    banPickIo.to(matchRoomName).emit("banpick:state", roomPayload);
+    emitted = true;
+  }
+
+  return emitted;
 };
 
-export const emitBanPickViewerContext = ({ socket, viewerTeamSlot, userId }) => {
+export const emitBanPickViewerContext = ({
+  socket,
+  viewerTeamSlot,
+  userId,
+}) => {
   if (!socket) return;
 
   socket.emit("banpick:self", {
