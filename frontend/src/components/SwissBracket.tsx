@@ -10,10 +10,19 @@ import { TOURNAMENT_LOGO } from "@/data/tournament";
 type SwissBracketProps = {
   bracketId?: number | null;
   selectedTeamByMatchId?: Record<number, number>;
+  pickStatusByMatchId?: Record<number, PickStatus>;
   onPickTeam?: (matchId: number, teamId: number) => void;
   disableMatchLink?: boolean;
   tournamentRegistered?: RegisteredTeam[];
 };
+
+type PickStatus = {
+  isResolved?: boolean;
+  isCorrect?: boolean | null;
+  winnerTeamId?: number | null;
+};
+
+type PickVisualState = "selected" | "correct" | "wrong";
 
 type RegisteredTeam = {
   id?: number | string;
@@ -30,6 +39,7 @@ type BracketOutletContext = {
 
 type PickemContextValue = {
   selectedTeamByMatchId?: Record<number, number>;
+  pickStatusByMatchId?: Record<number, PickStatus>;
   onPickTeam?: (matchId: number, teamId: number) => void;
   disableMatchLink?: boolean;
 };
@@ -141,7 +151,8 @@ const getTeamLabel = (
 };
 
 const resolveMatchWinnerTeamId = (match: DisplayMatch) => {
-  if (match.winnerTeamId !== null) return match.winnerTeamId;
+  if (match.winnerTeamId !== null && match.winnerTeamId > 0)
+    return match.winnerTeamId;
   if (match.s1 !== null && match.s2 !== null) {
     if (match.s1 > match.s2) return match.teamAId;
     if (match.s2 > match.s1) return match.teamBId;
@@ -177,7 +188,9 @@ const toDisplayMatches = (
     const teamBId = toNumber(match.team_b_id);
     const scoreA = toNumber(match.score_a);
     const scoreB = toNumber(match.score_b);
-    const winnerTeamId = toNumber(match.winner_team_id);
+    const rawWinnerTeamId = toNumber(match.winner_team_id);
+    const winnerTeamId =
+      rawWinnerTeamId !== null && rawWinnerTeamId > 0 ? rawWinnerTeamId : null;
 
     const p1 =
       (match as any)?.team_a?.name ?? getTeamLabel(teamAId, teamNameById);
@@ -187,7 +200,7 @@ const toDisplayMatches = (
     const p2Logo = (match as any)?.team_b?.logo_url ?? null;
 
     let winner: string | null = null;
-    if (winnerTeamId !== null) {
+    if (winnerTeamId) {
       if (toNumber((match as any)?.team_a?.id) === winnerTeamId) winner = p1;
       else if (toNumber((match as any)?.team_b?.id) === winnerTeamId)
         winner = p2;
@@ -430,6 +443,7 @@ const PlayerRow = ({
   score,
   isWinner,
   isSelected,
+  pickState,
   isHoveredTeam,
   hasHover,
   isTop,
@@ -442,6 +456,7 @@ const PlayerRow = ({
   score: number | null;
   isWinner: boolean;
   isSelected?: boolean;
+  pickState?: PickVisualState | null;
   isHoveredTeam: boolean;
   hasHover: boolean;
   isTop?: boolean;
@@ -451,27 +466,26 @@ const PlayerRow = ({
   const canPick =
     typeof onPick === "function" && Number.isFinite(Number(teamId));
 
-  const bg = hasHover
-    ? isHoveredTeam
-      ? "bg-primary text-primary-foreground"
-      : "bg-card"
-    : isSelected
-      ? "bg-primary/25"
-      : isWinner
-        ? "bg-primary/20"
-        : "bg-card";
+  const stateToneCls =
+    pickState === "correct"
+      ? "bg-emerald-500/20 text-emerald-100 font-semibold"
+      : pickState === "wrong"
+        ? "bg-rose-500/20 text-rose-100 font-semibold"
+        : pickState === "selected"
+          ? "bg-amber-500/20 text-amber-100 font-semibold"
+          : isWinner
+            ? "bg-primary/20 font-semibold"
+            : "bg-card";
 
-  const textClass = hasHover
+  const hoverCls = hasHover
     ? isHoveredTeam
-      ? "font-bold"
+      ? "brightness-110"
       : "text-muted-foreground"
-    : isWinner
-      ? "font-semibold"
-      : "";
+    : "";
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${bg} ${textClass} ${isSelected ? "ring-1 ring-primary/60" : ""} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-border/40" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHoverTeam(teamId)}
       onMouseLeave={() => onHoverTeam(null)}
@@ -506,20 +520,55 @@ const MatchCard = ({
   onHoverTeam: (teamId: number | null) => void;
   isInJourney: boolean;
 }) => {
-  const { selectedTeamByMatchId, onPickTeam, disableMatchLink } =
-    useContext(PickemContext);
+  const {
+    selectedTeamByMatchId,
+    pickStatusByMatchId,
+    onPickTeam,
+    disableMatchLink,
+  } = useContext(PickemContext);
   const hasHover = hoveredTeamId !== null;
   const faded = hasHover && !isInJourney;
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
-  const selectedTeamId = selectedTeamByMatchId?.[match.routeMatchId];
+  const realMatchId = toNumber(match.routeMatchId);
+  const selectedTeamId = realMatchId
+    ? selectedTeamByMatchId?.[realMatchId]
+    : null;
+  const pickStatus = realMatchId
+    ? pickStatusByMatchId?.[realMatchId]
+    : undefined;
+  const officialWinnerTeamId =
+    pickStatus?.winnerTeamId ??
+    match.winnerTeamId ??
+    (match.s1 !== null && match.s2 !== null
+      ? match.s1 > match.s2
+        ? match.teamAId
+        : match.s2 > match.s1
+          ? match.teamBId
+          : null
+      : null);
 
-  const handlePick = (teamId: number) => {
-    if (!onPickTeam) return;
-    onPickTeam(match.routeMatchId, teamId);
+  const resolvePickState = (teamId: number | null): PickVisualState | null => {
+    if (!teamId || selectedTeamId !== teamId) return null;
+
+    if (typeof pickStatus?.isCorrect === "boolean") {
+      return pickStatus.isCorrect ? "correct" : "wrong";
+    }
+
+    if (pickStatus?.isResolved || officialWinnerTeamId) {
+      if (!officialWinnerTeamId) return "selected";
+      return officialWinnerTeamId === selectedTeamId ? "correct" : "wrong";
+    }
+
+    return "selected";
   };
 
-  const canPick = Boolean(onPickTeam && match.routeMatchId > 0);
+  const handlePick = (teamId: number) => {
+    if (!onPickTeam || !realMatchId) return;
+    onPickTeam(realMatchId, teamId);
+  };
+
+  const canPick = Boolean(onPickTeam && realMatchId && realMatchId > 0);
 
   const content = (
     <>
@@ -530,6 +579,7 @@ const MatchCard = ({
         score={match.s1}
         isWinner={match.winner === match.p1}
         isSelected={selectedTeamId === match.teamAId}
+        pickState={resolvePickState(match.teamAId)}
         isHoveredTeam={hoveredTeamId === match.teamAId}
         hasHover={hasHover}
         isTop
@@ -543,6 +593,7 @@ const MatchCard = ({
         score={match.s2}
         isWinner={match.winner === match.p2}
         isSelected={selectedTeamId === match.teamBId}
+        pickState={resolvePickState(match.teamBId)}
         isHoveredTeam={hoveredTeamId === match.teamBId}
         hasHover={hasHover}
         onPick={canPick ? handlePick : undefined}
@@ -600,7 +651,7 @@ const TeamListCard = ({
       <p className="text-sm font-bold uppercase tracking-wide mb-2">
         {title} ({teams.length})
       </p>
-      <div className="space-y-1.5 flex-1 min-h-0 overflow-auto pr-1">
+      <div className="space-y-1.5 pr-1">
         {teams.length ? (
           teams.map((team) => (
             <div
@@ -633,6 +684,7 @@ const TeamListCard = ({
 const SwissBracket = ({
   bracketId,
   selectedTeamByMatchId,
+  pickStatusByMatchId,
   onPickTeam,
   disableMatchLink,
   tournamentRegistered,
@@ -939,11 +991,12 @@ const SwissBracket = ({
     <PickemContext.Provider
       value={{
         selectedTeamByMatchId,
+        pickStatusByMatchId,
         onPickTeam,
         disableMatchLink,
       }}
     >
-      <div className="w-full overflow-x-auto">
+      <div className="w-full">
         <div className="flex items-start gap-4 min-w-max">
           <div
             className="relative shrink-0"
@@ -1069,11 +1122,10 @@ const SwissBracket = ({
             className="shrink-0 flex flex-col items-start justify-center"
             style={{
               width: STAGE_W,
-              height: layoutInfo.contentHeight,
               gap: STAGE_GAP,
             }}
           >
-            <div className="min-h-0 w-full">
+            <div className="w-full">
               <TeamListCard
                 title="Đi tiếp"
                 teams={teamProgress.advanced}
@@ -1082,7 +1134,7 @@ const SwissBracket = ({
                 onHoverTeam={setHoveredTeamId}
               />
             </div>
-            <div className="min-h-0 w-full">
+            <div className="w-full">
               <TeamListCard
                 title="Bị loại"
                 teams={teamProgress.eliminated}

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Calendar,
+  Clipboard,
   Link2,
   Loader2,
   Plus,
@@ -39,6 +40,8 @@ const providerOptions = [
   { value: "lol", label: "LoL" },
   { value: "tft", label: "TFT" },
 ];
+
+const gameNoOptions = Array.from({ length: 7 }, (_, index) => index + 1);
 
 type BanPickFormat = "BO1" | "BO3" | "BO5";
 
@@ -91,6 +94,86 @@ const normalizeProviderKey = (value?: string | null) => {
     return "tft";
 
   return normalized;
+};
+
+const getInfoGameIdPlaceholder = (provider?: string) => {
+  const normalizedProvider = normalizeProviderKey(provider);
+
+  if (normalizedProvider === "valorant") {
+    return "Dán link/UUID Valorant match";
+  }
+
+  if (normalizedProvider === "lol") {
+    return "Dán link/ID LoL match";
+  }
+
+  if (normalizedProvider === "tft") {
+    return "Dán link/ID TFT match";
+  }
+
+  return "Dán link match hoặc nhập ID";
+};
+
+const normalizeInfoGameIdInput = (rawValue: string, provider?: string) => {
+  const trimmed = String(rawValue ?? "").trim();
+  if (!trimmed) return "";
+
+  const normalizedProvider = normalizeProviderKey(provider);
+  const uuidPattern =
+    /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+
+  const uuidInText = trimmed.match(uuidPattern)?.[0] ?? "";
+  if (normalizedProvider === "valorant" && uuidInText) {
+    return uuidInText;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const queryId =
+      url.searchParams.get("matchId") ??
+      url.searchParams.get("match_id") ??
+      url.searchParams.get("id");
+
+    if (queryId?.trim()) {
+      const fromQuery = queryId.trim();
+      if (normalizedProvider === "valorant") {
+        return fromQuery.match(uuidPattern)?.[0] ?? fromQuery;
+      }
+      return fromQuery;
+    }
+
+    const segments = url.pathname.split("/").filter(Boolean);
+    const matchSegmentIndex = segments.findIndex(
+      (segment) => segment.toLowerCase() === "match",
+    );
+
+    const candidateFromPath =
+      matchSegmentIndex >= 0 && segments[matchSegmentIndex + 1]
+        ? decodeURIComponent(segments[matchSegmentIndex + 1])
+        : decodeURIComponent(segments[segments.length - 1] ?? "");
+
+    const cleaned = candidateFromPath.trim();
+    if (cleaned) {
+      if (normalizedProvider === "valorant") {
+        return cleaned.match(uuidPattern)?.[0] ?? cleaned;
+      }
+
+      return cleaned;
+    }
+  } catch {
+    // fallback to raw pattern extraction below
+  }
+
+  const fromMatchPath = trimmed.match(/match\/([^/?#]+)/i)?.[1] ?? "";
+  if (fromMatchPath) {
+    const candidate = decodeURIComponent(fromMatchPath.trim());
+    if (normalizedProvider === "valorant") {
+      return candidate.match(uuidPattern)?.[0] ?? candidate;
+    }
+    return candidate;
+  }
+
+  return trimmed;
 };
 
 const toDatetimeLocalInput = (value?: string | null) => {
@@ -346,12 +429,15 @@ const ScoreControlPage = () => {
 
   const handleCreateGameId = async (matchId: number) => {
     const draft = newGameIdDraftByMatch[matchId] ?? createEmptyNewGameIdDraft();
-    const infoGameId = draft.infoGameId.trim();
+    const infoGameId = normalizeInfoGameIdInput(
+      draft.infoGameId,
+      draft.provider,
+    );
 
     if (!infoGameId) {
       toast({
         title: "Thiếu info_game_id",
-        description: "Vui lòng nhập ID trận game trước khi thêm.",
+        description: "Vui lòng dán link hoặc nhập ID trận game trước khi thêm.",
         variant: "destructive",
       });
       return;
@@ -399,6 +485,37 @@ const ScoreControlPage = () => {
     }
   };
 
+  const handlePasteInfoGameId = async (matchId: number) => {
+    try {
+      if (!navigator?.clipboard?.readText) {
+        toast({
+          title: "Không thể đọc clipboard",
+          description: "Trình duyệt chưa hỗ trợ đọc clipboard.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const clipboardText = await navigator.clipboard.readText();
+      if (!clipboardText.trim()) {
+        toast({
+          title: "Clipboard đang trống",
+          description: "Hãy copy link/ID trước khi bấm dán.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      updateNewGameIdDraft(matchId, "infoGameId", clipboardText);
+    } catch {
+      toast({
+        title: "Không thể dán từ clipboard",
+        description: "Vui lòng cho phép quyền đọc clipboard hoặc dán thủ công.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleUpdateGameId = async (matchId: number, rowId: number) => {
     const draft = editGameIdDraftByRow[rowId];
     if (!draft) return;
@@ -406,6 +523,11 @@ const ScoreControlPage = () => {
     updateEditGameIdDraft(rowId, "saving", true);
 
     try {
+      const normalizedInfoGameId = normalizeInfoGameIdInput(
+        draft.infoGameId,
+        draft.provider,
+      );
+
       const payload: {
         match_id_info?: string | null;
         info_game_id?: string | null;
@@ -413,8 +535,8 @@ const ScoreControlPage = () => {
         game_no?: number;
       } = {};
 
-      payload.match_id_info = draft.infoGameId.trim() || null;
-      payload.info_game_id = draft.infoGameId.trim() || null;
+      payload.match_id_info = normalizedInfoGameId || null;
+      payload.info_game_id = normalizedInfoGameId || null;
       const normalizedProvider = normalizeProviderKey(draft.provider);
       if (normalizedProvider) {
         payload.external_provider = normalizedProvider;
@@ -1200,8 +1322,8 @@ const ScoreControlPage = () => {
                                 key={item.id}
                                 className="rounded-md border border-border bg-card p-2.5 space-y-2"
                               >
-                                <div className="grid gap-2 md:grid-cols-[100px_1fr_220px_120px_auto_auto]">
-                                  <Input
+                                <div className="grid gap-2 md:grid-cols-[140px_1fr_220px_120px_auto_auto]">
+                                  <select
                                     value={draft.gameNo}
                                     onChange={(event) =>
                                       updateEditGameIdDraft(
@@ -1210,9 +1332,18 @@ const ScoreControlPage = () => {
                                         event.target.value,
                                       )
                                     }
-                                    placeholder="game_no"
-                                    inputMode="numeric"
-                                  />
+                                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                                  >
+                                    <option value="">Auto game_no</option>
+                                    {gameNoOptions.map((gameNo) => (
+                                      <option
+                                        key={gameNo}
+                                        value={String(gameNo)}
+                                      >
+                                        Game {gameNo}
+                                      </option>
+                                    ))}
+                                  </select>
                                   <Input
                                     value={draft.infoGameId}
                                     onChange={(event) =>
@@ -1222,7 +1353,9 @@ const ScoreControlPage = () => {
                                         event.target.value,
                                       )
                                     }
-                                    placeholder="info_game_id"
+                                    placeholder={getInfoGameIdPlaceholder(
+                                      draft.provider,
+                                    )}
                                   />
                                   <select
                                     value={draft.provider}
@@ -1294,9 +1427,9 @@ const ScoreControlPage = () => {
                         </div>
                       )}
 
-                      <div className="rounded-md border border-border bg-card p-2.5">
-                        <div className="grid gap-2 md:grid-cols-[100px_1fr_220px_auto]">
-                          <Input
+                      <div className="rounded-md border border-border bg-card p-2.5 space-y-2">
+                        <div className="grid gap-2 md:grid-cols-[140px_1fr_220px_auto_auto]">
+                          <select
                             value={
                               (
                                 newGameIdDraftByMatch[match.id] ??
@@ -1310,9 +1443,15 @@ const ScoreControlPage = () => {
                                 event.target.value,
                               )
                             }
-                            placeholder="game_no"
-                            inputMode="numeric"
-                          />
+                            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            <option value="">Auto game_no</option>
+                            {gameNoOptions.map((gameNo) => (
+                              <option key={gameNo} value={String(gameNo)}>
+                                Game {gameNo}
+                              </option>
+                            ))}
+                          </select>
                           <Input
                             value={
                               (
@@ -1327,7 +1466,12 @@ const ScoreControlPage = () => {
                                 event.target.value,
                               )
                             }
-                            placeholder="Nhập info_game_id"
+                            placeholder={getInfoGameIdPlaceholder(
+                              (
+                                newGameIdDraftByMatch[match.id] ??
+                                createEmptyNewGameIdDraft()
+                              ).provider,
+                            )}
                           />
                           <select
                             value={
@@ -1353,6 +1497,15 @@ const ScoreControlPage = () => {
                           </select>
                           <Button
                             type="button"
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => void handlePasteInfoGameId(match.id)}
+                          >
+                            <Clipboard className="h-4 w-4" />
+                            Dán
+                          </Button>
+                          <Button
+                            type="button"
                             className="gap-2"
                             onClick={() => void handleCreateGameId(match.id)}
                             disabled={Boolean(
@@ -1373,6 +1526,11 @@ const ScoreControlPage = () => {
                             Thêm ID
                           </Button>
                         </div>
+
+                        <p className="text-xs text-muted-foreground">
+                          Mẹo: chỉ cần dán link match, hệ thống sẽ tự bóc
+                          info_game_id.
+                        </p>
                       </div>
                     </div>
                   </div>

@@ -38,6 +38,18 @@ export const getBracketsByTournamentId = (tournamentId: number | string) =>
     `${tournamentsBaseUrl}/brackets/${tournamentId}`,
   );
 
+export const deleteBracket = (bracketId: number | string) =>
+  axios.delete<{
+    data: {
+      bracket_id: number;
+      tournament_id: number;
+      deleted_matches: number;
+      deleted_match_games: number;
+      deleted_pickem_picks: number;
+      deleted_pickem_submissions: number;
+    };
+  }>(`${tournamentsBaseUrl}/brackets/${bracketId}`, getAuthConfig());
+
 export const getMatchesByBracketId = (bracketId: number | string) =>
   axios.get<DataEnvelope<Match[]>>(
     `${tournamentsBaseUrl}/matches/brackets/${bracketId}/matches`,

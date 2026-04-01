@@ -14,6 +14,15 @@ const toNumber = (value) => {
   return Number.isFinite(number) ? number : null;
 };
 
+const doesTableExist = async (client, tableName) => {
+  const { rows } = await client.query(
+    "SELECT to_regclass($1) IS NOT NULL AS exists",
+    [`public.${tableName}`],
+  );
+
+  return Boolean(rows[0]?.exists);
+};
+
 const nextPowerOfTwo = (number) => {
   let value = 1;
   while (value < number) value *= 2;
@@ -974,6 +983,136 @@ bracketRouter.get(
   {
     tags: [TAG],
     summary: "List brackets by tournament",
+  },
+);
+
+bracketRouter.delete(
+  "/:bracket_id",
+  async ({ params, set, user }) => {
+    const bracketId = toNumber(params.bracket_id);
+
+    if (!bracketId) {
+      set.status = 400;
+      return { error: "bracket_id không hợp lệ" };
+    }
+
+    const { rows: bracketRows } = await pool.query(
+      "SELECT id, tournament_id, name FROM brackets WHERE id = $1 LIMIT 1",
+      [bracketId],
+    );
+
+    if (bracketRows.length === 0) {
+      set.status = 404;
+      return { error: "Bracket không tồn tại" };
+    }
+
+    const bracket = bracketRows[0];
+    const tournamentId = Number(bracket.tournament_id);
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      tournamentId,
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const BRACKET_NOT_FOUND_AFTER_DELETE = "BRACKET_NOT_FOUND_AFTER_DELETE";
+
+    try {
+      const result = await pool.transaction(async (client) => {
+        let deletedMatchGames = 0;
+        let deletedPickemPicks = 0;
+        let deletedPickemSubmissions = 0;
+
+        const hasMatchGamesTable = await doesTableExist(client, "match_games");
+        const hasPickemPicksTable = await doesTableExist(
+          client,
+          "pickem_bracket_picks",
+        );
+        const hasPickemSubmissionsTable = await doesTableExist(
+          client,
+          "pickem_bracket_submissions",
+        );
+
+        if (hasMatchGamesTable) {
+          const deletedMatchGamesResult = await client.query(
+            `
+            DELETE FROM match_games
+            WHERE match_id IN (
+              SELECT id FROM matches WHERE bracket_id = $1
+            )
+            RETURNING id
+            `,
+            [bracketId],
+          );
+
+          deletedMatchGames = deletedMatchGamesResult.rows?.length ?? 0;
+        }
+
+        if (hasPickemPicksTable) {
+          const deletedPickemPicksResult = await client.query(
+            "DELETE FROM pickem_bracket_picks WHERE bracket_id = $1 RETURNING id",
+            [bracketId],
+          );
+
+          deletedPickemPicks = deletedPickemPicksResult.rows?.length ?? 0;
+        }
+
+        if (hasPickemSubmissionsTable) {
+          const deletedPickemSubmissionsResult = await client.query(
+            "DELETE FROM pickem_bracket_submissions WHERE bracket_id = $1 RETURNING id",
+            [bracketId],
+          );
+
+          deletedPickemSubmissions =
+            deletedPickemSubmissionsResult.rows?.length ?? 0;
+        }
+
+        const deletedMatchesResult = await client.query(
+          "DELETE FROM matches WHERE bracket_id = $1 RETURNING id",
+          [bracketId],
+        );
+
+        const deletedBracketResult = await client.query(
+          "DELETE FROM brackets WHERE id = $1 RETURNING id",
+          [bracketId],
+        );
+
+        if ((deletedBracketResult.rows?.length ?? 0) === 0) {
+          const txError = new Error(BRACKET_NOT_FOUND_AFTER_DELETE);
+          txError.code = BRACKET_NOT_FOUND_AFTER_DELETE;
+          throw txError;
+        }
+
+        return {
+          message: "Xóa bracket thành công",
+          data: {
+            bracket_id: bracketId,
+            tournament_id: tournamentId,
+            bracket_name: bracket.name ?? null,
+            deleted_matches: deletedMatchesResult.rows?.length ?? 0,
+            deleted_match_games: deletedMatchGames,
+            deleted_pickem_picks: deletedPickemPicks,
+            deleted_pickem_submissions: deletedPickemSubmissions,
+          },
+        };
+      });
+
+      set.status = 200;
+      return result;
+    } catch (error) {
+      if (error?.code === BRACKET_NOT_FOUND_AFTER_DELETE) {
+        set.status = 404;
+        return { error: "Bracket không tồn tại" };
+      }
+
+      throw error;
+    }
+  },
+  {
+    tags: [TAG],
+    summary: "Delete bracket and related records",
+    security: [{ bearerAuth: [] }],
   },
 );
 

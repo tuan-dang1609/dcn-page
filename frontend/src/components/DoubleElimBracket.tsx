@@ -17,10 +17,19 @@ import { getDoubleElimRoundTitle } from "@/components/double-elim/roundLabels";
 type DoubleElimBracketProps = {
   bracketId?: number | null;
   selectedTeamByMatchId?: Record<number, number>;
+  pickStatusByMatchId?: Record<number, PickStatus>;
   onPickTeam?: (matchId: number, teamId: number) => void;
   disableMatchLink?: boolean;
   tournamentRegistered?: RegisteredTeam[];
 };
+
+type PickStatus = {
+  isResolved?: boolean;
+  isCorrect?: boolean | null;
+  winnerTeamId?: number | null;
+};
+
+type PickVisualState = "selected" | "correct" | "wrong";
 
 type RegisteredTeam = {
   id?: number | string;
@@ -38,6 +47,7 @@ type BracketOutletContext = {
 
 type PickemContextValue = {
   selectedTeamByMatchId?: Record<number, number>;
+  pickStatusByMatchId?: Record<number, PickStatus>;
   onPickTeam?: (matchId: number, teamId: number) => void;
   disableMatchLink?: boolean;
 };
@@ -84,7 +94,9 @@ const getTeamLabel = (
 };
 
 const toSlot = (value: unknown): "A" | "B" | null => {
-  const normalized = String(value ?? "").trim().toUpperCase();
+  const normalized = String(value ?? "")
+    .trim()
+    .toUpperCase();
   if (normalized === "A" || normalized === "B") return normalized;
   return null;
 };
@@ -219,7 +231,10 @@ const projectDoubleElimMatches = ({
   }
 
   const projectedById = new Map<number, DisplayMatch>();
-  const teamInfoById = new Map<number, { name: string; logoUrl: string | null }>();
+  const teamInfoById = new Map<
+    number,
+    { name: string; logoUrl: string | null }
+  >();
 
   matches.forEach((match) => {
     projectedById.set(match.id, { ...match });
@@ -254,9 +269,7 @@ const projectDoubleElimMatches = ({
     (match) => match.round === 1,
   ).length;
   const winnerRounds =
-    roundOneMatchCount > 0
-      ? Math.max(1, Math.log2(roundOneMatchCount * 2))
-      : 1;
+    roundOneMatchCount > 0 ? Math.max(1, Math.log2(roundOneMatchCount * 2)) : 1;
   const loserMainRounds = Math.max(1, 2 * (winnerRounds - 1));
   const roundShape = getRoundShape(projectedMatches);
 
@@ -324,12 +337,12 @@ const projectDoubleElimMatches = ({
   projectedById.forEach((match) => {
     const winnerTeamId = getResolvedWinnerTeamId(match, selectedTeamByMatchId);
 
-    if (winnerTeamId === match.teamAId) {
+    if (winnerTeamId !== null && winnerTeamId === match.teamAId) {
       match.winner = match.p1;
       return;
     }
 
-    if (winnerTeamId === match.teamBId) {
+    if (winnerTeamId !== null && winnerTeamId === match.teamBId) {
       match.winner = match.p2;
       return;
     }
@@ -351,6 +364,7 @@ const PlayerRow = ({
   score,
   isWinner,
   isSelected,
+  pickState,
   isHoveredPlayer,
   hasHover,
   isTop,
@@ -363,6 +377,7 @@ const PlayerRow = ({
   score: number | null;
   isWinner: boolean;
   isSelected?: boolean;
+  pickState?: PickVisualState | null;
   isHoveredPlayer: boolean;
   hasHover: boolean;
   isTop?: boolean;
@@ -372,27 +387,26 @@ const PlayerRow = ({
   const canPick =
     typeof onPick === "function" && Number.isFinite(Number(teamId));
 
-  const bg = hasHover
-    ? isHoveredPlayer
-      ? "bg-primary text-primary-foreground"
-      : "bg-card"
-    : isSelected
-      ? "bg-primary/25"
-      : isWinner
-        ? "bg-primary/20"
-        : "bg-card";
+  const stateToneCls =
+    pickState === "correct"
+      ? "bg-emerald-500/20 text-emerald-100 font-semibold"
+      : pickState === "wrong"
+        ? "bg-rose-500/20 text-rose-100 font-semibold"
+        : pickState === "selected"
+          ? "bg-amber-500/20 text-amber-100 font-semibold"
+          : isWinner
+            ? "bg-primary/20 font-semibold"
+            : "bg-card";
 
-  const textCls = hasHover
+  const hoverCls = hasHover
     ? isHoveredPlayer
-      ? "font-bold"
+      ? "brightness-110"
       : "text-muted-foreground"
-    : isWinner
-      ? "font-semibold"
-      : "";
+    : "";
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${bg} ${textCls} ${isSelected ? "ring-1 ring-primary/60" : ""} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-border/40" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHover(name)}
       onMouseLeave={() => onHover(null)}
@@ -427,21 +441,53 @@ const MatchCard = ({
   onHover: (player: string | null) => void;
   isInJourney: boolean;
 }) => {
-  const { selectedTeamByMatchId, onPickTeam, disableMatchLink } =
-    useContext(PickemContext);
+  const {
+    selectedTeamByMatchId,
+    pickStatusByMatchId,
+    onPickTeam,
+    disableMatchLink,
+  } = useContext(PickemContext);
   const hasHover = hoveredPlayer !== null;
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
-  const selectedTeamId = match.routeMatchId
-    ? selectedTeamByMatchId?.[match.routeMatchId]
+  const realMatchId = toNumber(match.routeMatchId);
+  const selectedTeamId = realMatchId
+    ? selectedTeamByMatchId?.[realMatchId]
     : null;
+  const pickStatus = realMatchId
+    ? pickStatusByMatchId?.[realMatchId]
+    : undefined;
+  const officialWinnerTeamId =
+    pickStatus?.winnerTeamId ??
+    (match.s1 !== null && match.s2 !== null
+      ? match.s1 > match.s2
+        ? match.teamAId
+        : match.s2 > match.s1
+          ? match.teamBId
+          : null
+      : null);
 
-  const handlePick = (teamId: number) => {
-    if (!onPickTeam || !match.routeMatchId) return;
-    onPickTeam(match.routeMatchId, teamId);
+  const resolvePickState = (teamId: number | null): PickVisualState | null => {
+    if (!teamId || selectedTeamId !== teamId) return null;
+
+    if (typeof pickStatus?.isCorrect === "boolean") {
+      return pickStatus.isCorrect ? "correct" : "wrong";
+    }
+
+    if (pickStatus?.isResolved || officialWinnerTeamId) {
+      if (!officialWinnerTeamId) return "selected";
+      return officialWinnerTeamId === selectedTeamId ? "correct" : "wrong";
+    }
+
+    return "selected";
   };
 
-  const canPick = Boolean(onPickTeam && match.routeMatchId);
+  const handlePick = (teamId: number) => {
+    if (!onPickTeam || !realMatchId) return;
+    onPickTeam(realMatchId, teamId);
+  };
+
+  const canPick = Boolean(onPickTeam && realMatchId);
 
   const content = (
     <>
@@ -452,6 +498,7 @@ const MatchCard = ({
         score={match.s1}
         isWinner={match.winner === match.p1}
         isSelected={selectedTeamId === match.teamAId}
+        pickState={resolvePickState(match.teamAId)}
         isHoveredPlayer={hoveredPlayer === match.p1}
         hasHover={hasHover}
         isTop
@@ -465,6 +512,7 @@ const MatchCard = ({
         score={match.s2}
         isWinner={match.winner === match.p2}
         isSelected={selectedTeamId === match.teamBId}
+        pickState={resolvePickState(match.teamBId)}
         isHoveredPlayer={hoveredPlayer === match.p2}
         hasHover={hasHover}
         onPick={canPick ? handlePick : undefined}
@@ -786,6 +834,7 @@ const getSegmentRange = (
 const DoubleElimBracket = ({
   bracketId,
   selectedTeamByMatchId,
+  pickStatusByMatchId,
   onPickTeam,
   disableMatchLink,
   tournamentRegistered,
@@ -798,6 +847,7 @@ const DoubleElimBracket = ({
     <PickemContext.Provider
       value={{
         selectedTeamByMatchId,
+        pickStatusByMatchId,
         onPickTeam,
         disableMatchLink,
       }}
@@ -850,13 +900,17 @@ const DoubleElimBracket = ({
         const teamBId = toNumber(match.team_b_id);
         const scoreA = toNumber(match.score_a);
         const scoreB = toNumber(match.score_b);
-        const winnerTeamId = toNumber(match.winner_team_id);
+        const rawWinnerTeamId = toNumber(match.winner_team_id);
+        const winnerTeamId =
+          rawWinnerTeamId !== null && rawWinnerTeamId > 0
+            ? rawWinnerTeamId
+            : null;
 
         const p1 = match.team_a?.name ?? getTeamLabel(teamAId, teamNameById);
         const p2 = match.team_b?.name ?? getTeamLabel(teamBId, teamNameById);
 
         let winner: string | null = null;
-        if (winnerTeamId !== null) {
+        if (winnerTeamId) {
           if (toNumber(match.team_a?.id) === winnerTeamId) winner = p1;
           else if (toNumber(match.team_b?.id) === winnerTeamId) winner = p2;
           else winner = getTeamLabel(winnerTeamId, teamNameById);

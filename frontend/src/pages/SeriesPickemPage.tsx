@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { getBracketPickemData, saveBracketPicks } from "@/api/pickem";
+import {
+  getBracketPickemData,
+  saveBracketPicks,
+  type UserBracketPick,
+} from "@/api/pickem";
 import {
   getBracketsByTournamentId,
   type Bracket,
 } from "@/api/tournaments/index";
+import AutoFitContent from "@/components/AutoFitContent";
 import SingleElimBracket from "@/components/BracketView";
 import DoubleElimBracket from "@/components/DoubleElimBracket";
 import SwissBracket from "@/components/SwissBracket";
@@ -43,6 +48,46 @@ const toErrorMessage = (error: unknown, fallback: string) => {
     maybeResponse.message ??
     fallback
   );
+};
+
+type MatchPickStatus = {
+  isResolved: boolean;
+  isCorrect: boolean | null;
+  winnerTeamId: number | null;
+};
+
+const serializePicks = (pickedTeamByMatch: Record<number, number>) =>
+  Object.entries(pickedTeamByMatch)
+    .map(([matchIdRaw, selectedTeamIdRaw]) => {
+      const matchId = Number(matchIdRaw);
+      const selectedTeamId = Number(selectedTeamIdRaw);
+
+      if (!Number.isFinite(matchId) || !Number.isFinite(selectedTeamId)) {
+        return null;
+      }
+
+      return {
+        matchId,
+        selectedTeamId,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+const buildPickStatusByMatchId = (picks: UserBracketPick[] | undefined) => {
+  const map: Record<number, MatchPickStatus> = {};
+
+  (picks ?? []).forEach((pick) => {
+    const matchId = toNumber(pick.matchId);
+    if (!matchId) return;
+
+    map[matchId] = {
+      isResolved: Boolean(pick.isResolved),
+      isCorrect: typeof pick.isCorrect === "boolean" ? pick.isCorrect : null,
+      winnerTeamId: toNumber(pick.winnerTeamId),
+    };
+  });
+
+  return map;
 };
 
 type SeriesTournamentOption = {
@@ -104,6 +149,9 @@ const SeriesPickemPage = () => {
   const [pickedTeamByBracket, setPickedTeamByBracket] = useState<
     Record<number, Record<number, number>>
   >({});
+  const pickedTeamByBracketRef = useRef<Record<number, Record<number, number>>>(
+    {},
+  );
   const [dirtyBracketMap, setDirtyBracketMap] = useState<
     Record<number, boolean>
   >({});
@@ -245,83 +293,66 @@ const SeriesPickemPage = () => {
     });
   }, [allBracketItems, dirtyBracketMap, pickemDataQueries]);
 
-  const totalSelectedCount = useMemo(
-    () =>
-      Object.values(pickedTeamByBracket).reduce((sum, picks) => {
-        return (
-          sum +
-          Object.values(picks).filter((selectedTeamId) =>
-            Number.isFinite(Number(selectedTeamId)),
-          ).length
-        );
-      }, 0),
-    [pickedTeamByBracket],
-  );
+  useEffect(() => {
+    pickedTeamByBracketRef.current = pickedTeamByBracket;
+  }, [pickedTeamByBracket]);
 
-  const totalPickableMatches = useMemo(
+  const totalCorrectCount = useMemo(
     () =>
       pickemDataQueries.reduce((sum, query) => {
-        const matches = query.data?.matches ?? [];
-        return (
-          sum +
-          matches.filter(
-            (match) => toNumber(match.team_a_id) && toNumber(match.team_b_id),
-          ).length
-        );
+        return sum + (query.data?.myPicks?.stats?.correctPicks ?? 0);
       }, 0),
     [pickemDataQueries],
   );
 
   const pickTeam = (bracketId: number, matchId: number, teamId: number) => {
-    setPickedTeamByBracket((previous) => {
-      const currentBracket = previous[bracketId] ?? {};
+    const previous = pickedTeamByBracketRef.current;
+    const currentBracket = previous[bracketId] ?? {};
 
-      if (currentBracket[matchId] === teamId) {
-        const nextBracket = { ...currentBracket };
-        delete nextBracket[matchId];
+    const nextBracket =
+      currentBracket[matchId] === teamId
+        ? (() => {
+            const removed = { ...currentBracket };
+            delete removed[matchId];
+            return removed;
+          })()
+        : {
+            ...currentBracket,
+            [matchId]: teamId,
+          };
 
-        return {
-          ...previous,
-          [bracketId]: nextBracket,
-        };
-      }
+    const next = {
+      ...previous,
+      [bracketId]: nextBracket,
+    };
 
-      return {
-        ...previous,
-        [bracketId]: {
-          ...currentBracket,
-          [matchId]: teamId,
-        },
-      };
-    });
+    pickedTeamByBracketRef.current = next;
+    setPickedTeamByBracket(next);
 
     setDirtyBracketMap((previous) => ({
       ...previous,
       [bracketId]: true,
     }));
+
+    if (user?.id) {
+      saveMutation.mutate({
+        bracketId,
+        picksByMatch: nextBracket,
+      });
+    }
   };
 
   const saveMutation = useMutation({
-    mutationFn: async ({ bracketId }: { bracketId: number }) => {
+    mutationFn: async ({
+      bracketId,
+      picksByMatch,
+    }: {
+      bracketId: number;
+      picksByMatch: Record<number, number>;
+    }) => {
       if (!bracketId || !user?.id) {
         throw new Error("Ban can dang nhap de luu du doan");
       }
-
-      const picks = Object.entries(pickedTeamByBracket[bracketId] ?? {})
-        .map(([matchIdRaw, selectedTeamIdRaw]) => {
-          const matchId = Number(matchIdRaw);
-          const selectedTeamId = Number(selectedTeamIdRaw);
-
-          if (!Number.isFinite(matchId) || !Number.isFinite(selectedTeamId)) {
-            return null;
-          }
-
-          return {
-            matchId,
-            selectedTeamId,
-          };
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null);
 
       return saveBracketPicks(bracketId, {
         userId: user.id,
@@ -332,10 +363,10 @@ const SeriesPickemPage = () => {
           teamName: user.team?.name ?? null,
           logoTeam: user.team?.logo_url ?? null,
         },
-        picks,
+        picks: serializePicks(picksByMatch),
       });
     },
-    onSuccess: async (response, variables) => {
+    onSuccess: async (_response, variables) => {
       await queryClient.invalidateQueries({
         queryKey: ["series-pickem-data", variables.bracketId, user?.id],
       });
@@ -346,15 +377,6 @@ const SeriesPickemPage = () => {
         const next = { ...previous };
         delete next[variables.bracketId];
         return next;
-      });
-
-      const count = response.data?.data?.count;
-      toast({
-        title: "Da luu Pick'em",
-        description:
-          typeof count === "number"
-            ? `Da luu ${count} tran ban da chon.`
-            : "Du doan cua ban da duoc cap nhat.",
       });
     },
     onError: (err) => {
@@ -411,14 +433,11 @@ const SeriesPickemPage = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">
-              Da chon {totalSelectedCount}/{totalPickableMatches}
-            </Badge>
-            <Badge variant="outline">{allBracketItems.length} bracket</Badge>
+            <Badge variant="outline">Dung {totalCorrectCount}</Badge>
           </div>
         </div>
 
-        <Card className="border-border/70 bg-card/70">
+        <Card className="border-0 bg-transparent shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Pick'em Theo Muc</CardTitle>
           </CardHeader>
@@ -447,7 +466,7 @@ const SeriesPickemPage = () => {
                           return (
                             <div
                               key={bundle.tournament.id}
-                              className="rounded-md border border-border/60 bg-muted/20 p-3"
+                              className="space-y-2"
                             >
                               <p className="mb-2 text-sm font-semibold">
                                 {tournamentLabel}
@@ -477,14 +496,13 @@ const SeriesPickemPage = () => {
                                     const pickemData = pickemQuery?.data;
                                     const selectedPicks =
                                       pickedTeamByBracket[bracketId] ?? {};
-                                    const selectedCount = Object.values(
-                                      selectedPicks,
-                                    ).filter((selectedTeamId) =>
-                                      Number.isFinite(Number(selectedTeamId)),
-                                    ).length;
                                     const matches = pickemData?.matches ?? [];
                                     const pickStats =
                                       pickemData?.myPicks?.stats;
+                                    const pickStatusByMatchId =
+                                      buildPickStatusByMatchId(
+                                        pickemData?.myPicks?.picks,
+                                      );
                                     const pickableCount = matches.filter(
                                       (match) =>
                                         toNumber(match.team_a_id) &&
@@ -509,38 +527,24 @@ const SeriesPickemPage = () => {
                                     return (
                                       <Card
                                         key={bracketId}
-                                        className="border-border/60 bg-background/40"
+                                        className="border-0 bg-transparent shadow-none"
                                       >
                                         <CardHeader className="pb-2">
                                           <div className="flex flex-wrap items-center justify-between gap-2">
                                             <CardTitle className="text-sm">
                                               {normalizeText(bracket.name) ||
-                                                `Bracket ${bracketId}`}
+                                                "Bracket"}
                                             </CardTitle>
                                             <div className="flex flex-wrap items-center gap-2">
                                               <Badge variant="outline">
-                                                Da chon {selectedCount}/
-                                                {pickableCount}
-                                              </Badge>
-                                              {pickStats ? (
-                                                <Badge variant="outline">
-                                                  Dung {pickStats.correctPicks}/
-                                                  {pickStats.resolvedPicks}
-                                                </Badge>
-                                              ) : null}
-                                              {pickStats ? (
-                                                <Badge variant="outline">
-                                                  {pickStats.totalPoints} diem
-                                                </Badge>
-                                              ) : null}
-                                              <Badge variant="secondary">
-                                                Bracket #{bracketId}
+                                                Dung{" "}
+                                                {pickStats?.correctPicks ?? 0}
                                               </Badge>
                                             </div>
                                           </div>
                                         </CardHeader>
 
-                                        <CardContent className="space-y-3">
+                                        <CardContent className="space-y-3 px-0 pb-4 pt-0">
                                           {pickemQuery?.isLoading ? (
                                             <p className="text-sm text-muted-foreground">
                                               Dang tai du lieu Pick'em...
@@ -573,12 +577,15 @@ const SeriesPickemPage = () => {
                                                 </p>
                                               ) : null}
 
-                                              <div className="overflow-x-auto p-1">
+                                              <AutoFitContent>
                                                 {formatId === 1 ? (
                                                   <SingleElimBracket
                                                     bracketId={bracketId}
                                                     selectedTeamByMatchId={
                                                       selectedPicks
+                                                    }
+                                                    pickStatusByMatchId={
+                                                      pickStatusByMatchId
                                                     }
                                                     onPickTeam={(
                                                       matchId,
@@ -600,6 +607,9 @@ const SeriesPickemPage = () => {
                                                     selectedTeamByMatchId={
                                                       selectedPicks
                                                     }
+                                                    pickStatusByMatchId={
+                                                      pickStatusByMatchId
+                                                    }
                                                     onPickTeam={(
                                                       matchId,
                                                       teamId,
@@ -619,6 +629,9 @@ const SeriesPickemPage = () => {
                                                     bracketId={bracketId}
                                                     selectedTeamByMatchId={
                                                       selectedPicks
+                                                    }
+                                                    pickStatusByMatchId={
+                                                      pickStatusByMatchId
                                                     }
                                                     onPickTeam={(
                                                       matchId,
@@ -643,7 +656,7 @@ const SeriesPickemPage = () => {
                                                     single, double va swiss.
                                                   </p>
                                                 ) : null}
-                                              </div>
+                                              </AutoFitContent>
 
                                               {!pickableCount ? (
                                                 <p className="text-sm text-muted-foreground">
@@ -652,34 +665,28 @@ const SeriesPickemPage = () => {
                                                 </p>
                                               ) : null}
 
-                                              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 bg-card/40 p-3">
+                                              <div className="flex flex-wrap items-center justify-between gap-3">
                                                 {!user ? (
                                                   <p className="text-sm text-muted-foreground">
-                                                    Dang nhap de luu Pick'em cua
-                                                    ban.
+                                                    Dang nhap de tu dong luu
+                                                    Pick'em cua ban ngay khi
+                                                    chon doi.
                                                   </p>
                                                 ) : (
                                                   <p className="text-sm text-muted-foreground">
-                                                    Pick se duoc luu theo tung
-                                                    tran trong bracket nay.
+                                                    Chon doi la he thong se tu
+                                                    dong luu ngay cho bracket
+                                                    nay.
                                                   </p>
                                                 )}
 
-                                                <Button
-                                                  onClick={() =>
-                                                    saveMutation.mutate({
-                                                      bracketId,
-                                                    })
-                                                  }
-                                                  disabled={
-                                                    !user ||
-                                                    saveMutation.isPending
-                                                  }
-                                                >
-                                                  {isSavingThisBracket
-                                                    ? "Dang luu..."
-                                                    : "Luu Pick'em"}
-                                                </Button>
+                                                {user ? (
+                                                  <p className="text-xs text-muted-foreground">
+                                                    {isSavingThisBracket
+                                                      ? "Dang tu dong luu..."
+                                                      : "Da bat tu dong luu."}
+                                                  </p>
+                                                ) : null}
                                               </div>
                                             </>
                                           ) : null}

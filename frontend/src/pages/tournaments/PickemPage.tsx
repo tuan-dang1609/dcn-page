@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
-import { getBracketPickemData, saveBracketPicks } from "@/api/pickem";
+import {
+  getBracketPickemData,
+  saveBracketPicks,
+  type UserBracketPick,
+} from "@/api/pickem";
 import {
   getBracketsByTournamentId,
   type Bracket,
 } from "@/api/tournaments/index";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import AutoFitContent from "@/components/AutoFitContent";
 import SingleElimBracket from "@/components/BracketView";
 import DoubleElimBracket from "@/components/DoubleElimBracket";
 import SwissBracket from "@/components/SwissBracket";
@@ -43,6 +48,46 @@ const toErrorMessage = (error: unknown, fallback: string) => {
   );
 };
 
+type MatchPickStatus = {
+  isResolved: boolean;
+  isCorrect: boolean | null;
+  winnerTeamId: number | null;
+};
+
+const serializePicks = (pickedTeamByMatch: Record<number, number>) =>
+  Object.entries(pickedTeamByMatch)
+    .map(([matchIdRaw, selectedTeamIdRaw]) => {
+      const matchId = Number(matchIdRaw);
+      const selectedTeamId = Number(selectedTeamIdRaw);
+
+      if (!Number.isFinite(matchId) || !Number.isFinite(selectedTeamId)) {
+        return null;
+      }
+
+      return {
+        matchId,
+        selectedTeamId,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+const buildPickStatusByMatchId = (picks: UserBracketPick[] | undefined) => {
+  const map: Record<number, MatchPickStatus> = {};
+
+  (picks ?? []).forEach((pick) => {
+    const matchId = toNumber(pick.matchId);
+    if (!matchId) return;
+
+    map[matchId] = {
+      isResolved: Boolean(pick.isResolved),
+      isCorrect: typeof pick.isCorrect === "boolean" ? pick.isCorrect : null,
+      winnerTeamId: toNumber(pick.winnerTeamId),
+    };
+  });
+
+  return map;
+};
+
 type PickemOutletContext = {
   tournament?: {
     id?: number | string;
@@ -64,6 +109,7 @@ const PickemPage = () => {
   const [pickedTeamByMatch, setPickedTeamByMatch] = useState<
     Record<number, number>
   >({});
+  const pickedTeamByMatchRef = useRef<Record<number, number>>({});
 
   const bracketsQuery = useQuery({
     queryKey: ["pickem-brackets", tournamentId],
@@ -114,12 +160,11 @@ const PickemPage = () => {
 
   useEffect(() => {
     setPickedTeamByMatch({});
+    pickedTeamByMatchRef.current = {};
   }, [activeBracketId]);
 
   useEffect(() => {
     const picks = pickemDataQuery.data?.myPicks?.picks ?? [];
-    if (!picks.length) return;
-
     const next: Record<number, number> = {};
     picks.forEach((pick) => {
       const matchId = toNumber(pick.matchId);
@@ -129,8 +174,13 @@ const PickemPage = () => {
       next[matchId] = selectedTeamId;
     });
 
+    pickedTeamByMatchRef.current = next;
     setPickedTeamByMatch(next);
   }, [pickemDataQuery.data?.myPicks?.picks]);
+
+  useEffect(() => {
+    pickedTeamByMatchRef.current = pickedTeamByMatch;
+  }, [pickedTeamByMatch]);
 
   const matches = pickemDataQuery.data?.matches ?? [];
 
@@ -142,37 +192,24 @@ const PickemPage = () => {
     [matches],
   );
 
-  const selectedCount = useMemo(
-    () =>
-      Object.entries(pickedTeamByMatch).filter(([, selectedTeamId]) =>
-        Number.isFinite(Number(selectedTeamId)),
-      ).length,
-    [pickedTeamByMatch],
+  const pickStatusByMatchId = useMemo(
+    () => buildPickStatusByMatchId(pickemDataQuery.data?.myPicks?.picks),
+    [pickemDataQuery.data?.myPicks?.picks],
   );
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeBracketId || !user?.id) {
+    mutationFn: async ({
+      bracketId,
+      picksByMatch,
+    }: {
+      bracketId: number;
+      picksByMatch: Record<number, number>;
+    }) => {
+      if (!bracketId || !user?.id) {
         throw new Error("Ban can dang nhap de luu du doan");
       }
 
-      const picks = Object.entries(pickedTeamByMatch)
-        .map(([matchIdRaw, selectedTeamIdRaw]) => {
-          const matchId = Number(matchIdRaw);
-          const selectedTeamId = Number(selectedTeamIdRaw);
-
-          if (!Number.isFinite(matchId) || !Number.isFinite(selectedTeamId)) {
-            return null;
-          }
-
-          return {
-            matchId,
-            selectedTeamId,
-          };
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null);
-
-      return saveBracketPicks(activeBracketId, {
+      return saveBracketPicks(bracketId, {
         userId: user.id,
         user: {
           userId: user.id,
@@ -181,22 +218,12 @@ const PickemPage = () => {
           teamName: user.team?.name ?? null,
           logoTeam: user.team?.logo_url ?? null,
         },
-        picks,
+        picks: serializePicks(picksByMatch),
       });
     },
-    onSuccess: async (response) => {
+    onSuccess: async (_response, variables) => {
       await queryClient.invalidateQueries({
-        queryKey: ["pickem-bracket-data", activeBracketId, user?.id],
-      });
-
-      const count = response.data?.data?.count;
-
-      toast({
-        title: "Da luu Pick'em",
-        description:
-          typeof count === "number"
-            ? `Da luu ${count} tran ban da chon.`
-            : "Du doan cua ban da duoc cap nhat.",
+        queryKey: ["pickem-bracket-data", variables.bracketId, user?.id],
       });
     },
     onError: (error) => {
@@ -209,22 +236,36 @@ const PickemPage = () => {
   });
 
   const pickTeam = (matchId: number, teamId: number) => {
-    setPickedTeamByMatch((previous) => {
-      if (previous[matchId] === teamId) {
-        const next = { ...previous };
-        delete next[matchId];
-        return next;
-      }
+    const previous = pickedTeamByMatchRef.current;
 
-      return {
+    let next: Record<number, number>;
+    if (previous[matchId] === teamId) {
+      next = { ...previous };
+      delete next[matchId];
+    } else {
+      next = {
         ...previous,
         [matchId]: teamId,
       };
-    });
+    }
+
+    pickedTeamByMatchRef.current = next;
+    setPickedTeamByMatch(next);
+
+    if (activeBracketId && user?.id) {
+      saveMutation.mutate({
+        bracketId: activeBracketId,
+        picksByMatch: next,
+      });
+    }
   };
 
   const selectedBracket = pickemDataQuery.data?.bracket;
   const pickStats = pickemDataQuery.data?.myPicks?.stats;
+  const correctCount =
+    pickStats?.correctPicks ??
+    Object.values(pickStatusByMatchId).filter((status) => status.isCorrect)
+      .length;
   const selectedFormatId = toNumber(selectedBracket?.format_id);
   const selectedFormatType = normalizeText(
     selectedBracket?.format_type,
@@ -235,31 +276,18 @@ const PickemPage = () => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h2 className="text-2xl font-heading">Pick'em Bracket</h2>
+          <h2 className="text-2xl font-heading">Pick'em Tournament</h2>
           <p className="text-sm text-muted-foreground">
             Bam truc tiep vao doi trong bracket de chon doi thang tung tran.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">
-            Da chon {selectedCount}/{pickableMatches.length}
-          </Badge>
-          {pickStats ? (
-            <Badge variant="outline">
-              Dung {pickStats.correctPicks}/{pickStats.resolvedPicks}
-            </Badge>
-          ) : null}
-          {pickStats ? (
-            <Badge variant="outline">{pickStats.totalPoints} diem</Badge>
-          ) : null}
-          {activeBracketId ? (
-            <Badge variant="secondary">Bracket #{activeBracketId}</Badge>
-          ) : null}
+          <Badge variant="outline">Dung {correctCount}</Badge>
         </div>
       </div>
 
-      <Card className="border-border/70 bg-card/70">
+      <Card className="border-0 bg-transparent shadow-none">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Chon Bracket</CardTitle>
         </CardHeader>
@@ -280,7 +308,7 @@ const PickemPage = () => {
                       setActiveBracketId(bracketId);
                     }}
                   >
-                    {normalizeText(bracket.name) || `Bracket ${bracketId}`}
+                    {normalizeText(bracket.name) || "Bracket"}
                   </Button>
                 );
               })}
@@ -312,7 +340,7 @@ const PickemPage = () => {
         <p className="text-sm text-destructive">
           {toErrorMessage(
             pickemDataQuery.error,
-            "Khong tai duoc du lieu Pick'em theo bracket_id.",
+            "Khong tai duoc du lieu Pick'em theo bracket.",
           )}
         </p>
       ) : null}
@@ -320,57 +348,62 @@ const PickemPage = () => {
       {activeBracketId &&
       !pickemDataQuery.isLoading &&
       !pickemDataQuery.isError ? (
-        <Card className="border-border/70 bg-card/70">
+        <Card className="border-0 bg-transparent shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Bracket View</CardTitle>
           </CardHeader>
-          <CardContent className="overflow-x-auto p-4">
-            <p className="mb-3 text-sm text-muted-foreground">
+          <CardContent className="space-y-3 px-0 py-4">
+            <p className="text-sm text-muted-foreground">
               Chon doi thang bang cach bam vao ten doi trong moi match.
             </p>
 
             {pickStats ? (
-              <p className="mb-3 text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Match da co ket qua se tu dong danh dau Dung/Sai. Diem tinh theo
                 round: R1 = 1, R2 = 2, R3 = 4...
               </p>
             ) : null}
 
-            {selectedFormatId === 1 ? (
-              <SingleElimBracket
-                bracketId={activeBracketId}
-                selectedTeamByMatchId={pickedTeamByMatch}
-                onPickTeam={pickTeam}
-                disableMatchLink
-              />
-            ) : null}
+            <AutoFitContent>
+              {selectedFormatId === 1 ? (
+                <SingleElimBracket
+                  bracketId={activeBracketId}
+                  selectedTeamByMatchId={pickedTeamByMatch}
+                  pickStatusByMatchId={pickStatusByMatchId}
+                  onPickTeam={pickTeam}
+                  disableMatchLink
+                />
+              ) : null}
 
-            {selectedFormatId === 2 ? (
-              <DoubleElimBracket
-                bracketId={activeBracketId}
-                selectedTeamByMatchId={pickedTeamByMatch}
-                onPickTeam={pickTeam}
-                disableMatchLink
-              />
-            ) : null}
+              {selectedFormatId === 2 ? (
+                <DoubleElimBracket
+                  bracketId={activeBracketId}
+                  selectedTeamByMatchId={pickedTeamByMatch}
+                  pickStatusByMatchId={pickStatusByMatchId}
+                  onPickTeam={pickTeam}
+                  disableMatchLink
+                />
+              ) : null}
 
-            {isSwissBracket ? (
-              <SwissBracket
-                bracketId={activeBracketId}
-                selectedTeamByMatchId={pickedTeamByMatch}
-                onPickTeam={pickTeam}
-                disableMatchLink
-              />
-            ) : null}
+              {isSwissBracket ? (
+                <SwissBracket
+                  bracketId={activeBracketId}
+                  selectedTeamByMatchId={pickedTeamByMatch}
+                  pickStatusByMatchId={pickStatusByMatchId}
+                  onPickTeam={pickTeam}
+                  disableMatchLink
+                />
+              ) : null}
 
-            {!isSwissBracket &&
-            selectedFormatId !== 1 &&
-            selectedFormatId !== 2 ? (
-              <p className="text-sm text-muted-foreground">
-                Bracket nay co format khac. He thong hien chi render style cho
-                single, double va swiss.
-              </p>
-            ) : null}
+              {!isSwissBracket &&
+              selectedFormatId !== 1 &&
+              selectedFormatId !== 2 ? (
+                <p className="text-sm text-muted-foreground">
+                  Bracket nay co format khac. He thong hien chi render style cho
+                  single, double va swiss.
+                </p>
+              ) : null}
+            </AutoFitContent>
           </CardContent>
         </Card>
       ) : null}
@@ -384,26 +417,27 @@ const PickemPage = () => {
       ) : null}
 
       {activeBracketId ? (
-        <Card className="border-border/70 bg-card/70">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <Card className="border-0 bg-transparent shadow-none">
+          <CardContent className="p-4">
             <div className="space-y-1">
               {!user ? (
                 <p className="text-sm text-muted-foreground">
-                  Dang nhap de luu Pick'em cua ban.
+                  Dang nhap de tu dong luu Pick'em cua ban ngay khi chon doi.
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  Pick se duoc luu theo tung tran trong bracket hien tai.
+                  Chon doi la he thong se tu dong luu ngay.
                 </p>
               )}
-            </div>
 
-            <Button
-              onClick={() => saveMutation.mutate()}
-              disabled={!user || saveMutation.isPending}
-            >
-              {saveMutation.isPending ? "Dang luu..." : "Luu Pick'em"}
-            </Button>
+              {user ? (
+                <p className="text-xs text-muted-foreground">
+                  {saveMutation.isPending
+                    ? "Dang tu dong luu..."
+                    : "Da bat tu dong luu."}
+                </p>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
       ) : null}
