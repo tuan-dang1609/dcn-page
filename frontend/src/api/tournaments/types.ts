@@ -77,9 +77,13 @@ export interface Match {
   bracket_id: number;
   round_number?: number;
   match_no?: number;
+  next_match_id?: number | null;
+  next_slot?: "A" | "B" | string | null;
   date_scheduled?: string | null;
   team_a_id?: number | null;
   team_b_id?: number | null;
+  seed_a?: number | null;
+  seed_b?: number | null;
   score_a?: number | null;
   score_b?: number | null;
   winner_team_id?: number | null;

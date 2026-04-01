@@ -48,6 +48,23 @@ export const getTournamentTeamPlayers = (tournamentTeamId: number | string) =>
     `${tournamentsBaseUrl}/team/players/${tournamentTeamId}`,
   );
 
+export interface TournamentTeamRecord {
+  id: number;
+  team_id: number;
+  name?: string | null;
+  short_name?: string | null;
+  logo_url?: string | null;
+  team_color_hex?: string | null;
+  nickname?: string | null;
+  created_by?: string | null;
+  isCheckedIn?: boolean;
+}
+
+export const getTournamentTeams = (tournamentId: number | string) =>
+  axios.get<{ total: number; teams: TournamentTeamRecord[] }>(
+    `${tournamentsBaseUrl}/teams/${tournamentId}`,
+  );
+
 export const getMatchesByTournamentId = async (
   tournamentId: number | string,
 ) => {

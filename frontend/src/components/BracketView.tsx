@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import {
@@ -46,19 +46,39 @@ const connectorPairs4 = [{ from: [1, 2], to: 3 }];
 type BracketOutletContext = {
   tournament?: {
     id?: number;
-    registered?: Array<{
-      id?: number | string;
-      team_id?: number | string;
-      name?: string;
-      short_name?: string;
-    }>;
+    registered?: RegisteredTeam[];
   };
 };
+
+type RegisteredTeam = {
+  id?: number | string;
+  team_id?: number | string;
+  name?: string;
+  short_name?: string;
+};
+
+type SingleElimBracketProps = {
+  bracketId?: number | null;
+  selectedTeamByMatchId?: Record<number, number>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+  tournamentRegistered?: RegisteredTeam[];
+};
+
+type PickemContextValue = {
+  selectedTeamByMatchId?: Record<number, number>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+};
+
+const PickemContext = createContext<PickemContextValue>({});
 
 type DisplayMatch = Match & {
   routeMatchId?: number;
   p1Logo?: string | null;
   p2Logo?: string | null;
+  teamAId?: number | null;
+  teamBId?: number | null;
 };
 
 const toNumber = (value: unknown): number | null => {
@@ -134,6 +154,8 @@ const toDisplayMatches = (
     const viewMatch: DisplayMatch = {
       id: displayId,
       routeMatchId: match.id,
+      teamAId,
+      teamBId,
       p1: p1Name,
       p2: p2Name,
       p1Logo,
@@ -148,34 +170,161 @@ const toDisplayMatches = (
   });
 };
 
+const getResolvedWinnerTeamId = (
+  match: DisplayMatch,
+  selectedTeamByMatchId?: Record<number, number>,
+) => {
+  const pickedTeamId = match.routeMatchId
+    ? toNumber(selectedTeamByMatchId?.[match.routeMatchId])
+    : null;
+
+  if (
+    pickedTeamId &&
+    (pickedTeamId === match.teamAId || pickedTeamId === match.teamBId)
+  ) {
+    return pickedTeamId;
+  }
+
+  if (
+    match.teamAId &&
+    match.teamBId &&
+    match.s1 !== null &&
+    match.s2 !== null
+  ) {
+    if (match.s1 > match.s2) return match.teamAId;
+    if (match.s2 > match.s1) return match.teamBId;
+  }
+
+  if (match.winner === match.p1 && match.teamAId) return match.teamAId;
+  if (match.winner === match.p2 && match.teamBId) return match.teamBId;
+
+  return null;
+};
+
+const projectSingleElimMatches = ({
+  matches,
+  isFourTeam,
+  selectedTeamByMatchId,
+}: {
+  matches: DisplayMatch[];
+  isFourTeam: boolean;
+  selectedTeamByMatchId?: Record<number, number>;
+}) => {
+  if (!selectedTeamByMatchId || !Object.keys(selectedTeamByMatchId).length) {
+    return matches;
+  }
+
+  const projectedById = new Map<number, DisplayMatch>();
+  const teamInfoById = new Map<
+    number,
+    { name: string; logoUrl: string | null }
+  >();
+
+  matches.forEach((match) => {
+    projectedById.set(match.id, { ...match });
+
+    if (match.teamAId) {
+      teamInfoById.set(match.teamAId, {
+        name: match.p1,
+        logoUrl: match.p1Logo ?? null,
+      });
+    }
+
+    if (match.teamBId) {
+      teamInfoById.set(match.teamBId, {
+        name: match.p2,
+        logoUrl: match.p2Logo ?? null,
+      });
+    }
+  });
+
+  const connectors = isFourTeam ? connectorPairs4 : connectorPairs;
+
+  connectors.forEach((pair) => {
+    const topSource = projectedById.get(pair.from[0]);
+    const bottomSource = projectedById.get(pair.from[1]);
+    const target = projectedById.get(pair.to);
+    if (!topSource || !bottomSource || !target) return;
+
+    const topWinnerTeamId = getResolvedWinnerTeamId(
+      topSource,
+      selectedTeamByMatchId,
+    );
+    const bottomWinnerTeamId = getResolvedWinnerTeamId(
+      bottomSource,
+      selectedTeamByMatchId,
+    );
+
+    if (topWinnerTeamId) {
+      const winnerInfo = teamInfoById.get(topWinnerTeamId);
+      target.teamAId = topWinnerTeamId;
+      target.p1 = winnerInfo?.name ?? `Team #${topWinnerTeamId}`;
+      target.p1Logo = winnerInfo?.logoUrl ?? null;
+    }
+
+    if (bottomWinnerTeamId) {
+      const winnerInfo = teamInfoById.get(bottomWinnerTeamId);
+      target.teamBId = bottomWinnerTeamId;
+      target.p2 = winnerInfo?.name ?? `Team #${bottomWinnerTeamId}`;
+      target.p2Logo = winnerInfo?.logoUrl ?? null;
+    }
+
+    const targetWinnerTeamId = getResolvedWinnerTeamId(
+      target,
+      selectedTeamByMatchId,
+    );
+
+    if (targetWinnerTeamId === target.teamAId) {
+      target.winner = target.p1;
+    } else if (targetWinnerTeamId === target.teamBId) {
+      target.winner = target.p2;
+    } else {
+      target.winner = null;
+    }
+  });
+
+  return [...projectedById.values()].sort((a, b) => a.id - b.id);
+};
+
 interface PlayerRowProps {
+  teamId?: number | null;
   logo_url?: string | null;
   name: string;
   score: number | null;
   isWinner: boolean;
+  isSelected?: boolean;
   isHoveredPlayer: boolean;
   hasHover: boolean;
   isTop?: boolean;
+  onPick?: (teamId: number) => void;
   onHover: (p: string | null) => void;
 }
 
 const PlayerRow = ({
+  teamId,
   logo_url,
   name,
   score,
   isWinner,
+  isSelected,
   isHoveredPlayer,
   hasHover,
   isTop,
+  onPick,
   onHover,
 }: PlayerRowProps) => {
+  const canPick =
+    typeof onPick === "function" && Number.isFinite(Number(teamId));
+
   const bg = hasHover
     ? isHoveredPlayer
       ? "bg-primary text-primary-foreground"
       : "bg-card"
-    : isWinner
-      ? "bg-primary/20"
-      : "bg-card";
+    : isSelected
+      ? "bg-primary/25"
+      : isWinner
+        ? "bg-primary/20"
+        : "bg-card";
 
   const textCls = hasHover
     ? isHoveredPlayer
@@ -187,10 +336,14 @@ const PlayerRow = ({
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 cursor-default ${bg} ${textCls} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${bg} ${textCls} ${isSelected ? "ring-1 ring-primary/60" : ""} ${isTop ? "border-b border-border/40" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHover(name)}
       onMouseLeave={() => onHover(null)}
+      onClick={() => {
+        if (!canPick || !teamId) return;
+        onPick(teamId);
+      }}
     >
       <span className="flex items-center gap-2 text-sm truncate flex-1">
         <img
@@ -216,36 +369,66 @@ const MatchCard = ({
   hoveredPlayer: string | null;
   onHover: (p: string | null) => void;
 }) => {
-  const { p1, p2, p1Logo, p2Logo, s1, s2, winner, routeMatchId } = match;
+  const { selectedTeamByMatchId, onPickTeam, disableMatchLink } =
+    useContext(PickemContext);
+  const {
+    p1,
+    p2,
+    p1Logo,
+    p2Logo,
+    s1,
+    s2,
+    winner,
+    routeMatchId,
+    teamAId,
+    teamBId,
+  } = match;
   const hasHover = hoveredPlayer !== null;
   const { game, slug } = useParams();
   const matchParam = routeMatchId ? String(routeMatchId) : null;
+  const realMatchId = toNumber(routeMatchId);
+  const selectedTeamId = realMatchId
+    ? selectedTeamByMatchId?.[realMatchId]
+    : null;
+
+  const handlePick = (teamId: number) => {
+    if (!onPickTeam || !realMatchId) return;
+    onPickTeam(realMatchId, teamId);
+  };
+
+  const canPick = Boolean(onPickTeam && realMatchId);
 
   const content = (
     <>
       <PlayerRow
+        teamId={teamAId}
         logo_url={p1Logo}
         name={p1}
         score={s1}
         isWinner={winner === p1}
+        isSelected={selectedTeamId === teamAId}
         isHoveredPlayer={hoveredPlayer === p1}
         hasHover={hasHover}
         isTop
+        onPick={canPick ? handlePick : undefined}
         onHover={onHover}
       />
       <PlayerRow
+        teamId={teamBId}
         logo_url={p2Logo}
         name={p2}
         score={s2}
         isWinner={winner === p2}
+        isSelected={selectedTeamId === teamBId}
         isHoveredPlayer={hoveredPlayer === p2}
         hasHover={hasHover}
+        onPick={canPick ? handlePick : undefined}
         onHover={onHover}
       />
     </>
   );
 
-  if (!routeMatchId) {
+  if (!routeMatchId || disableMatchLink || canPick) {
     return (
       <div
         className="block neo-box-sm overflow-hidden"
@@ -375,19 +558,27 @@ const Connector = ({
   );
 };
 
-const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
-  const { tournament } = useOutletContext<BracketOutletContext>();
+const SingleElimBracket = ({
+  bracketId,
+  selectedTeamByMatchId,
+  onPickTeam,
+  disableMatchLink,
+  tournamentRegistered,
+}: SingleElimBracketProps) => {
+  const outletContext = useOutletContext<BracketOutletContext | undefined>();
+  const tournament = outletContext?.tournament;
   const [hoveredPlayer, setHoveredPlayer] = useState<string | null>(null);
+  const registeredTeams = tournamentRegistered ?? tournament?.registered ?? [];
 
   const teamNameById = useMemo(() => {
     const map: Record<number, string> = {};
-    (tournament?.registered ?? []).forEach((team) => {
+    registeredTeams.forEach((team) => {
       const teamId = toNumber(team.team_id ?? team.id);
       if (!teamId) return;
       map[teamId] = team.name || team.short_name || `Team #${teamId}`;
     });
     return map;
-  }, [tournament?.registered]);
+  }, [registeredTeams]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["bracket-matches", bracketId],
@@ -417,24 +608,36 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
     [data?.matches, teamNameById],
   );
 
-  const journeySet = useMemo(
+  const isFourTeam = singleElimMatches.length <= 3;
+
+  const projectedMatches = useMemo(
     () =>
-      hoveredPlayer ? getPlayerJourney(hoveredPlayer, singleElimMatches) : null,
-    [hoveredPlayer, singleElimMatches],
+      projectSingleElimMatches({
+        matches: singleElimMatches,
+        isFourTeam,
+        selectedTeamByMatchId,
+      }),
+    [singleElimMatches, isFourTeam, selectedTeamByMatchId],
   );
 
-  const isFourTeam = singleElimMatches.length <= 3;
+  const journeySet = useMemo(
+    () =>
+      hoveredPlayer ? getPlayerJourney(hoveredPlayer, projectedMatches) : null,
+    [hoveredPlayer, projectedMatches],
+  );
 
   const matchMap = useMemo(() => {
     const m: Record<number, DisplayMatch> = {};
-    singleElimMatches.forEach((match) => (m[match.id] = match));
+    projectedMatches.forEach((match) => (m[match.id] = match));
     return m;
-  }, [singleElimMatches]);
+  }, [projectedMatches]);
 
   const getMatchOrPlaceholder = (id: number): DisplayMatch =>
     matchMap[id] ?? {
       id,
       routeMatchId: undefined,
+      teamAId: null,
+      teamBId: null,
       p1: "TBD",
       p2: "TBD",
       s1: null,
@@ -454,7 +657,7 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
     );
   }
 
-  if (!singleElimMatches.length) {
+  if (!projectedMatches.length) {
     return (
       <p className="text-smtext-[#EEEEEE]">Chưa có match trong bracket này.</p>
     );
@@ -495,28 +698,114 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
 
   if (isFourTeam) {
     return (
+      <PickemContext.Provider
+        value={{
+          selectedTeamByMatchId,
+          onPickTeam,
+          disableMatchLink,
+        }}
+      >
+        <div
+          className="relative"
+          style={{ width: totalW, height: totalH4 + HEADER_H }}
+        >
+          <div
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
+          >
+            Bán kết
+          </div>
+          <div
+            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
+          >
+            Chung kết
+          </div>
+
+          {[1, 2].map((id, i) => (
+            <div
+              key={id}
+              className="absolute"
+              style={{ left: 0, top: sfTops4[i] + HEADER_H }}
+            >
+              <MatchCard
+                match={getMatchOrPlaceholder(id)}
+                hoveredPlayer={hoveredPlayer}
+                onHover={setHoveredPlayer}
+              />
+            </div>
+          ))}
+
+          <div
+            className="absolute"
+            style={{
+              left: col1,
+              width: CONN_W,
+              top: 0,
+              height: totalH4 + HEADER_H,
+            }}
+          >
+            <Connector
+              y1={sfMids4[0]}
+              y2={sfMids4[1]}
+              outY={finalMid4}
+              hasHover={hoveredPlayer !== null}
+              activeFrom={getConnState(0).activeFrom}
+              hasOutput={getConnState(0).hasOutput}
+            />
+          </div>
+
+          <div
+            className="absolute"
+            style={{ left: col2, top: finalTop4 + HEADER_H }}
+          >
+            <MatchCard
+              match={getMatchOrPlaceholder(3)}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+            />
+          </div>
+        </div>
+      </PickemContext.Provider>
+    );
+  }
+
+  return (
+    <PickemContext.Provider
+      value={{
+        selectedTeamByMatchId,
+        onPickTeam,
+        disableMatchLink,
+      }}
+    >
       <div
         className="relative"
-        style={{ width: totalW, height: totalH4 + HEADER_H }}
+        style={{ width: totalW, height: totalH + HEADER_H }}
       >
         <div
           className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
           style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
         >
-          Bán kết
+          Tứ kết
         </div>
         <div
           className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
           style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
         >
+          Bán kết
+        </div>
+        <div
+          className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+          style={{ left: col4, width: CARD_W, textAlign: "center", top: 0 }}
+        >
           Chung kết
         </div>
 
-        {[1, 2].map((id, i) => (
+        {[1, 2, 3, 4].map((id, i) => (
           <div
             key={id}
             className="absolute"
-            style={{ left: 0, top: sfTops4[i] + HEADER_H }}
+            style={{ left: 0, top: qfTops[i] + HEADER_H }}
           >
             <MatchCard
               match={getMatchOrPlaceholder(id)}
@@ -532,132 +821,72 @@ const SingleElimBracket = ({ bracketId }: { bracketId?: number | null }) => {
             left: col1,
             width: CONN_W,
             top: 0,
-            height: totalH4 + HEADER_H,
+            height: totalH + HEADER_H,
           }}
         >
           <Connector
-            y1={sfMids4[0]}
-            y2={sfMids4[1]}
-            outY={finalMid4}
+            y1={qfMids[0]}
+            y2={qfMids[1]}
+            outY={sfMids[0]}
             hasHover={hoveredPlayer !== null}
             activeFrom={getConnState(0).activeFrom}
             hasOutput={getConnState(0).hasOutput}
           />
+          <Connector
+            y1={qfMids[2]}
+            y2={qfMids[3]}
+            outY={sfMids[1]}
+            hasHover={hoveredPlayer !== null}
+            activeFrom={getConnState(1).activeFrom}
+            hasOutput={getConnState(1).hasOutput}
+          />
+        </div>
+
+        {[5, 6].map((id, i) => (
+          <div
+            key={id}
+            className="absolute"
+            style={{ left: col2, top: sfTops[i] + HEADER_H }}
+          >
+            <MatchCard
+              match={getMatchOrPlaceholder(id)}
+              hoveredPlayer={hoveredPlayer}
+              onHover={setHoveredPlayer}
+            />
+          </div>
+        ))}
+
+        <div
+          className="absolute"
+          style={{
+            left: col3,
+            width: CONN_W,
+            top: 0,
+            height: totalH + HEADER_H,
+          }}
+        >
+          <Connector
+            y1={sfMids[0]}
+            y2={sfMids[1]}
+            outY={finalMid}
+            hasHover={hoveredPlayer !== null}
+            activeFrom={getConnState(2).activeFrom}
+            hasOutput={getConnState(2).hasOutput}
+          />
         </div>
 
         <div
           className="absolute"
-          style={{ left: col2, top: finalTop4 + HEADER_H }}
+          style={{ left: col4, top: finalTop + HEADER_H }}
         >
           <MatchCard
-            match={getMatchOrPlaceholder(3)}
+            match={getMatchOrPlaceholder(7)}
             hoveredPlayer={hoveredPlayer}
             onHover={setHoveredPlayer}
           />
         </div>
       </div>
-    );
-  }
-
-  return (
-    <div
-      className="relative"
-      style={{ width: totalW, height: totalH + HEADER_H }}
-    >
-      <div
-        className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
-        style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
-      >
-        Tứ kết
-      </div>
-      <div
-        className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
-        style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
-      >
-        Bán kết
-      </div>
-      <div
-        className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
-        style={{ left: col4, width: CARD_W, textAlign: "center", top: 0 }}
-      >
-        Chung kết
-      </div>
-
-      {[1, 2, 3, 4].map((id, i) => (
-        <div
-          key={id}
-          className="absolute"
-          style={{ left: 0, top: qfTops[i] + HEADER_H }}
-        >
-          <MatchCard
-            match={getMatchOrPlaceholder(id)}
-            hoveredPlayer={hoveredPlayer}
-            onHover={setHoveredPlayer}
-          />
-        </div>
-      ))}
-
-      <div
-        className="absolute"
-        style={{ left: col1, width: CONN_W, top: 0, height: totalH + HEADER_H }}
-      >
-        <Connector
-          y1={qfMids[0]}
-          y2={qfMids[1]}
-          outY={sfMids[0]}
-          hasHover={hoveredPlayer !== null}
-          activeFrom={getConnState(0).activeFrom}
-          hasOutput={getConnState(0).hasOutput}
-        />
-        <Connector
-          y1={qfMids[2]}
-          y2={qfMids[3]}
-          outY={sfMids[1]}
-          hasHover={hoveredPlayer !== null}
-          activeFrom={getConnState(1).activeFrom}
-          hasOutput={getConnState(1).hasOutput}
-        />
-      </div>
-
-      {[5, 6].map((id, i) => (
-        <div
-          key={id}
-          className="absolute"
-          style={{ left: col2, top: sfTops[i] + HEADER_H }}
-        >
-          <MatchCard
-            match={getMatchOrPlaceholder(id)}
-            hoveredPlayer={hoveredPlayer}
-            onHover={setHoveredPlayer}
-          />
-        </div>
-      ))}
-
-      <div
-        className="absolute"
-        style={{ left: col3, width: CONN_W, top: 0, height: totalH + HEADER_H }}
-      >
-        <Connector
-          y1={sfMids[0]}
-          y2={sfMids[1]}
-          outY={finalMid}
-          hasHover={hoveredPlayer !== null}
-          activeFrom={getConnState(2).activeFrom}
-          hasOutput={getConnState(2).hasOutput}
-        />
-      </div>
-
-      <div
-        className="absolute"
-        style={{ left: col4, top: finalTop + HEADER_H }}
-      >
-        <MatchCard
-          match={getMatchOrPlaceholder(7)}
-          hoveredPlayer={hoveredPlayer}
-          onHover={setHoveredPlayer}
-        />
-      </div>
-    </div>
+    </PickemContext.Provider>
   );
 };
 

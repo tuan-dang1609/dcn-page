@@ -7,12 +7,8 @@ const PlayersPage = lazy(() => import("@/pages/tournaments/PlayersPage"));
 const LeaderboardPage = lazy(
   () => import("@/pages/tournaments/LeaderboardPage"),
 );
-const PickemPage = lazy(() => import("@/pages/tournaments/PickemPage"));
 const SeriesPage = lazy(() => import("@/pages/SeriesPage"));
 const SeriesPickemPage = lazy(() => import("@/pages/SeriesPickemPage"));
-const SeriesPickemSetupPage = lazy(
-  () => import("@/pages/SeriesPickemSetupPage"),
-);
 const RulePage = lazy(() => import("@/pages/tournaments/RulePage"));
 const NotFound = lazy(() => import("@/pages/tournaments/NotFound"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
@@ -41,7 +37,6 @@ const routes = [
       { path: "bracket", element: withSuspense(<BracketPage />) },
       { path: "participants", element: withSuspense(<PlayersPage />) },
       { path: "leaderboard", element: withSuspense(<LeaderboardPage />) },
-      { path: "pickem", element: withSuspense(<PickemPage />) },
       { path: "rule", element: withSuspense(<RulePage />) },
       { path: "match/:id", element: withSuspense(<MatchDetailPage />) },
     ],
@@ -81,10 +76,6 @@ const routes = [
   {
     path: "/ops/bracket-setup",
     element: withSuspense(<BracketSetupPage />),
-  },
-  {
-    path: "/ops/series-pickem-setup",
-    element: withSuspense(<SeriesPickemSetupPage />),
   },
   { path: "*", element: withSuspense(<NotFound />) },
 ];

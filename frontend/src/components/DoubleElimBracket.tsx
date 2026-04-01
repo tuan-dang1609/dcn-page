@@ -1,4 +1,10 @@
-import { useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import {
@@ -10,25 +16,41 @@ import { getDoubleElimRoundTitle } from "@/components/double-elim/roundLabels";
 
 type DoubleElimBracketProps = {
   bracketId?: number | null;
+  selectedTeamByMatchId?: Record<number, number>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+  tournamentRegistered?: RegisteredTeam[];
+};
+
+type RegisteredTeam = {
+  id?: number | string;
+  team_id?: number | string;
+  name?: string;
+  short_name?: string;
+  logo_url?: string;
 };
 
 type BracketOutletContext = {
   tournament?: {
-    registered?: Array<{
-      id?: number | string;
-      team_id?: number | string;
-      name?: string;
-      short_name?: string;
-      logo_url?: string;
-    }>;
+    registered?: RegisteredTeam[];
   };
 };
+
+type PickemContextValue = {
+  selectedTeamByMatchId?: Record<number, number>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+};
+
+const PickemContext = createContext<PickemContextValue>({});
 
 type DisplayMatch = {
   id: number;
   routeMatchId?: number;
   round: number;
   matchNo: number;
+  nextMatchId: number | null;
+  nextSlot: "A" | "B" | null;
   teamAId: number | null;
   teamBId: number | null;
   p1: string;
@@ -61,32 +83,304 @@ const getTeamLabel = (
   return teamNameById[teamId] || `${teamId}`;
 };
 
+const toSlot = (value: unknown): "A" | "B" | null => {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (normalized === "A" || normalized === "B") return normalized;
+  return null;
+};
+
+const getResolvedWinnerTeamId = (
+  match: DisplayMatch,
+  selectedTeamByMatchId?: Record<number, number>,
+) => {
+  const pickedTeamId = match.routeMatchId
+    ? toNumber(selectedTeamByMatchId?.[match.routeMatchId])
+    : null;
+
+  if (pickedTeamId) {
+    const canUsePickedTeam =
+      pickedTeamId === match.teamAId ||
+      pickedTeamId === match.teamBId ||
+      !match.teamAId ||
+      !match.teamBId;
+
+    if (canUsePickedTeam) return pickedTeamId;
+  }
+
+  if (
+    match.teamAId &&
+    match.teamBId &&
+    match.s1 !== null &&
+    match.s2 !== null
+  ) {
+    if (match.s1 > match.s2) return match.teamAId;
+    if (match.s2 > match.s1) return match.teamBId;
+  }
+
+  if (match.winner === match.p1 && match.teamAId) return match.teamAId;
+  if (match.winner === match.p2 && match.teamBId) return match.teamBId;
+
+  return null;
+};
+
+const getResolvedLoserTeamId = (
+  match: DisplayMatch,
+  winnerTeamId: number | null,
+) => {
+  if (!winnerTeamId || !match.teamAId || !match.teamBId) return null;
+  if (winnerTeamId === match.teamAId) return match.teamBId;
+  if (winnerTeamId === match.teamBId) return match.teamAId;
+  return null;
+};
+
+const getRoundShape = (matches: DisplayMatch[]) => {
+  const countByRound = new Map<number, number>();
+
+  matches.forEach((match) => {
+    countByRound.set(match.round, (countByRound.get(match.round) ?? 0) + 1);
+  });
+
+  return [...countByRound.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([round, count]) => `${round}:${count}`)
+    .join(",");
+};
+
+const getCompactSingleLoserTarget = ({
+  match,
+  winnerRounds,
+  loserMainRounds,
+  roundShape,
+}: {
+  match: DisplayMatch;
+  winnerRounds: number;
+  loserMainRounds: number;
+  roundShape: string;
+}) => {
+  const currentRound = match.round;
+  const currentMatchNo = match.matchNo;
+
+  if (!currentRound || !currentMatchNo) return null;
+
+  const isCompactSixSingleBracket =
+    roundShape === "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+
+  if (isCompactSixSingleBracket) {
+    const compactSixLoserMap: Record<
+      string,
+      { round: number; matchNo: number; slot: "A" | "B" }
+    > = {
+      "1-1": { round: 4, matchNo: 2, slot: "A" },
+      "1-2": { round: 4, matchNo: 1, slot: "A" },
+      "2-1": { round: 4, matchNo: 1, slot: "B" },
+      "2-2": { round: 4, matchNo: 2, slot: "B" },
+      "3-1": { round: 6, matchNo: 1, slot: "A" },
+    };
+
+    return compactSixLoserMap[`${currentRound}-${currentMatchNo}`] ?? null;
+  }
+
+  if (currentRound > winnerRounds) return null;
+
+  let targetLoserRoundIndex = 1;
+  let targetMatchNo = 1;
+  let preferredSlot: "A" | "B" = "A";
+
+  if (currentRound === 1) {
+    targetLoserRoundIndex = 1;
+    targetMatchNo = Math.ceil(currentMatchNo / 2);
+    preferredSlot = currentMatchNo % 2 === 1 ? "A" : "B";
+  } else if (currentRound < winnerRounds) {
+    targetLoserRoundIndex = Math.max(2, currentRound * 2 - 2);
+    targetMatchNo = currentMatchNo;
+    preferredSlot = "B";
+  } else {
+    targetLoserRoundIndex = loserMainRounds;
+    targetMatchNo = 1;
+    preferredSlot = "B";
+  }
+
+  return {
+    round: winnerRounds + targetLoserRoundIndex,
+    matchNo: targetMatchNo,
+    slot: preferredSlot,
+  };
+};
+
+const projectDoubleElimMatches = ({
+  matches,
+  selectedTeamByMatchId,
+}: {
+  matches: DisplayMatch[];
+  selectedTeamByMatchId?: Record<number, number>;
+}) => {
+  if (!selectedTeamByMatchId || !Object.keys(selectedTeamByMatchId).length) {
+    return matches;
+  }
+
+  const projectedById = new Map<number, DisplayMatch>();
+  const teamInfoById = new Map<number, { name: string; logoUrl: string | null }>();
+
+  matches.forEach((match) => {
+    projectedById.set(match.id, { ...match });
+
+    if (match.teamAId) {
+      teamInfoById.set(match.teamAId, {
+        name: match.p1,
+        logoUrl: match.p1Logo ?? null,
+      });
+    }
+
+    if (match.teamBId) {
+      teamInfoById.set(match.teamBId, {
+        name: match.p2,
+        logoUrl: match.p2Logo ?? null,
+      });
+    }
+  });
+
+  const byRoundMatchNo = new Map<string, DisplayMatch>();
+  projectedById.forEach((match) => {
+    byRoundMatchNo.set(`${match.round}-${match.matchNo}`, match);
+  });
+
+  const projectedMatches = [...projectedById.values()].sort((a, b) => {
+    if (a.round !== b.round) return a.round - b.round;
+    if (a.matchNo !== b.matchNo) return a.matchNo - b.matchNo;
+    return a.id - b.id;
+  });
+
+  const roundOneMatchCount = projectedMatches.filter(
+    (match) => match.round === 1,
+  ).length;
+  const winnerRounds =
+    roundOneMatchCount > 0
+      ? Math.max(1, Math.log2(roundOneMatchCount * 2))
+      : 1;
+  const loserMainRounds = Math.max(1, 2 * (winnerRounds - 1));
+  const roundShape = getRoundShape(projectedMatches);
+
+  const applyTeamToSlot = (
+    target: DisplayMatch,
+    slot: "A" | "B",
+    teamId: number,
+  ) => {
+    const winnerInfo = teamInfoById.get(teamId);
+
+    if (slot === "A") {
+      if (target.teamAId && target.teamAId !== teamId) return;
+      target.teamAId = teamId;
+      target.p1 = winnerInfo?.name ?? `Team #${teamId}`;
+      target.p1Logo = winnerInfo?.logoUrl ?? null;
+      return;
+    }
+
+    if (target.teamBId && target.teamBId !== teamId) return;
+    target.teamBId = teamId;
+    target.p2 = winnerInfo?.name ?? `Team #${teamId}`;
+    target.p2Logo = winnerInfo?.logoUrl ?? null;
+  };
+
+  projectedMatches.forEach((source) => {
+    const winnerTeamId = getResolvedWinnerTeamId(source, selectedTeamByMatchId);
+    if (!winnerTeamId) return;
+
+    const winnerInfo = teamInfoById.get(winnerTeamId);
+    if (!winnerInfo) {
+      teamInfoById.set(winnerTeamId, {
+        name: `Team #${winnerTeamId}`,
+        logoUrl: null,
+      });
+    }
+
+    if (source.nextMatchId && source.nextSlot) {
+      const winnerTarget = projectedById.get(source.nextMatchId);
+      if (winnerTarget) {
+        applyTeamToSlot(winnerTarget, source.nextSlot, winnerTeamId);
+      }
+    }
+
+    const loserTeamId = getResolvedLoserTeamId(source, winnerTeamId);
+    if (!loserTeamId) return;
+
+    const loserTarget = getCompactSingleLoserTarget({
+      match: source,
+      winnerRounds,
+      loserMainRounds,
+      roundShape,
+    });
+
+    if (!loserTarget) return;
+
+    const targetMatch = byRoundMatchNo.get(
+      `${loserTarget.round}-${loserTarget.matchNo}`,
+    );
+
+    if (!targetMatch) return;
+
+    applyTeamToSlot(targetMatch, loserTarget.slot, loserTeamId);
+  });
+
+  projectedById.forEach((match) => {
+    const winnerTeamId = getResolvedWinnerTeamId(match, selectedTeamByMatchId);
+
+    if (winnerTeamId === match.teamAId) {
+      match.winner = match.p1;
+      return;
+    }
+
+    if (winnerTeamId === match.teamBId) {
+      match.winner = match.p2;
+      return;
+    }
+
+    match.winner = null;
+  });
+
+  return [...projectedById.values()].sort((a, b) => {
+    if (a.round !== b.round) return a.round - b.round;
+    if (a.matchNo !== b.matchNo) return a.matchNo - b.matchNo;
+    return a.id - b.id;
+  });
+};
+
 const PlayerRow = ({
+  teamId,
   logoUrl,
   name,
   score,
   isWinner,
+  isSelected,
   isHoveredPlayer,
   hasHover,
   isTop,
+  onPick,
   onHover,
 }: {
+  teamId?: number | null;
   logoUrl?: string | null;
   name: string;
   score: number | null;
   isWinner: boolean;
+  isSelected?: boolean;
   isHoveredPlayer: boolean;
   hasHover: boolean;
   isTop?: boolean;
+  onPick?: (teamId: number) => void;
   onHover: (player: string | null) => void;
 }) => {
+  const canPick =
+    typeof onPick === "function" && Number.isFinite(Number(teamId));
+
   const bg = hasHover
     ? isHoveredPlayer
       ? "bg-primary text-primary-foreground"
       : "bg-card"
-    : isWinner
-      ? "bg-primary/20"
-      : "bg-card";
+    : isSelected
+      ? "bg-primary/25"
+      : isWinner
+        ? "bg-primary/20"
+        : "bg-card";
 
   const textCls = hasHover
     ? isHoveredPlayer
@@ -98,10 +392,14 @@ const PlayerRow = ({
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 cursor-default ${bg} ${textCls} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${bg} ${textCls} ${isSelected ? "ring-1 ring-primary/60" : ""} ${isTop ? "border-b border-border/40" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHover(name)}
       onMouseLeave={() => onHover(null)}
+      onClick={() => {
+        if (!canPick || !teamId) return;
+        onPick(teamId);
+      }}
     >
       <span className="flex items-center gap-2 text-sm truncate flex-1">
         <img
@@ -129,29 +427,47 @@ const MatchCard = ({
   onHover: (player: string | null) => void;
   isInJourney: boolean;
 }) => {
+  const { selectedTeamByMatchId, onPickTeam, disableMatchLink } =
+    useContext(PickemContext);
   const hasHover = hoveredPlayer !== null;
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
+  const selectedTeamId = match.routeMatchId
+    ? selectedTeamByMatchId?.[match.routeMatchId]
+    : null;
+
+  const handlePick = (teamId: number) => {
+    if (!onPickTeam || !match.routeMatchId) return;
+    onPickTeam(match.routeMatchId, teamId);
+  };
+
+  const canPick = Boolean(onPickTeam && match.routeMatchId);
 
   const content = (
     <>
       <PlayerRow
+        teamId={match.teamAId}
         logoUrl={match.p1Logo}
         name={match.p1}
         score={match.s1}
         isWinner={match.winner === match.p1}
+        isSelected={selectedTeamId === match.teamAId}
         isHoveredPlayer={hoveredPlayer === match.p1}
         hasHover={hasHover}
         isTop
+        onPick={canPick ? handlePick : undefined}
         onHover={onHover}
       />
       <PlayerRow
+        teamId={match.teamBId}
         logoUrl={match.p2Logo}
         name={match.p2}
         score={match.s2}
         isWinner={match.winner === match.p2}
+        isSelected={selectedTeamId === match.teamBId}
         isHoveredPlayer={hoveredPlayer === match.p2}
         hasHover={hasHover}
+        onPick={canPick ? handlePick : undefined}
         onHover={onHover}
       />
     </>
@@ -159,7 +475,7 @@ const MatchCard = ({
 
   const faded = hasHover && !isInJourney;
 
-  if (!match.routeMatchId) {
+  if (!match.routeMatchId || disableMatchLink || canPick) {
     return (
       <div
         className={`block neo-box-sm overflow-hidden transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
@@ -467,11 +783,30 @@ const getSegmentRange = (
   return { start, end };
 };
 
-const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
-  const { tournament } = useOutletContext<BracketOutletContext>();
+const DoubleElimBracket = ({
+  bracketId,
+  selectedTeamByMatchId,
+  onPickTeam,
+  disableMatchLink,
+  tournamentRegistered,
+}: DoubleElimBracketProps) => {
+  const outletContext = useOutletContext<BracketOutletContext | undefined>();
+  const tournament = outletContext?.tournament;
   const [hoveredPlayer, setHoveredPlayer] = useState<string | null>(null);
 
-  const registeredTeams = tournament?.registered ?? [];
+  const withPickemContext = (content: ReactNode) => (
+    <PickemContext.Provider
+      value={{
+        selectedTeamByMatchId,
+        onPickTeam,
+        disableMatchLink,
+      }}
+    >
+      {content}
+    </PickemContext.Provider>
+  );
+
+  const registeredTeams = tournamentRegistered ?? tournament?.registered ?? [];
   const actualTeamCount = registeredTeams.length;
   const teamCount = actualTeamCount;
 
@@ -499,7 +834,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     refetchOnReconnect: false,
   });
 
-  const displayMatches = useMemo<DisplayMatch[]>(() => {
+  const baseDisplayMatches = useMemo<DisplayMatch[]>(() => {
     const matches = data ?? [];
 
     return [...matches]
@@ -535,6 +870,8 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
           routeMatchId: Number(match.id),
           round: Number(match.round_number ?? 0),
           matchNo: Number(match.match_no ?? 0),
+          nextMatchId: toNumber(match.next_match_id),
+          nextSlot: toSlot(match.next_slot),
           teamAId,
           teamBId,
           p1,
@@ -547,6 +884,15 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
         };
       });
   }, [data, teamNameById]);
+
+  const displayMatches = useMemo(
+    () =>
+      projectDoubleElimMatches({
+        matches: baseDisplayMatches,
+        selectedTeamByMatchId,
+      }),
+    [baseDisplayMatches, selectedTeamByMatchId],
+  );
 
   const inferredTeamCount = useMemo(() => {
     const teamIds = new Set<number>();
@@ -813,7 +1159,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     const c7 = y7 + HEADER_H + CARD_H / 2;
     const c8 = y8 + HEADER_H + CARD_H / 2;
 
-    return (
+    return withPickemContext(
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
@@ -1169,7 +1515,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           />
         </div>
-      </div>
+      </div>,
     );
   }
 
@@ -1208,7 +1554,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     const c6 = y6 + HEADER_H + CARD_H / 2;
     const c7 = y7 + HEADER_H + CARD_H / 2;
 
-    return (
+    return withPickemContext(
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
@@ -1452,7 +1798,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           />
         </div>
-      </div>
+      </div>,
     );
   }
 
@@ -1485,7 +1831,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     const c4 = y4 + HEADER_H + CARD_H / 2;
     const c5 = y5 + HEADER_H + CARD_H / 2;
 
-    return (
+    return withPickemContext(
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
@@ -1666,7 +2012,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
             )}
           />
         </div>
-      </div>
+      </div>,
     );
   }
 
@@ -1676,7 +2022,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
     );
   }
 
-  return (
+  return withPickemContext(
     <div className="space-y-3">
       <div
         className="relative"
@@ -1779,7 +2125,7 @@ const DoubleElimBracket = ({ bracketId }: DoubleElimBracketProps) => {
           );
         })}
       </div>
-    </div>
+    </div>,
   );
 };
 

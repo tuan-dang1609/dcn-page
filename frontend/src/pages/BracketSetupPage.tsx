@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Loader2, WandSparkles } from "lucide-react";
+import { ArrowLeft, ChevronDown, Loader2, WandSparkles, X } from "lucide-react";
 import {
   generateBracket,
   pairSwissNextRound,
+  getTournamentTeams,
   type BracketType,
+  type TournamentTeamRecord,
 } from "@/api/tournaments";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const allowedRoleIds = new Set([1, 2, 3]);
 
@@ -21,13 +27,17 @@ const toNumber = (value: unknown): number | null => {
   return Number.isFinite(next) ? next : null;
 };
 
-const parseTeamIds = (csv: string) => {
-  if (!csv.trim()) return undefined;
+const getTeamLabel = (team: TournamentTeamRecord) =>
+  team.short_name?.trim() || team.name?.trim() || `Team #${team.team_id}`;
 
-  return csv
-    .split(",")
-    .map((part) => Number(part.trim()))
-    .filter(Number.isFinite);
+const orderTeamIdsByTournament = (
+  ids: number[],
+  teams: TournamentTeamRecord[],
+) => {
+  const idSet = new Set(ids);
+  return teams
+    .filter((team) => idSet.has(team.team_id))
+    .map((team) => team.team_id);
 };
 
 const BracketSetupPage = () => {
@@ -46,9 +56,16 @@ const BracketSetupPage = () => {
     name: "",
     stage: "",
     status: "scheduled",
-    team_ids_csv: "",
     swiss_round: "",
   });
+
+  const [tournamentTeams, setTournamentTeams] = useState<
+    TournamentTeamRecord[]
+  >([]);
+  const [selectedTeamIds, setSelectedTeamIds] = useState<number[]>([]);
+  const [draftTeamIds, setDraftTeamIds] = useState<number[]>([]);
+  const [quickPickCountInput, setQuickPickCountInput] = useState("8");
+  const [teamPickerOpen, setTeamPickerOpen] = useState(false);
 
   const [generatedBracketId, setGeneratedBracketId] = useState<number | null>(
     null,
@@ -78,6 +95,76 @@ const BracketSetupPage = () => {
     }
   }, [isLoading, navigate, token, user]);
 
+  useEffect(() => {
+    const tournamentId = toNumber(tournamentIdInput);
+
+    if (!tournamentId) {
+      setTournamentTeams([]);
+      setSelectedTeamIds([]);
+      setDraftTeamIds([]);
+      setTeamPickerOpen(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const resp = await getTournamentTeams(tournamentId);
+        if (cancelled) return;
+        const teams = resp.data?.teams ?? resp.data?.data?.teams ?? [];
+        setTournamentTeams(teams);
+        const validIds = new Set(teams.map((team) => team.team_id));
+        setSelectedTeamIds((prev) => prev.filter((id) => validIds.has(id)));
+        setDraftTeamIds((prev) => prev.filter((id) => validIds.has(id)));
+      } catch (err) {
+        setTournamentTeams([]);
+        setSelectedTeamIds([]);
+        setDraftTeamIds([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tournamentIdInput]);
+
+  const selectedTeams = tournamentTeams.filter((team) =>
+    selectedTeamIds.includes(team.team_id),
+  );
+
+  const toggleDraftTeam = (teamId: number) => {
+    setDraftTeamIds((prev) => {
+      if (prev.includes(teamId)) return prev.filter((id) => id !== teamId);
+      return [...prev, teamId];
+    });
+  };
+
+  const applyDraftSelection = () => {
+    setSelectedTeamIds(orderTeamIdsByTournament(draftTeamIds, tournamentTeams));
+    setTeamPickerOpen(false);
+  };
+
+  const handleQuickPickCount = () => {
+    const count = toNumber(quickPickCountInput);
+    if (count === null || count <= 0) {
+      toast({
+        title: "Số lượng không hợp lệ",
+        description: "Nhập số đội lớn hơn 0 để chọn nhanh.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const nextIds = tournamentTeams.slice(0, count).map((team) => team.team_id);
+    setDraftTeamIds(nextIds);
+  };
+
+  const removeSelectedTeam = (teamId: number) => {
+    setSelectedTeamIds((prev) => prev.filter((id) => id !== teamId));
+    setDraftTeamIds((prev) => prev.filter((id) => id !== teamId));
+  };
+
   const handleGenerateBracket = async () => {
     const tournamentId = toNumber(tournamentIdInput);
     const formatId = toNumber(form.format_id);
@@ -94,7 +181,7 @@ const BracketSetupPage = () => {
     setSubmitting(true);
 
     try {
-      const parsedTeamIds = parseTeamIds(form.team_ids_csv);
+      const parsedTeamIds = selectedTeamIds.length ? selectedTeamIds : undefined;
 
       const response = await generateBracket(tournamentId, form.type, {
         format_id: formatId,
@@ -187,9 +274,7 @@ const BracketSetupPage = () => {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold">Bracket Setup</h1>
-              <p className="text-smtext-[#EEEEEE]">
-                Tạo bracket riêng theo loại cho tournament.
-              </p>
+              <p className="text-smtext-[#EEEEEE]">Tạo bracket riêng theo loại cho tournament.</p>
             </div>
             {generatedBracketId ? (
               <Badge variant="outline">Bracket ID: {generatedBracketId}</Badge>
@@ -197,81 +282,226 @@ const BracketSetupPage = () => {
           </div>
 
           <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <Label>Tournament ID</Label>
+              <Input
+                value={tournamentIdInput}
+                onChange={(event) => setTournamentIdInput(event.target.value)}
+                placeholder="tournament_id"
+                inputMode="numeric"
+              />
+            </div>
+
+            <div>
+              <Label>Bracket Type</Label>
+              <select
+                value={form.type}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, type: event.target.value as BracketType }))
+                }
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+              >
+                <option value="single-elimination">single-elimination</option>
+                <option value="double-elimination">double-elimination</option>
+                <option value="swiss">swiss</option>
+                <option value="round-robin">round-robin</option>
+              </select>
+            </div>
+
+            <div>
+              <Label>Format ID</Label>
+              <Input
+                value={form.format_id}
+                onChange={(event) => setForm((prev) => ({ ...prev, format_id: event.target.value }))}
+                placeholder="format_id"
+                inputMode="numeric"
+              />
+            </div>
+
+            <div>
+              <Label>Best Of</Label>
+              <Input
+                value={form.best_of}
+                onChange={(event) => setForm((prev) => ({ ...prev, best_of: event.target.value }))}
+                placeholder="best_of"
+                inputMode="numeric"
+              />
+            </div>
+
+            <div>
+              <Label>Name</Label>
+              <Input
+                value={form.name}
+                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="name"
+              />
+            </div>
+
+            <div>
+              <Label>Stage</Label>
+              <Input
+                value={form.stage}
+                onChange={(event) => setForm((prev) => ({ ...prev, stage: event.target.value }))}
+                placeholder="stage"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Status</Label>
             <Input
-              value={tournamentIdInput}
-              onChange={(event) => setTournamentIdInput(event.target.value)}
-              placeholder="tournament_id"
-              inputMode="numeric"
-            />
-            <select
-              value={form.type}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  type: event.target.value as BracketType,
-                }))
-              }
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="single-elimination">single-elimination</option>
-              <option value="double-elimination">double-elimination</option>
-              <option value="swiss">swiss</option>
-              <option value="round-robin">round-robin</option>
-            </select>
-            <Input
-              value={form.format_id}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, format_id: event.target.value }))
-              }
-              placeholder="format_id"
-              inputMode="numeric"
-            />
-            <Input
-              value={form.best_of}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, best_of: event.target.value }))
-              }
-              placeholder="best_of"
-              inputMode="numeric"
-            />
-            <Input
-              value={form.name}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, name: event.target.value }))
-              }
-              placeholder="name"
-            />
-            <Input
-              value={form.stage}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, stage: event.target.value }))
-              }
-              placeholder="stage"
+              value={form.status}
+              onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))}
+              placeholder="status"
             />
           </div>
 
-          <Input
-            value={form.status}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, status: event.target.value }))
-            }
-            placeholder="status"
-          />
+          <div className="space-y-2">
+            <Label>Teams</Label>
 
-          <Input
-            value={form.team_ids_csv}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, team_ids_csv: event.target.value }))
-            }
-            placeholder="team_ids CSV (vd: 11,22,33,44) - để trống = lấy tournament_teams"
-          />
+            <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 w-full justify-between font-normal"
+                  disabled={tournamentTeams.length === 0}
+                >
+                  <span className="truncate text-left">
+                    {tournamentTeams.length === 0
+                      ? tournamentIdInput
+                        ? "Không có đội cho tournament này"
+                        : "Nhập Tournament ID để tải đội"
+                      : selectedTeamIds.length > 0
+                        ? `Đã chọn ${selectedTeamIds.length} đội`
+                        : "Mở dropdown để chọn đội"}
+                  </span>
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </PopoverTrigger>
+
+              <PopoverContent align="start" className="w-115 max-w-[calc(100vw-2rem)] p-3">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      value={quickPickCountInput}
+                      onChange={(event) => setQuickPickCountInput(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="Số đội"
+                      className="w-32"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handleQuickPickCount}
+                      disabled={tournamentTeams.length === 0}
+                    >
+                      Chọn nhanh N đội
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() =>
+                        setDraftTeamIds(tournamentTeams.map((team) => team.team_id))
+                      }
+                      disabled={tournamentTeams.length === 0}
+                    >
+                      Chọn tất cả
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setDraftTeamIds([])}
+                      disabled={tournamentTeams.length === 0}
+                    >
+                      Bỏ chọn
+                    </Button>
+                  </div>
+
+                  <ScrollArea className="h-64 rounded-md border border-border">
+                    <div className="space-y-1 p-2">
+                      {tournamentTeams.length === 0 ? (
+                        <p className="text-sm text-muted-foreground px-2 py-4">
+                          Chưa có đội để chọn.
+                        </p>
+                      ) : (
+                        tournamentTeams.map((team) => {
+                          const checked = draftTeamIds.includes(team.team_id);
+
+                          return (
+                            <label
+                              key={team.team_id}
+                              className="flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 hover:bg-accent"
+                            >
+                              <span className="flex items-center gap-2">
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={() => toggleDraftTeam(team.team_id)}
+                                />
+                                <span className="text-sm">{getTeamLabel(team)}</span>
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                #{team.team_id}
+                              </span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </ScrollArea>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Tạm chọn: {draftTeamIds.length} đội
+                    </span>
+                    <Button
+                      type="button"
+                      onClick={applyDraftSelection}
+                      disabled={tournamentTeams.length === 0}
+                    >
+                      Áp dụng đội đã chọn
+                    </Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <div className="text-xs text-muted-foreground">
+              Chọn đội trong dropdown, bấm "Áp dụng đội đã chọn" để cập nhật vào bracket.
+            </div>
+
+            <div className="rounded-md border border-border bg-muted/30 p-3">
+              <div className="text-sm font-medium">Đội đã áp dụng ({selectedTeams.length})</div>
+              {selectedTeams.length === 0 ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Chưa có đội nào được áp dụng. Nếu để trống, backend sẽ tự lấy tournament teams.
+                </p>
+              ) : (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedTeams.map((team) => (
+                    <Badge
+                      key={team.team_id}
+                      variant="secondary"
+                      className="flex items-center gap-1"
+                    >
+                      <span>{getTeamLabel(team)}</span>
+                      <button
+                        type="button"
+                        className="rounded-sm p-0.5 hover:bg-background/60"
+                        onClick={() => removeSelectedTeam(team.team_id)}
+                        aria-label={`Xóa ${getTeamLabel(team)}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={handleGenerateBracket}
-              disabled={submitting}
-            >
+            <Button type="button" onClick={handleGenerateBracket} disabled={submitting}>
               {submitting ? "Đang tạo..." : "Tạo bracket"}
             </Button>
           </div>
@@ -282,23 +512,12 @@ const BracketSetupPage = () => {
               <div className="flex flex-wrap items-center gap-2">
                 <Input
                   value={form.swiss_round}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      swiss_round: event.target.value,
-                    }))
-                  }
+                  onChange={(event) => setForm((prev) => ({ ...prev, swiss_round: event.target.value }))}
                   placeholder="round_number (để trống = auto)"
                   className="w-72"
                   inputMode="numeric"
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="gap-2"
-                  onClick={handlePairSwiss}
-                  disabled={!generatedBracketId || submitting}
-                >
+                <Button type="button" variant="outline" className="gap-2" onClick={handlePairSwiss} disabled={!generatedBracketId || submitting}>
                   <WandSparkles className="h-4 w-4" />
                   Pair next round
                 </Button>

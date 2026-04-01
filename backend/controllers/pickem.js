@@ -1,15 +1,12 @@
 import { Elysia } from "elysia";
 import {
+  evaluateBracketPicks,
   ensurePickemTables,
-  generatePickemQuestionsForTournament,
-  generatePickemQuestionsForSeries,
-  getPickemAnswersByLeagueAndUser,
-  getPickemLeaderboardRows,
-  getPickemQuestionsByLeague,
-  getUsersByIds,
-  gradePickemLeague,
-  upsertPickemQuestions,
-  upsertPickemResponse,
+  getBracketById,
+  getBracketPickemData,
+  getMatchesByBracketId,
+  getUserBracketPicks,
+  upsertUserBracketPicks,
 } from "../utils/pickem.js";
 
 const pickemRouter = new Elysia({ name: "Pickem" });
@@ -21,16 +18,7 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const parseBoolean = (value, fallback) => {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true") return true;
-    if (normalized === "false") return false;
-  }
-  return fallback;
-};
+const normalizeUserId = (value) => String(value ?? "").trim();
 
 const asObject = (value, fallback = {}) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -39,689 +27,140 @@ const asObject = (value, fallback = {}) => {
   return value;
 };
 
-const getExpectedApiKey = () =>
-  process.env.API_KEY_DCN || process.env.API_KEY || process.env.DCN_API_KEY;
-
-const isApiKeyProtectedPath = (request) => {
-  const pathname = new URL(request.url).pathname.toLowerCase();
-  return pathname.includes("/addquestion");
-};
-
-const toTeamText = (value) => {
-  if (!value) return null;
-  if (typeof value === "string") return value;
-  if (typeof value === "object") {
-    const name = String(value.name ?? "").trim();
-    return name || null;
-  }
-  return null;
-};
-
-const toTeamLogo = (value) => {
-  if (!value || typeof value !== "object") return null;
-  return (
-    String(value.logoTeam ?? value.logo_url ?? value.logo ?? "").trim() || null
-  );
-};
-
-const getUserIdCandidates = (rows) =>
-  rows.map((row) => String(row.user_id ?? "").trim()).filter(Boolean);
-
-const shapeLeaderboard = ({ rows, userMap }) => {
-  const leaderboard = rows.map((row) => {
-    const userId = String(row.user_id ?? "").trim();
-    const userMeta = asObject(row.user_meta, {});
-    const dbUser = userMap.get(userId) ?? null;
-
-    const username =
-      String(
-        dbUser?.username ??
-          userMeta.username ??
-          userMeta.nickname ??
-          userMeta.userId ??
-          userId,
-      ).trim() || userId;
-
-    const nickname =
-      String(dbUser?.nickname ?? userMeta.nickname ?? username).trim() ||
-      username;
-
-    const team =
-      String(
-        dbUser?.team_name ??
-          userMeta.teamName ??
-          toTeamText(userMeta.team) ??
-          "",
-      ).trim() || null;
-
-    const logoTeam =
-      String(
-        dbUser?.team_logo ??
-          userMeta.logoTeam ??
-          toTeamLogo(userMeta.team) ??
-          "",
-      ).trim() || null;
-
-    const img =
-      String(
-        dbUser?.profile_picture ??
-          userMeta.img ??
-          userMeta.profilePicture ??
-          userMeta.profile_picture ??
-          "",
-      ).trim() || null;
-
-    return {
-      userId,
-      username,
-      nickname,
-      team,
-      logoTeam,
-      img,
-      Score: Number(row.total_score ?? 0),
-      _lastUpdate: row.last_update
-        ? new Date(row.last_update).getTime()
-        : Number.MAX_SAFE_INTEGER,
-    };
-  });
-
-  leaderboard.sort((a, b) => {
-    if (b.Score !== a.Score) return b.Score - a.Score;
-    if (a._lastUpdate !== b._lastUpdate) return a._lastUpdate - b._lastUpdate;
-    return String(a.userId).localeCompare(String(b.userId));
-  });
-
-  return leaderboard.map(({ _lastUpdate, ...rest }) => rest);
-};
+const resolveUserId = ({ query, request }) =>
+  normalizeUserId(query?.userId ?? request.headers.get("x-user-id") ?? "");
 
 pickemRouter.onBeforeHandle(async () => {
   await ensurePickemTables();
 });
 
-pickemRouter.onBeforeHandle(({ request, query, body, set }) => {
-  if (request.method === "OPTIONS") return;
-  if (!isApiKeyProtectedPath(request)) return;
-
-  const expected = getExpectedApiKey();
-  if (!expected) return;
-
-  const requestBody = asObject(body, {});
-  const provided = String(
-    request.headers.get("x-api-key") ??
-      query?.api_key ??
-      requestBody.api_key ??
-      "",
-  ).trim();
-
-  if (!provided || provided !== expected) {
-    set.status = 401;
-    return { error: "Invalid API key" };
-  }
-});
-
 pickemRouter.get(
-  "/pickemscore/:league_id/leaderboard",
-  async ({ params, set }) => {
-    const leagueId = String(params.league_id ?? "").trim();
-    if (!leagueId) {
+  "/bracket/:bracket_id",
+  async ({ params, query, request, set }) => {
+    const bracketId = toNumber(params.bracket_id);
+    if (!bracketId) {
       set.status = 400;
-      return { error: "league_id is required" };
+      return { error: "bracket_id is required" };
     }
 
-    const rows = await getPickemLeaderboardRows(leagueId);
-    const userMap = await getUsersByIds(getUserIdCandidates(rows));
-
-    return {
-      league_id: leagueId,
-      leaderboard: shapeLeaderboard({ rows, userMap }),
-    };
-  },
-  {
-    tags: [TAG],
-    summary: "Get Pickem leaderboard from stored response scores",
-  },
-);
-
-pickemRouter.get(
-  "/pickem/:league_id/leaderboard",
-  async ({ params, set }) => {
-    const leagueId = String(params.league_id ?? "").trim();
-    if (!leagueId) {
-      set.status = 400;
-      return { error: "league_id is required" };
-    }
-
-    const rows = await getPickemLeaderboardRows(leagueId);
-    const userMap = await getUsersByIds(getUserIdCandidates(rows));
-
-    return {
-      league_id: leagueId,
-      leaderboard: shapeLeaderboard({ rows, userMap }),
-    };
-  },
-  {
-    tags: [TAG],
-    summary: "Get Pickem leaderboard",
-  },
-);
-
-pickemRouter.post(
-  "/:scope/addquestion",
-  async ({ params, body, set }) => {
-    const leagueId = String(params.scope ?? "").trim();
-    if (!leagueId) {
-      set.status = 400;
-      return { error: "league_id is required" };
-    }
-
-    const payload = Array.isArray(body) ? body : [body];
-    const updatedQuestions = await upsertPickemQuestions({
-      leagueId,
-      questions: payload,
+    const userId = resolveUserId({ query, request });
+    const data = await getBracketPickemData({
+      bracketId,
+      userId: userId || null,
     });
 
-    if (!updatedQuestions.length) {
-      set.status = 400;
-      return { error: "No valid questions to update" };
-    }
-
-    await gradePickemLeague(leagueId);
-
-    set.status = 200;
-    return {
-      message: "Questions processed",
-      league_id: leagueId,
-      updatedQuestions,
-    };
-  },
-  {
-    tags: [TAG],
-    summary: "Create or update Pickem questions",
-  },
-);
-
-pickemRouter.post(
-  "/:scope/generate",
-  async ({ params, body, set }) => {
-    const leagueId = String(params.scope ?? "").trim();
-    if (!leagueId) {
-      set.status = 400;
-      return { error: "league_id is required" };
-    }
-
-    const tournamentId =
-      toNumber(body?.tournamentId ?? body?.tournament_id) ?? toNumber(leagueId);
-
-    if (!tournamentId) {
-      set.status = 400;
-      return {
-        error: "tournamentId/tournament_id is required or league_id must be numeric",
-      };
-    }
-
-    const requestedGameShort = String(
-      body?.game_short ?? body?.gameShort ?? params.scope ?? "",
-    )
-      .trim()
-      .toLowerCase();
-
-    const generated = await generatePickemQuestionsForTournament({
-      leagueId,
-      tournamentId,
-      gameShort: requestedGameShort,
-    });
-
-    const generatedQuestions = Array.isArray(generated?.questions)
-      ? generated.questions
-      : [];
-
-    if (!generatedQuestions.length) {
+    if (!data) {
       set.status = 404;
-      return {
-        error: "Cannot generate Pickem questions from tournament data",
-        summary: generated?.summary ?? null,
-      };
+      return { error: "Bracket not found" };
     }
 
-    const updatedQuestions = await upsertPickemQuestions({
-      leagueId,
-      questions: generatedQuestions,
-    });
-
-    await gradePickemLeague(leagueId);
-
-    set.status = 200;
     return {
-      success: true,
-      message: "Pickem questions generated",
-      league_id: leagueId,
-      tournament_id: tournamentId,
-      generated: generated.summary,
-      updated: updatedQuestions.length,
+      bracket: data.bracket,
+      matches: data.matches,
+      myPicks: data.myPicks,
+      totalMatches: data.matches.length,
     };
   },
   {
     tags: [TAG],
-    summary: "Generate Pickem questions from tournament brackets",
-  },
-);
-
-pickemRouter.post(
-  "/series/:series_id/generate",
-  async ({ params, body, set }) => {
-    const seriesId = toNumber(params.series_id);
-    if (!seriesId) {
-      set.status = 400;
-      return { error: "series_id is required" };
-    }
-
-    const leagueId = String(body?.league_id ?? body?.leagueId ?? seriesId).trim();
-    if (!leagueId) {
-      set.status = 400;
-      return { error: "league_id is required" };
-    }
-
-    const requestedGameShort = String(
-      body?.game_short ?? body?.gameShort ?? "",
-    )
-      .trim()
-      .toLowerCase();
-
-    const generated = await generatePickemQuestionsForSeries({
-      leagueId,
-      seriesId,
-      gameShort: requestedGameShort,
-    });
-
-    const generatedQuestions = Array.isArray(generated?.questions)
-      ? generated.questions
-      : [];
-
-    if (!generatedQuestions.length) {
-      set.status = 404;
-      return {
-        error: "Cannot generate Pickem questions from series data",
-        summary: generated?.summary ?? null,
-      };
-    }
-
-    const updatedQuestions = await upsertPickemQuestions({
-      leagueId,
-      questions: generatedQuestions,
-    });
-
-    await gradePickemLeague(leagueId);
-
-    set.status = 200;
-    return {
-      success: true,
-      message: "Series Pickem questions generated",
-      league_id: leagueId,
-      series_id: seriesId,
-      generated: generated.summary,
-      updated: updatedQuestions.length,
-    };
-  },
-  {
-    tags: [TAG],
-    summary: "Generate Pickem questions from a whole series",
+    summary: "Get bracket pickem data by bracket_id",
   },
 );
 
 pickemRouter.get(
-  "/:scope/:league_id/question/:type",
-  async ({ params, set }) => {
-    const leagueId = String(params.league_id ?? "").trim();
-    if (!leagueId) {
+  "/bracket/:bracket_id/my-picks",
+  async ({ params, query, request, set }) => {
+    const bracketId = toNumber(params.bracket_id);
+    if (!bracketId) {
       set.status = 400;
-      return { error: "league_id is required" };
+      return { error: "bracket_id is required" };
     }
 
-    const gameShort = String(params.scope ?? "")
-      .trim()
-      .toLowerCase();
-    const type = String(params.type ?? "")
-      .trim()
-      .toLowerCase();
-
-    const includeAllGames = !gameShort || gameShort === "all";
-    const includeAllTypes = !type || type === "all";
-
-    let allQuestions = await getPickemQuestionsByLeague(leagueId);
-    let autoGenerated = false;
-    let generationSummary = null;
-
-    if (!allQuestions.length) {
-      const inferredTournamentId = toNumber(leagueId);
-
-      if (inferredTournamentId) {
-        const generationCandidates = includeAllGames
-          ? [
-              () =>
-                generatePickemQuestionsForSeries({
-                  leagueId,
-                  seriesId: inferredTournamentId,
-                  gameShort: gameShort,
-                }),
-              () =>
-                generatePickemQuestionsForTournament({
-                  leagueId,
-                  tournamentId: inferredTournamentId,
-                  gameShort: "",
-                }),
-            ]
-          : [
-              () =>
-                generatePickemQuestionsForTournament({
-                  leagueId,
-                  tournamentId: inferredTournamentId,
-                  gameShort: gameShort,
-                }),
-            ];
-
-        for (const createQuestions of generationCandidates) {
-          const generated = await createQuestions();
-          const generatedQuestions = Array.isArray(generated?.questions)
-            ? generated.questions
-            : [];
-
-          if (!generatedQuestions.length) {
-            continue;
-          }
-
-          await upsertPickemQuestions({
-            leagueId,
-            questions: generatedQuestions,
-          });
-
-          await gradePickemLeague(leagueId);
-
-          allQuestions = await getPickemQuestionsByLeague(leagueId);
-          autoGenerated = true;
-          generationSummary = generated.summary ?? null;
-          break;
-        }
-      }
+    const userId = resolveUserId({ query, request });
+    if (!userId) {
+      set.status = 400;
+      return { error: "userId is required" };
     }
 
-    const filtered = allQuestions.filter((q) => {
-      const normalizedQuestionGame = String(q.game_short ?? "")
-        .trim()
-        .toLowerCase();
+    const bracket = await getBracketById(bracketId);
+    if (!bracket) {
+      set.status = 404;
+      return { error: "Bracket not found" };
+    }
 
-      const gameMatch = includeAllGames
-        ? true
-        : !normalizedQuestionGame || normalizedQuestionGame === gameShort;
+    const [myPicks, matches] = await Promise.all([
+      getUserBracketPicks({ bracketId, userId }),
+      getMatchesByBracketId(bracketId),
+    ]);
 
-      const typeMatch = includeAllTypes
-        ? true
-        : String(q.type ?? "")
-            .trim()
-            .toLowerCase() === type;
-
-      return gameMatch && typeMatch;
+    const evaluated = evaluateBracketPicks({
+      matches,
+      picks: myPicks?.picks ?? [],
     });
 
-    const sanitized = filtered.map((q) => ({
-      id: Number(q.question_id),
-      question: q.question,
-      type: q.type,
-      options: q.options ?? [],
-      score: Number(q.score ?? 0),
-      maxChoose: Number(q.max_choose ?? 1),
-      correctAnswer: q.correct_answer ?? [],
-      meta: q.meta ?? {},
-      game_short: q.game_short,
-      bracket_id: q.bracket_id,
-      openTime: q.open_time,
-      closeTime: q.close_time,
-    }));
-
-    const totalPoint = sanitized.reduce(
-      (sum, q) => sum + (Number(q.maxChoose) || 0) * (Number(q.score) || 0),
-      0,
-    );
-
-    const leagueScope = allQuestions.filter((q) =>
-      includeAllTypes
-        ? true
-        : String(q.type ?? "")
-            .trim()
-            .toLowerCase() === type,
-    );
-
-    const totalPointAll = leagueScope.reduce(
-      (sum, q) => sum + (Number(q.max_choose) || 0) * (Number(q.score) || 0),
-      0,
-    );
-
     return {
-      league_id: leagueId,
-      game_short: params.scope,
-      type: params.type,
-      count: sanitized.length,
-      questions: sanitized,
-      totalPoint,
-      totalPointAll,
-      autoGenerated,
-      generationSummary,
+      bracket_id: bracketId,
+      userId,
+      user: myPicks?.userMeta ?? {},
+      picks: evaluated.picks,
+      stats: evaluated.stats,
+      updatedAt: myPicks?.updatedAt ?? null,
     };
   },
   {
     tags: [TAG],
-    summary: "List Pickem questions by game and type",
+    summary: "Get current user picks by bracket_id",
   },
 );
 
 pickemRouter.post(
-  "/:scope/submitPrediction",
+  "/bracket/:bracket_id/picks",
   async ({ params, body, set }) => {
-    const leagueId = String(params.scope ?? "").trim();
-    const userId = String(body?.userId ?? "").trim();
-    const answers = Array.isArray(body?.answers) ? body.answers : null;
-
-    if (!leagueId || !userId || !answers) {
+    const bracketId = toNumber(params.bracket_id);
+    if (!bracketId) {
       set.status = 400;
-      return {
-        error: "league_id, userId and answers are required",
-      };
+      return { error: "bracket_id is required" };
     }
 
-    const responseId = await upsertPickemResponse({
-      leagueId,
+    const userId = normalizeUserId(body?.userId);
+    if (!userId) {
+      set.status = 400;
+      return { error: "userId is required" };
+    }
+
+    const bracket = await getBracketById(bracketId);
+    if (!bracket) {
+      set.status = 404;
+      return { error: "Bracket not found" };
+    }
+
+    const saved = await upsertUserBracketPicks({
+      bracketId,
       userId,
       userMeta: asObject(body?.user, {}),
-      answers,
+      picks: Array.isArray(body?.picks) ? body.picks : [],
     });
 
-    if (!responseId) {
+    if (!saved) {
       set.status = 500;
-      return { error: "Cannot save prediction" };
+      return { error: "Cannot save picks" };
     }
-
-    await gradePickemLeague(leagueId);
-
-    const answerData = await getPickemAnswersByLeagueAndUser({
-      leagueId,
-      userId,
-    });
 
     return {
       success: true,
-      message: "Prediction saved and regraded",
+      message: "Picks saved",
       data: {
-        responseId,
-        totalScore: Number(answerData?.response?.total_score ?? 0),
+        bracketId,
+        userId,
+        picks: saved.picks,
+        count: saved.picks.length,
+        updatedAt: saved.updatedAt,
       },
     };
   },
   {
     tags: [TAG],
-    summary: "Submit Pickem predictions",
-  },
-);
-
-pickemRouter.get(
-  "/:scope/myanswer",
-  async ({ params, query, request, set }) => {
-    const leagueId = String(params.scope ?? "").trim();
-    const userId =
-      String(query?.userId ?? request.headers.get("x-user-id") ?? "").trim() ||
-      null;
-
-    if (!leagueId || !userId) {
-      set.status = 400;
-      return { error: "league_id and userId are required" };
-    }
-
-    const includeLogs = parseBoolean(query?.includeLogs, true);
-    const includeMeta = parseBoolean(query?.includeMeta, true);
-    const questionIdFilter = toNumber(query?.questionId);
-
-    const data = await getPickemAnswersByLeagueAndUser({ leagueId, userId });
-    if (!data) {
-      set.status = 404;
-      return { error: "Prediction not found" };
-    }
-
-    const rawAnswers = Array.isArray(data.answers) ? data.answers : [];
-    const selectedAnswers = questionIdFilter
-      ? rawAnswers.filter((a) => Number(a.question_id) === questionIdFilter)
-      : rawAnswers;
-
-    let answers = selectedAnswers.map((ans) => ({
-      questionId: Number(ans.question_id),
-      selectedOptions: ans.selected_options,
-      openTime: ans.open_time,
-      closeTime: ans.close_time,
-      updatedAt: ans.updated_at,
-    }));
-
-    if (includeMeta) {
-      const questions = await getPickemQuestionsByLeague(leagueId);
-      const questionMap = new Map(
-        questions.map((q) => [Number(q.question_id), q]),
-      );
-
-      answers = answers.map((ans) => {
-        const q = questionMap.get(Number(ans.questionId));
-        if (!q) return ans;
-
-        return {
-          ...ans,
-          question: q.question,
-          type: q.type,
-          options: q.options,
-          score: Number(q.score ?? 0),
-          maxChoose: Number(q.max_choose ?? 1),
-          meta: q.meta ?? {},
-          game_short: q.game_short,
-          bracket_id: q.bracket_id,
-        };
-      });
-    }
-
-    const payload = {
-      league_id: leagueId,
-      userId,
-      user: data.response.user_meta ?? {},
-      totalScore: Number(data.response.total_score ?? 0),
-      answers,
-    };
-
-    if (includeLogs) {
-      return {
-        ...payload,
-        logs: [],
-      };
-    }
-
-    return payload;
-  },
-  {
-    tags: [TAG],
-    summary: "Get current user Pickem answers",
-  },
-);
-
-pickemRouter.get(
-  "/:scope/pickem/:userid",
-  async ({ params, query, set }) => {
-    const leagueId = String(params.scope ?? "").trim();
-    const userId = String(params.userid ?? "").trim();
-
-    if (!leagueId || !userId) {
-      set.status = 400;
-      return { error: "league_id and userid are required" };
-    }
-
-    const includeLogs = parseBoolean(query?.includeLogs, true);
-    const includeMeta = parseBoolean(query?.includeMeta, true);
-    const questionIdFilter = toNumber(query?.questionId);
-
-    const data = await getPickemAnswersByLeagueAndUser({ leagueId, userId });
-    if (!data) {
-      set.status = 404;
-      return { error: "Prediction not found" };
-    }
-
-    const rawAnswers = Array.isArray(data.answers) ? data.answers : [];
-    const selectedAnswers = questionIdFilter
-      ? rawAnswers.filter((a) => Number(a.question_id) === questionIdFilter)
-      : rawAnswers;
-
-    let answers = selectedAnswers.map((ans) => ({
-      questionId: Number(ans.question_id),
-      selectedOptions: ans.selected_options,
-      openTime: ans.open_time,
-      closeTime: ans.close_time,
-      updatedAt: ans.updated_at,
-    }));
-
-    if (includeMeta) {
-      const questions = await getPickemQuestionsByLeague(leagueId);
-      const questionMap = new Map(
-        questions.map((q) => [Number(q.question_id), q]),
-      );
-
-      answers = answers.map((ans) => {
-        const q = questionMap.get(Number(ans.questionId));
-        if (!q) return ans;
-
-        return {
-          ...ans,
-          question: q.question,
-          type: q.type,
-          options: q.options,
-          score: Number(q.score ?? 0),
-          maxChoose: Number(q.max_choose ?? 1),
-          meta: q.meta ?? {},
-          game_short: q.game_short,
-          bracket_id: q.bracket_id,
-        };
-      });
-    }
-
-    const payload = {
-      league_id: leagueId,
-      userId,
-      user: data.response.user_meta ?? {},
-      totalScore: Number(data.response.total_score ?? 0),
-      answers,
-    };
-
-    if (includeLogs) {
-      return {
-        ...payload,
-        logs: [],
-      };
-    }
-
-    return payload;
-  },
-  {
-    tags: [TAG],
-    summary: "Get any user Pickem answers",
+    summary: "Save user picks by bracket_id",
   },
 );
 

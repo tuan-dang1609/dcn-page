@@ -408,19 +408,18 @@ const SeriesPage = () => {
             ))}
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Button asChild>
-              <Link to={`/series/${canonicalSeriesSlug}/pickem`}>
-                Choi Pick'em Series
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link
-                to={`/ops/series-pickem-setup?series=${encodeURIComponent(canonicalSeriesSlug)}`}
-              >
-                Tao Pick'em
-              </Link>
-            </Button>
+          <div className="mt-6 rounded-md border border-border/60 bg-card/40 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                Pick'em theo series: chon tournament, chon bracket, bam doi tren
+                bracket de du doan.
+              </p>
+              <Button asChild size="sm">
+                <Link to={`/series/${canonicalSeriesSlug}/pickem`}>
+                  Choi Pick'em
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
       </section>

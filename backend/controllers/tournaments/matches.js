@@ -516,6 +516,8 @@ matchRouter.get(
               m.date_scheduled,
              m.team_a_id,
              m.team_b_id,
+              m.next_match_id,
+              m.next_slot,
              m.seed_a,
              m.seed_b,
              m.score_a,

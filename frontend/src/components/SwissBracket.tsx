@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import {
@@ -9,18 +9,32 @@ import { TOURNAMENT_LOGO } from "@/data/tournament";
 
 type SwissBracketProps = {
   bracketId?: number | null;
+  selectedTeamByMatchId?: Record<number, number>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+  tournamentRegistered?: RegisteredTeam[];
+};
+
+type RegisteredTeam = {
+  id?: number | string;
+  team_id?: number | string;
+  name?: string;
+  short_name?: string;
 };
 
 type BracketOutletContext = {
   tournament?: {
-    registered?: Array<{
-      id?: number | string;
-      team_id?: number | string;
-      name?: string;
-      short_name?: string;
-    }>;
+    registered?: RegisteredTeam[];
   };
 };
+
+type PickemContextValue = {
+  selectedTeamByMatchId?: Record<number, number>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+};
+
+const PickemContext = createContext<PickemContextValue>({});
 
 type DisplayMatch = {
   id: number;
@@ -415,9 +429,11 @@ const PlayerRow = ({
   name,
   score,
   isWinner,
+  isSelected,
   isHoveredTeam,
   hasHover,
   isTop,
+  onPick,
   onHoverTeam,
 }: {
   teamId: number | null;
@@ -425,18 +441,25 @@ const PlayerRow = ({
   name: string;
   score: number | null;
   isWinner: boolean;
+  isSelected?: boolean;
   isHoveredTeam: boolean;
   hasHover: boolean;
   isTop?: boolean;
+  onPick?: (teamId: number) => void;
   onHoverTeam: (teamId: number | null) => void;
 }) => {
+  const canPick =
+    typeof onPick === "function" && Number.isFinite(Number(teamId));
+
   const bg = hasHover
     ? isHoveredTeam
       ? "bg-primary text-primary-foreground"
       : "bg-card"
-    : isWinner
-      ? "bg-primary/20"
-      : "bg-card";
+    : isSelected
+      ? "bg-primary/25"
+      : isWinner
+        ? "bg-primary/20"
+        : "bg-card";
 
   const textClass = hasHover
     ? isHoveredTeam
@@ -448,10 +471,14 @@ const PlayerRow = ({
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 cursor-default ${bg} ${textClass} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${bg} ${textClass} ${isSelected ? "ring-1 ring-primary/60" : ""} ${isTop ? "border-b border-border/40" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHoverTeam(teamId)}
       onMouseLeave={() => onHoverTeam(null)}
+      onClick={() => {
+        if (!canPick || !teamId) return;
+        onPick(teamId);
+      }}
     >
       <span className="flex items-center gap-2 text-sm truncate flex-1">
         <img
@@ -479,26 +506,34 @@ const MatchCard = ({
   onHoverTeam: (teamId: number | null) => void;
   isInJourney: boolean;
 }) => {
+  const { selectedTeamByMatchId, onPickTeam, disableMatchLink } =
+    useContext(PickemContext);
   const hasHover = hoveredTeamId !== null;
   const faded = hasHover && !isInJourney;
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
+  const selectedTeamId = selectedTeamByMatchId?.[match.routeMatchId];
 
-  return (
-    <Link
-      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
-      style={{ width: CARD_W, height: CARD_H }}
-    >
+  const handlePick = (teamId: number) => {
+    if (!onPickTeam) return;
+    onPickTeam(match.routeMatchId, teamId);
+  };
+
+  const canPick = Boolean(onPickTeam && match.routeMatchId > 0);
+
+  const content = (
+    <>
       <PlayerRow
         teamId={match.teamAId}
         logoUrl={match.p1Logo}
         name={match.p1}
         score={match.s1}
         isWinner={match.winner === match.p1}
+        isSelected={selectedTeamId === match.teamAId}
         isHoveredTeam={hoveredTeamId === match.teamAId}
         hasHover={hasHover}
         isTop
+        onPick={canPick ? handlePick : undefined}
         onHoverTeam={onHoverTeam}
       />
       <PlayerRow
@@ -507,10 +542,33 @@ const MatchCard = ({
         name={match.p2}
         score={match.s2}
         isWinner={match.winner === match.p2}
+        isSelected={selectedTeamId === match.teamBId}
         isHoveredTeam={hoveredTeamId === match.teamBId}
         hasHover={hasHover}
+        onPick={canPick ? handlePick : undefined}
         onHoverTeam={onHoverTeam}
       />
+    </>
+  );
+
+  if (disableMatchLink || canPick) {
+    return (
+      <div
+        className={`block neo-box-sm overflow-hidden transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+        style={{ width: CARD_W, height: CARD_H }}
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
+      className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      style={{ width: CARD_W, height: CARD_H }}
+    >
+      {content}
     </Link>
   );
 };
@@ -572,19 +630,28 @@ const TeamListCard = ({
   );
 };
 
-const SwissBracket = ({ bracketId }: SwissBracketProps) => {
-  const { tournament } = useOutletContext<BracketOutletContext>();
+const SwissBracket = ({
+  bracketId,
+  selectedTeamByMatchId,
+  onPickTeam,
+  disableMatchLink,
+  tournamentRegistered,
+}: SwissBracketProps) => {
+  const outletContext = useOutletContext<BracketOutletContext | undefined>();
+  const tournament = outletContext?.tournament;
   const [hoveredTeamId, setHoveredTeamId] = useState<number | null>(null);
+
+  const registeredTeams = tournamentRegistered ?? tournament?.registered ?? [];
 
   const teamNameById = useMemo(() => {
     const map: Record<number, string> = {};
-    (tournament?.registered ?? []).forEach((team) => {
+    registeredTeams.forEach((team) => {
       const teamId = toNumber(team.team_id ?? team.id);
       if (!teamId) return;
       map[teamId] = team.name || team.short_name || `Team #${teamId}`;
     });
     return map;
-  }, [tournament?.registered]);
+  }, [registeredTeams]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["swiss-bracket-matches", bracketId],
@@ -869,157 +936,165 @@ const SwissBracket = ({ bracketId }: SwissBracketProps) => {
   }
 
   return (
-    <div className="w-full overflow-x-auto">
-      <div className="flex items-start gap-4 min-w-max">
-        <div
-          className="relative shrink-0"
-          style={{
-            width: layoutInfo.contentWidth,
-            height: layoutInfo.contentHeight,
-          }}
-        >
-          {layout.flat().map((label) => {
-            const metrics = layoutInfo.stageMetrics.get(label);
-            if (!metrics) return null;
+    <PickemContext.Provider
+      value={{
+        selectedTeamByMatchId,
+        onPickTeam,
+        disableMatchLink,
+      }}
+    >
+      <div className="w-full overflow-x-auto">
+        <div className="flex items-start gap-4 min-w-max">
+          <div
+            className="relative shrink-0"
+            style={{
+              width: layoutInfo.contentWidth,
+              height: layoutInfo.contentHeight,
+            }}
+          >
+            {layout.flat().map((label) => {
+              const metrics = layoutInfo.stageMetrics.get(label);
+              if (!metrics) return null;
 
-            const matches = stageMatches.get(label) ?? [];
-            const renderMatches = matches.length
-              ? matches
-              : [
-                  {
-                    id: -1,
-                    routeMatchId: -1,
-                    round: 0,
-                    matchNo: 0,
-                    teamAId: null,
-                    teamBId: null,
-                    winnerTeamId: null,
-                    p1: "TBD",
-                    p2: "TBD",
-                    p1Logo: null,
-                    p2Logo: null,
-                    s1: null,
-                    s2: null,
-                    winner: null,
-                    status: "scheduled",
-                  } as DisplayMatch,
-                ];
+              const matches = stageMatches.get(label) ?? [];
+              const renderMatches = matches.length
+                ? matches
+                : [
+                    {
+                      id: -1,
+                      routeMatchId: -1,
+                      round: 0,
+                      matchNo: 0,
+                      teamAId: null,
+                      teamBId: null,
+                      winnerTeamId: null,
+                      p1: "TBD",
+                      p2: "TBD",
+                      p1Logo: null,
+                      p2Logo: null,
+                      s1: null,
+                      s2: null,
+                      winner: null,
+                      status: "scheduled",
+                    } as DisplayMatch,
+                  ];
 
-            return (
-              <div
-                key={label}
-                className="absolute neo-box-sm bg-card/50 border border-border/60"
-                style={{
-                  left: metrics.x,
-                  top: metrics.y,
-                  width: STAGE_W,
-                  height: metrics.height,
-                  padding: `${STAGE_PAD_Y}px ${STAGE_PAD_X}px`,
-                }}
-              >
-                <div className="h-6 flex items-center justify-center text-xs font-bold tracking-wider uppercase text-primary">
-                  {label}
+              return (
+                <div
+                  key={label}
+                  className="absolute neo-box-sm bg-card/50 border border-border/60"
+                  style={{
+                    left: metrics.x,
+                    top: metrics.y,
+                    width: STAGE_W,
+                    height: metrics.height,
+                    padding: `${STAGE_PAD_Y}px ${STAGE_PAD_X}px`,
+                  }}
+                >
+                  <div className="h-6 flex items-center justify-center text-xs font-bold tracking-wider uppercase text-primary">
+                    {label}
+                  </div>
+
+                  <div className="space-y-3">
+                    {renderMatches.map((match) =>
+                      match.routeMatchId > 0 ? (
+                        <MatchCard
+                          key={match.id}
+                          match={match}
+                          hoveredTeamId={hoveredTeamId}
+                          onHoverTeam={setHoveredTeamId}
+                          isInJourney={
+                            !journeyMatchIds || journeyMatchIds.has(match.id)
+                          }
+                        />
+                      ) : (
+                        <div
+                          key={`${label}-placeholder`}
+                          className="neo-box-sm bg-card/40"
+                          style={{ width: CARD_W, height: CARD_H }}
+                        />
+                      ),
+                    )}
+                  </div>
                 </div>
+              );
+            })}
 
-                <div className="space-y-3">
-                  {renderMatches.map((match) =>
-                    match.routeMatchId > 0 ? (
-                      <MatchCard
-                        key={match.id}
-                        match={match}
-                        hoveredTeamId={hoveredTeamId}
-                        onHoverTeam={setHoveredTeamId}
-                        isInJourney={
-                          !journeyMatchIds || journeyMatchIds.has(match.id)
-                        }
-                      />
-                    ) : (
-                      <div
-                        key={`${label}-placeholder`}
-                        className="neo-box-sm bg-card/40"
-                        style={{ width: CARD_W, height: CARD_H }}
-                      />
-                    ),
+            {connectors.map((connector) =>
+              connector.type === "single" ? (
+                <StageConnectorSingle
+                  key={connector.key}
+                  x1={connector.x1}
+                  x2={connector.x2}
+                  y1={connector.y1}
+                  y2={connector.y2}
+                  hasHover={hoveredTeamId !== null}
+                  active={Boolean(
+                    journeyStageLabels &&
+                    journeyStageLabels.has(connector.fromLabel) &&
+                    journeyStageLabels.has(connector.toLabel),
                   )}
-                </div>
-              </div>
-            );
-          })}
-
-          {connectors.map((connector) =>
-            connector.type === "single" ? (
-              <StageConnectorSingle
-                key={connector.key}
-                x1={connector.x1}
-                x2={connector.x2}
-                y1={connector.y1}
-                y2={connector.y2}
-                hasHover={hoveredTeamId !== null}
-                active={Boolean(
-                  journeyStageLabels &&
-                  journeyStageLabels.has(connector.fromLabel) &&
-                  journeyStageLabels.has(connector.toLabel),
-                )}
-              />
-            ) : (
-              <StageConnectorMerge
-                key={connector.key}
-                x1={connector.x1}
-                x2={connector.x2}
-                yTop={connector.yTop}
-                yBottom={connector.yBottom}
-                yOut={connector.yOut}
-                hasHover={hoveredTeamId !== null}
-                activeInputIndexes={
-                  journeyStageLabels
-                    ? connector.sourceLabels
-                        .map((label, index) =>
-                          journeyStageLabels.has(label) ? index : -1,
-                        )
-                        .filter((index) => index !== -1)
-                    : []
-                }
-                activeOutput={Boolean(
-                  journeyStageLabels &&
-                  connector.sourceLabels.some((label) =>
-                    journeyStageLabels.has(label),
-                  ) &&
-                  journeyStageLabels.has(connector.toLabel),
-                )}
-              />
-            ),
-          )}
-        </div>
-
-        <div
-          className="shrink-0 flex flex-col items-start justify-center"
-          style={{
-            width: STAGE_W,
-            height: layoutInfo.contentHeight,
-            gap: STAGE_GAP,
-          }}
-        >
-          <div className="min-h-0 w-full">
-            <TeamListCard
-              title="Đi tiếp"
-              teams={teamProgress.advanced}
-              tone="advanced"
-              hoveredTeamId={hoveredTeamId}
-              onHoverTeam={setHoveredTeamId}
-            />
+                />
+              ) : (
+                <StageConnectorMerge
+                  key={connector.key}
+                  x1={connector.x1}
+                  x2={connector.x2}
+                  yTop={connector.yTop}
+                  yBottom={connector.yBottom}
+                  yOut={connector.yOut}
+                  hasHover={hoveredTeamId !== null}
+                  activeInputIndexes={
+                    journeyStageLabels
+                      ? connector.sourceLabels
+                          .map((label, index) =>
+                            journeyStageLabels.has(label) ? index : -1,
+                          )
+                          .filter((index) => index !== -1)
+                      : []
+                  }
+                  activeOutput={Boolean(
+                    journeyStageLabels &&
+                    connector.sourceLabels.some((label) =>
+                      journeyStageLabels.has(label),
+                    ) &&
+                    journeyStageLabels.has(connector.toLabel),
+                  )}
+                />
+              ),
+            )}
           </div>
-          <div className="min-h-0 w-full">
-            <TeamListCard
-              title="Bị loại"
-              teams={teamProgress.eliminated}
-              tone="eliminated"
-              hoveredTeamId={hoveredTeamId}
-              onHoverTeam={setHoveredTeamId}
-            />
+
+          <div
+            className="shrink-0 flex flex-col items-start justify-center"
+            style={{
+              width: STAGE_W,
+              height: layoutInfo.contentHeight,
+              gap: STAGE_GAP,
+            }}
+          >
+            <div className="min-h-0 w-full">
+              <TeamListCard
+                title="Đi tiếp"
+                teams={teamProgress.advanced}
+                tone="advanced"
+                hoveredTeamId={hoveredTeamId}
+                onHoverTeam={setHoveredTeamId}
+              />
+            </div>
+            <div className="min-h-0 w-full">
+              <TeamListCard
+                title="Bị loại"
+                teams={teamProgress.eliminated}
+                tone="eliminated"
+                hoveredTeamId={hoveredTeamId}
+                onHoverTeam={setHoveredTeamId}
+              />
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </PickemContext.Provider>
   );
 };
 
