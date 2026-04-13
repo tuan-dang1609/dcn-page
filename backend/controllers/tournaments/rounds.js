@@ -3,6 +3,7 @@ import middleware from "../../utils/middleware.js";
 import {
   buildRoundSlug,
   createBanPickSession,
+  deleteBanPickSession,
   ensureBanPickTables,
   ensureSessionByRoundSlug,
   getBanPickSessionByRoundSlug,
@@ -137,6 +138,7 @@ roundRouter.post(
       roundSlug,
       matchId,
       format: body?.format,
+      countdownSeconds: body?.countdown_seconds,
     });
 
     if (!session) {
@@ -152,6 +154,45 @@ roundRouter.post(
   {
     tags: [TAG],
     summary: "Init ban/pick by round slug and match id",
+  },
+);
+
+roundRouter.delete(
+  "/:round_slug/ban-pick",
+  async ({ params, query, user, set }) => {
+    const roleId = toNumber(user?.role_id);
+    const canManage = roleId === 1 || roleId === 2 || roleId === 3;
+
+    if (!user || !canManage) {
+      set.status = 403;
+      return { error: "Bạn không có quyền xóa ban/pick" };
+    }
+
+    const matchId = toNumber(query?.match_id);
+
+    const result = await deleteBanPickSession({
+      roundSlug: params.round_slug,
+      matchId,
+    });
+
+    if (!result.deleted) {
+      set.status = 200;
+      return {
+        message: "Không có phiên ban/pick để xóa",
+        data: null,
+      };
+    }
+
+    set.status = 200;
+    return {
+      message: "Đã xóa phiên ban/pick",
+      data: result.session,
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Delete ban/pick by round slug and optional match id",
+    security: [{ bearerAuth: [] }],
   },
 );
 
@@ -228,6 +269,7 @@ roundRouter.post(
       matchId,
       roundSlug,
       format: body?.format,
+      countdownSeconds: body?.countdown_seconds,
     });
 
     if (!session) {

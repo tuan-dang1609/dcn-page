@@ -569,6 +569,11 @@ const MatchCard = ({
   };
 
   const canPick = Boolean(onPickTeam && realMatchId && realMatchId > 0);
+  const isMatchCompleted = ["complete", "completed"].includes(
+    String(match.status ?? "")
+      .trim()
+      .toLowerCase(),
+  );
 
   const content = (
     <>
@@ -602,7 +607,7 @@ const MatchCard = ({
     </>
   );
 
-  if (disableMatchLink || canPick) {
+  if (disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
         className={`block neo-box-sm overflow-hidden transition-all ${faded ? "opacity-40" : "opacity-100"}`}

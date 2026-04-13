@@ -20,6 +20,7 @@ export interface PlayerStat {
   name: string;
   icon: string;
   avatar?: string;
+  riotAccount?: string;
   kills?: number;
   deaths?: number;
   plusMinus?: number;
@@ -56,6 +57,8 @@ export interface MatchDetail {
   format: string;
   date: string;
   gameType: GameType;
+  status?: string;
+  roomId?: string | null;
   team1: {
     name: string;
     tag: string;

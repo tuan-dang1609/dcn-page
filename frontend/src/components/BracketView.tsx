@@ -75,6 +75,7 @@ const PickemContext = createContext<PickemContextValue>({});
 type DisplayMatch = {
   id: number;
   routeMatchId: number;
+  status?: string;
   round: number;
   matchNo: number;
   nextMatchId: number | null;
@@ -165,6 +166,7 @@ const toDisplayMatches = (
       return {
         id: matchId,
         routeMatchId: matchId,
+        status: String(match.status ?? "").trim(),
         round: Number(match.round_number ?? 0),
         matchNo: Number(match.match_no ?? 0),
         nextMatchId: toNumber(match.next_match_id),
@@ -462,6 +464,11 @@ const MatchCard = ({
   };
 
   const canPick = Boolean(onPickTeam && realMatchId);
+  const isMatchCompleted = ["complete", "completed"].includes(
+    String(match.status ?? "")
+      .trim()
+      .toLowerCase(),
+  );
 
   const content = (
     <>
@@ -495,7 +502,7 @@ const MatchCard = ({
     </>
   );
 
-  if (!routeMatchId || disableMatchLink || canPick) {
+  if (!routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
         className={`block neo-box-sm overflow-hidden transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}

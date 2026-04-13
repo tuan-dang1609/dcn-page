@@ -15,12 +15,14 @@ import {
 } from "lucide-react";
 import {
   createMatchGameId,
+  deleteMatchBanPick,
   deleteMatchGameId,
   getBracketsByTournamentId,
   getMatchGameIds,
   getMatchesByBracketId,
   pairSwissNextRound,
   updateMatchGameId,
+  updateMatchRoomId,
   updateMatchScore,
   type Bracket,
   type Match,
@@ -44,6 +46,14 @@ const providerOptions = [
 const gameNoOptions = Array.from({ length: 7 }, (_, index) => index + 1);
 
 type BanPickFormat = "BO1" | "BO3" | "BO5";
+type BanPickCountdownDraft = {
+  minutes: string;
+  seconds: string;
+};
+
+const DEFAULT_BANPICK_COUNTDOWN_SECONDS = 30;
+const MIN_BANPICK_COUNTDOWN_SECONDS = 5;
+const MAX_BANPICK_COUNTDOWN_SECONDS = 3600;
 
 const banPickFormatOptions: Array<{ value: BanPickFormat; label: string }> = [
   { value: "BO1", label: "BO1" },
@@ -56,8 +66,10 @@ interface EditableMatch extends Match {
   draftScoreB: string;
   draftWinnerTeamId: string;
   draftDateScheduled: string;
+  draftRoomId: string;
   saving?: boolean;
   scheduleSaving?: boolean;
+  roomSaving?: boolean;
 }
 
 interface NewGameIdDraft {
@@ -228,6 +240,49 @@ const buildScoreControlRoundSlug = ({
   return `ops-t${safeTournament}-r${safeRound}-m${safeMatchNo}-${matchId}`;
 };
 
+const buildScoreControlLobbyPath = (match: Match): string | null => {
+  const game = String(match.tournament_game_short_name ?? "")
+    .trim()
+    .toLowerCase();
+  const slug = String(match.tournament_slug ?? "").trim();
+  const matchId = toNumber(match.id);
+
+  if (!game || !slug || !matchId) {
+    return null;
+  }
+
+  return `/tournament/${game}/${slug}/lobby/${matchId}`;
+};
+
+const toAbsoluteClientUrl = (path: string) => {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (typeof window === "undefined") {
+    return normalizedPath;
+  }
+
+  return `${window.location.origin}${normalizedPath}`;
+};
+
+const clampBanPickCountdownSeconds = (value: number) =>
+  Math.min(
+    MAX_BANPICK_COUNTDOWN_SECONDS,
+    Math.max(MIN_BANPICK_COUNTDOWN_SECONDS, Math.round(value)),
+  );
+
+const toBanPickCountdownDraft = (
+  value?: number | null,
+): BanPickCountdownDraft => {
+  const normalized = clampBanPickCountdownSeconds(
+    toNumber(value) ?? DEFAULT_BANPICK_COUNTDOWN_SECONDS,
+  );
+
+  return {
+    minutes: String(Math.floor(normalized / 60)),
+    seconds: String(normalized % 60).padStart(2, "0"),
+  };
+};
+
 const hydrateMatches = (matches: Match[]): EditableMatch[] =>
   matches.map((match) => ({
     ...match,
@@ -244,8 +299,10 @@ const hydrateMatches = (matches: Match[]): EditableMatch[] =>
         ? "auto"
         : String(match.winner_team_id),
     draftDateScheduled: toDatetimeLocalInput(match.date_scheduled),
+    draftRoomId: String(match.room_id ?? "").trim(),
     saving: false,
     scheduleSaving: false,
+    roomSaving: false,
   }));
 
 const createEmptyNewGameIdDraft = (): NewGameIdDraft => ({
@@ -298,6 +355,12 @@ const ScoreControlPage = () => {
   const [settingUpBanPickByMatch, setSettingUpBanPickByMatch] = useState<
     Record<number, boolean>
   >({});
+  const [deletingBanPickByMatch, setDeletingBanPickByMatch] = useState<
+    Record<number, boolean>
+  >({});
+  const [banPickCountdownByMatch, setBanPickCountdownByMatch] = useState<
+    Record<number, BanPickCountdownDraft>
+  >({});
 
   const roleId = Number(user?.role_id);
   const hasAccess = allowedRoleIds.has(roleId);
@@ -343,6 +406,8 @@ const ScoreControlPage = () => {
       setEditGameIdDraftByRow({});
       setBanPickFormatByMatch({});
       setSettingUpBanPickByMatch({});
+      setDeletingBanPickByMatch({});
+      setBanPickCountdownByMatch({});
     } catch (error: any) {
       toast({
         title: "Không thể tải danh sách trận",
@@ -661,7 +726,8 @@ const ScoreControlPage = () => {
       | "draftScoreA"
       | "draftScoreB"
       | "draftWinnerTeamId"
-      | "draftDateScheduled",
+      | "draftDateScheduled"
+      | "draftRoomId",
     value: string,
   ) => {
     setMatches((prev) =>
@@ -688,6 +754,12 @@ const ScoreControlPage = () => {
     );
   };
 
+  const setRoomSavingForMatch = (matchId: number, roomSaving: boolean) => {
+    setMatches((prev) =>
+      prev.map((item) => (item.id === matchId ? { ...item, roomSaving } : item)),
+    );
+  };
+
   const getDefaultBanPickFormatForMatch = (
     match: EditableMatch,
   ): BanPickFormat => {
@@ -707,8 +779,52 @@ const ScoreControlPage = () => {
     }));
   };
 
+  const getBanPickCountdownForMatch = (
+    match: EditableMatch,
+  ): BanPickCountdownDraft =>
+    banPickCountdownByMatch[match.id] ??
+    toBanPickCountdownDraft(match.ban_pick_countdown_seconds);
+
+  const setBanPickCountdownForMatch = (
+    matchId: number,
+    patch: Partial<BanPickCountdownDraft>,
+    fallback?: BanPickCountdownDraft,
+  ) => {
+    setBanPickCountdownByMatch((prev) => {
+      const base = prev[matchId] ?? fallback ?? toBanPickCountdownDraft();
+
+      return {
+        ...prev,
+        [matchId]: {
+          minutes: patch.minutes ?? base.minutes,
+          seconds: patch.seconds ?? base.seconds,
+        },
+      };
+    });
+  };
+
+  const getBanPickCountdownSecondsForMatch = (match: EditableMatch) => {
+    const draft = getBanPickCountdownForMatch(match);
+    const minutes = Math.max(0, Math.floor(toNumber(draft.minutes) ?? 0));
+    const seconds = Math.max(0, Math.floor(toNumber(draft.seconds) ?? 0));
+    const totalSeconds = minutes * 60 + seconds;
+
+    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+      return DEFAULT_BANPICK_COUNTDOWN_SECONDS;
+    }
+
+    return clampBanPickCountdownSeconds(totalSeconds);
+  };
+
   const setSettingUpBanPick = (matchId: number, value: boolean) => {
     setSettingUpBanPickByMatch((prev) => ({
+      ...prev,
+      [matchId]: value,
+    }));
+  };
+
+  const setDeletingBanPick = (matchId: number, value: boolean) => {
+    setDeletingBanPickByMatch((prev) => ({
       ...prev,
       [matchId]: value,
     }));
@@ -718,6 +834,11 @@ const ScoreControlPage = () => {
     match: EditableMatch,
     format: BanPickFormat,
   ) => {
+    const lobbyPath = buildScoreControlLobbyPath(match);
+    if (lobbyPath) {
+      return lobbyPath;
+    }
+
     const roundSlug = buildScoreControlRoundSlug({
       tournamentId: toNumber(tournamentIdInput),
       roundNumber: toNumber(match.round_number),
@@ -735,6 +856,7 @@ const ScoreControlPage = () => {
 
   const handleSetupBanPick = async (match: EditableMatch) => {
     const selectedFormat = getBanPickFormatForMatch(match);
+    const countdownSeconds = getBanPickCountdownSecondsForMatch(match);
     const roundSlug = buildScoreControlRoundSlug({
       tournamentId: toNumber(tournamentIdInput),
       roundNumber: toNumber(match.round_number),
@@ -750,13 +872,14 @@ const ScoreControlPage = () => {
         {
           match_id: match.id,
           format: selectedFormat,
+          countdown_seconds: countdownSeconds,
         },
         token,
       );
 
       toast({
         title: "Đã setup Ban/Pick",
-        description: `Match #${match.id} đã sẵn sàng với format ${selectedFormat}.`,
+        description: `Match #${match.id} đã sẵn sàng (${selectedFormat}, ${countdownSeconds}s/lượt).`,
       });
     } catch (error: any) {
       toast({
@@ -772,8 +895,40 @@ const ScoreControlPage = () => {
 
   const handleOpenBanPick = (match: EditableMatch) => {
     const selectedFormat = getBanPickFormatForMatch(match);
-    const link = getBanPickLinkForMatch(match, selectedFormat);
-    navigate(link);
+    const link = toAbsoluteClientUrl(getBanPickLinkForMatch(match, selectedFormat));
+    const opened = window.open(link, "_blank", "noopener,noreferrer");
+
+    if (!opened) {
+      navigate(link);
+    }
+  };
+
+  const handleDeleteBanPick = async (match: EditableMatch) => {
+    const confirmed = window.confirm(
+      `Xóa toàn bộ phiên Ban/Pick của Match #${match.id}?`,
+    );
+
+    if (!confirmed) return;
+
+    setDeletingBanPick(match.id, true);
+
+    try {
+      await deleteMatchBanPick(match.id);
+
+      toast({
+        title: "Đã xóa Ban/Pick",
+        description: `Match #${match.id} đã xóa phiên ban/pick.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Xóa Ban/Pick thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingBanPick(match.id, false);
+    }
   };
 
   const handleSaveMatch = async (match: EditableMatch) => {
@@ -879,6 +1034,37 @@ const ScoreControlPage = () => {
       });
     } finally {
       setScheduleSavingForMatch(match.id, false);
+    }
+  };
+
+  const handleSaveMatchRoomId = async (match: EditableMatch) => {
+    const normalizedRoomId = String(match.draftRoomId ?? "").trim();
+
+    setRoomSavingForMatch(match.id, true);
+
+    try {
+      await updateMatchRoomId(match.id, {
+        room_id: normalizedRoomId || null,
+      });
+
+      toast({
+        title: "Cập nhật room_id thành công",
+        description: `Match #${match.id} đã cập nhật room_id.`,
+      });
+
+      const bracketId = toNumber(selectedBracketId);
+      if (bracketId) {
+        await loadMatches(bracketId);
+      }
+    } catch (error: any) {
+      toast({
+        title: "Cập nhật room_id thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setRoomSavingForMatch(match.id, false);
     }
   };
 
@@ -1090,6 +1276,9 @@ const ScoreControlPage = () => {
                         <div className="text-xstext-[#EEEEEE] mt-0.5">
                           {formatDateTime(match.date_scheduled)}
                         </div>
+                        <div className="text-xstext-[#EEEEEE] mt-0.5">
+                          Room: {String(match.room_id ?? "").trim() || "--"}
+                        </div>
                       </div>
                     </div>
 
@@ -1178,7 +1367,7 @@ const ScoreControlPage = () => {
                       </Button>
                     </div>
 
-                    <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                    <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto_auto]">
                       <Input
                         type="datetime-local"
                         value={match.draftDateScheduled}
@@ -1190,6 +1379,18 @@ const ScoreControlPage = () => {
                           )
                         }
                         placeholder="date_scheduled"
+                      />
+
+                      <Input
+                        value={match.draftRoomId}
+                        onChange={(event) =>
+                          updateDraftMatch(
+                            match.id,
+                            "draftRoomId",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="room_id (VD: dcn-valo-room-01)"
                       />
 
                       <Button
@@ -1211,6 +1412,26 @@ const ScoreControlPage = () => {
                           </>
                         )}
                       </Button>
+
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void handleSaveMatchRoomId(match)}
+                        disabled={Boolean(match.roomSaving)}
+                        className="gap-2"
+                      >
+                        {match.roomSaving ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Đang lưu room
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-4 w-4" />
+                            Lưu room_id
+                          </>
+                        )}
+                      </Button>
                     </div>
 
                     <div className="rounded-md border border-border bg-muted/20 p-3 space-y-3">
@@ -1223,7 +1444,7 @@ const ScoreControlPage = () => {
                         </div>
                       </div>
 
-                      <div className="grid gap-2 md:grid-cols-[140px_auto_auto]">
+                      <div className="grid gap-2 md:grid-cols-[110px_110px_110px_auto_auto_auto]">
                         <select
                           value={getBanPickFormatForMatch(match)}
                           onChange={(event) =>
@@ -1241,11 +1462,50 @@ const ScoreControlPage = () => {
                           ))}
                         </select>
 
+                        <Input
+                          type="number"
+                          min={0}
+                          max={59}
+                          step={1}
+                          value={getBanPickCountdownForMatch(match).minutes}
+                          onChange={(event) =>
+                            setBanPickCountdownForMatch(
+                              match.id,
+                              {
+                                minutes: event.target.value.replace(/[^0-9]/g, ""),
+                              },
+                              getBanPickCountdownForMatch(match),
+                            )
+                          }
+                          placeholder="Phút"
+                        />
+
+                        <Input
+                          type="number"
+                          min={0}
+                          max={59}
+                          step={1}
+                          value={getBanPickCountdownForMatch(match).seconds}
+                          onChange={(event) =>
+                            setBanPickCountdownForMatch(
+                              match.id,
+                              {
+                                seconds: event.target.value.replace(/[^0-9]/g, ""),
+                              },
+                              getBanPickCountdownForMatch(match),
+                            )
+                          }
+                          placeholder="Giây"
+                        />
+
                         <Button
                           type="button"
                           className="gap-2"
                           onClick={() => void handleSetupBanPick(match)}
-                          disabled={Boolean(settingUpBanPickByMatch[match.id])}
+                          disabled={
+                            Boolean(settingUpBanPickByMatch[match.id]) ||
+                            Boolean(deletingBanPickByMatch[match.id])
+                          }
                         >
                           {settingUpBanPickByMatch[match.id] ? (
                             <>
@@ -1265,18 +1525,48 @@ const ScoreControlPage = () => {
                           variant="outline"
                           className="gap-2"
                           onClick={() => handleOpenBanPick(match)}
+                          disabled={Boolean(deletingBanPickByMatch[match.id])}
                         >
                           <Link2 className="h-4 w-4" />
                           Mở trang Ban/Pick
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          className="gap-2"
+                          onClick={() => void handleDeleteBanPick(match)}
+                          disabled={
+                            Boolean(settingUpBanPickByMatch[match.id]) ||
+                            Boolean(deletingBanPickByMatch[match.id])
+                          }
+                        >
+                          {deletingBanPickByMatch[match.id] ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Đang xóa...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="h-4 w-4" />
+                              Xóa Ban/Pick
+                            </>
+                          )}
                         </Button>
                       </div>
 
                       <p className="text-xstext-[#EEEEEE] break-all">
                         Link:{" "}
-                        {getBanPickLinkForMatch(
-                          match,
-                          getBanPickFormatForMatch(match),
+                        {toAbsoluteClientUrl(
+                          getBanPickLinkForMatch(
+                            match,
+                            getBanPickFormatForMatch(match),
+                          ),
                         )}
+                      </p>
+
+                      <p className="text-xstext-[#EEEEEE]">
+                        Countdown mỗi lượt: {getBanPickCountdownSecondsForMatch(match)} giây
                       </p>
                     </div>
 

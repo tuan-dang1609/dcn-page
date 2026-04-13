@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS ban_picks (
   team_a_id BIGINT NULL,
   team_b_id BIGINT NULL,
   format TEXT NOT NULL DEFAULT 'BO3',
+  turn_time_limit_seconds INT NOT NULL DEFAULT 30,
+  turn_started_at TIMESTAMPTZ NULL,
   phase TEXT NOT NULL DEFAULT 'ban_pick',
   current_step INT NOT NULL DEFAULT 0,
   selected_map_code TEXT NULL,
@@ -47,6 +49,15 @@ CREATE TABLE IF NOT EXISTS ban_pick_actions (
 
 ALTER TABLE matches
 ADD COLUMN IF NOT EXISTS ban_pick_id BIGINT NULL;
+
+ALTER TABLE matches
+ADD COLUMN IF NOT EXISTS room_id TEXT NULL;
+
+ALTER TABLE ban_picks
+ADD COLUMN IF NOT EXISTS turn_time_limit_seconds INT NOT NULL DEFAULT 30;
+
+ALTER TABLE ban_picks
+ADD COLUMN IF NOT EXISTS turn_started_at TIMESTAMPTZ NULL;
 
 CREATE INDEX IF NOT EXISTS idx_ban_picks_match_id ON ban_picks(match_id);
 CREATE INDEX IF NOT EXISTS idx_ban_pick_actions_ban_pick_id ON ban_pick_actions(ban_pick_id);
