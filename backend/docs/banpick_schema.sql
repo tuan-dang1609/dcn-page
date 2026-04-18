@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS ban_pick_actions (
 ALTER TABLE matches
 ADD COLUMN IF NOT EXISTS ban_pick_id BIGINT NULL;
 
+ALTER TABLE matches
+ADD COLUMN IF NOT EXISTS room_id TEXT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_ban_picks_match_id ON ban_picks(match_id);
 CREATE INDEX IF NOT EXISTS idx_ban_pick_actions_ban_pick_id ON ban_pick_actions(ban_pick_id);
 

@@ -36,6 +36,7 @@ export interface RoundBanPickPayload {
   id: number;
   round_slug: string;
   match_id: number;
+  room_id: string | null;
   tournament_id: number | null;
   round_number: number | null;
   match_no: number | null;

@@ -77,6 +77,7 @@ export interface Match {
   bracket_id: number;
   round_number?: number;
   match_no?: number;
+  room_id?: string | null;
   next_match_id?: number | null;
   next_slot?: "A" | "B" | string | null;
   date_scheduled?: string | null;

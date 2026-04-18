@@ -1,12 +1,15 @@
-import { Navigate, useParams, Link, useOutletContext } from "react-router-dom";
+import { useParams, Link, useOutletContext } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import axios from "axios";
 import type { MatchDetail, RoundHistoryEntry } from "@/types/matchDetail";
 import { useAuth, type User as AuthUser } from "@/contexts/AuthContext";
-import { getRoundBanPick, type RoundBanPickPayload } from "@/api/banpick";
+import type { RoundBanPickPayload } from "@/api/banpick";
 import { API_BASE } from "@/lib/apiBase";
+import { MapCard } from "@/components/MapCard";
+import { SideSelectModal } from "@/components/SideSelectModal";
+import { useRoundBanPickSocket } from "@/hooks/useRoundBanPickSocket";
 import {
   getValorantMatchData,
   type ValorantApiMatchData,
@@ -1393,6 +1396,368 @@ const BanPickTimelinePanel = ({
   );
 };
 
+type BanPickLobbyMapItem = {
+  key: string;
+  mapId: string;
+  mapName: string;
+  imageUrl: string;
+  type: "PICK" | "DECIDER";
+};
+
+const buildBanPickLobbyMaps = (
+  payload?: RoundBanPickPayload | null,
+): BanPickLobbyMapItem[] => {
+  if (!payload?.state) return [];
+
+  const mapMetaByCode = new Map(
+    (payload.map_pool ?? []).map((mapItem) => [mapItem.map_code, mapItem]),
+  );
+
+  const mapStateById = new Map(
+    (payload.state.maps ?? []).map((mapState) => [mapState.mapId, mapState]),
+  );
+
+  const pickedByOrder = (payload.state.actionLog ?? [])
+    .slice()
+    .sort((a, b) => Number(a.step ?? 0) - Number(b.step ?? 0))
+    .filter((entry) => String(entry.action ?? "").toLowerCase() === "pick")
+    .map((entry, index) => {
+      const mapState = mapStateById.get(entry.mapId);
+      const mapMeta = mapMetaByCode.get(entry.mapId);
+
+      return {
+        key: `picked-${entry.step}-${entry.mapId}-${index}`,
+        mapId: entry.mapId,
+        mapName: mapMeta?.map_name ?? entry.mapId,
+        imageUrl: mapMeta?.image_url ?? "",
+        type: mapState?.status === "decider" ? "DECIDER" : "PICK",
+      } satisfies BanPickLobbyMapItem;
+    });
+
+  const seen = new Set(pickedByOrder.map((item) => item.mapId));
+
+  const leftovers = (payload.state.maps ?? [])
+    .filter(
+      (mapState) =>
+        (mapState.status === "picked" || mapState.status === "decider") &&
+        !seen.has(mapState.mapId),
+    )
+    .map((mapState, index) => {
+      const mapMeta = mapMetaByCode.get(mapState.mapId);
+
+      return {
+        key: `leftover-${mapState.mapId}-${index}`,
+        mapId: mapState.mapId,
+        mapName: mapMeta?.map_name ?? mapState.mapId,
+        imageUrl: mapMeta?.image_url ?? "",
+        type: mapState.status === "decider" ? "DECIDER" : "PICK",
+      } satisfies BanPickLobbyMapItem;
+    });
+
+  return [...pickedByOrder, ...leftovers];
+};
+
+const BanPickLobbyPanel = ({
+  roundSlug,
+  matchId,
+  token,
+  team1,
+  team2,
+  seriesScoreA,
+  seriesScoreB,
+  mapCursorFromGameIds,
+  roomId,
+}: {
+  roundSlug: string;
+  matchId: number | null;
+  token?: string | null;
+  team1: MatchDetail["team1"];
+  team2: MatchDetail["team2"];
+  seriesScoreA: number;
+  seriesScoreB: number;
+  mapCursorFromGameIds: number;
+  roomId?: string | null;
+}) => {
+  const {
+    session,
+    isLoading,
+    error,
+    viewerTeamSlot,
+    canAct,
+    selectMap,
+    confirmAction,
+    selectSide,
+  } = useRoundBanPickSocket({
+    roundSlug,
+    matchId,
+    token,
+  });
+
+  const banPick = session?.state ?? null;
+
+  const mapByCode = useMemo(() => {
+    const entries = (session?.map_pool ?? []).map((item) => [
+      item.map_code,
+      item,
+    ]);
+    return Object.fromEntries(entries);
+  }, [session?.map_pool]);
+
+  const lobbyMaps = useMemo(() => buildBanPickLobbyMaps(session), [session]);
+
+  const currentAction = session?.current_action ?? null;
+
+  const isMyTurn =
+    Boolean(viewerTeamSlot) &&
+    ((banPick?.phase === "ban_pick" && currentAction?.team === viewerTeamSlot) ||
+      (banPick?.phase === "side_select" &&
+        banPick?.sideSelectTeam === viewerTeamSlot));
+
+  const progressByScore = Math.max(
+    0,
+    (toNumber(seriesScoreA) ?? 0) + (toNumber(seriesScoreB) ?? 0),
+  );
+  const progressByMatchIds = Math.max(0, toNumber(mapCursorFromGameIds) ?? 0);
+  const nextMapCursor = Math.max(progressByScore, progressByMatchIds);
+
+  const currentMapIndex =
+    lobbyMaps.length > 0
+      ? Math.min(nextMapCursor, Math.max(lobbyMaps.length - 1, 0))
+      : -1;
+
+  const currentMap = currentMapIndex >= 0 ? lobbyMaps[currentMapIndex] : null;
+
+  const sideSelectMap =
+    banPick?.sideSelectMapId && mapByCode[banPick.sideSelectMapId]
+      ? mapByCode[banPick.sideSelectMapId]
+      : null;
+
+  const sideSelectTeamName =
+    banPick?.sideSelectTeam && banPick?.teamNames
+      ? banPick.teamNames[banPick.sideSelectTeam]
+      : "";
+
+  const draftComplete = banPick?.phase === "complete";
+  const effectiveRoomId =
+    String(session?.room_id ?? roomId ?? "").trim() || null;
+
+  if (!matchId) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-2xl border border-border/70 bg-[#0f1115] text-foreground overflow-hidden">
+      <div className="border-b border-border/70 px-4 md:px-6 py-3.5 bg-[#14181d]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-primary">
+              Match Lobby
+            </p>
+            <p className="text-[11px] text-[#EEEEEE] mt-0.5">
+              {roundSlug.toUpperCase()}
+            </p>
+          </div>
+
+          <div className="text-right">
+            {draftComplete ? (
+              <span className="inline-flex items-center rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-300">
+                Draft Complete
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-300">
+                {currentAction?.type === "pick" ? "Pick Turn" : "Ban Turn"}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {draftComplete && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-md border border-border/70 bg-black/25 px-3 py-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
+              Room ID
+            </span>
+            <span className="text-[11px] font-black tracking-[0.1em] text-primary">
+              {effectiveRoomId ?? "TBD"}
+            </span>
+          </div>
+        )}
+
+        {error && (
+          <p className="mt-3 text-[11px] text-rose-300">{error}</p>
+        )}
+      </div>
+
+      <div className="px-4 md:px-6 py-4 grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_220px] gap-4 lg:gap-5 items-start">
+        <div className="rounded-xl border border-border/60 bg-black/20 px-4 py-4">
+          <div className="flex items-center gap-3">
+            <img src={team1.logo} alt={team1.tag} className="w-11 h-11 rounded-md" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
+                Team A
+              </p>
+              <p className="truncate text-[13px] font-black uppercase tracking-wide text-foreground">
+                {team1.name}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-black tabular-nums text-rose-300">
+            {seriesScoreA}
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {currentMap && (
+            <div className="relative rounded-xl overflow-hidden border border-primary/30 h-24">
+              <img
+                src={currentMap.imageUrl}
+                alt={currentMap.mapName}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-linear-to-r from-black/75 via-black/35 to-black/75" />
+              <div className="relative z-10 h-full px-4 py-3 flex items-end justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-primary font-black">
+                    Current Map
+                  </p>
+                  <p className="truncate text-lg font-black uppercase tracking-wide text-white">
+                    {currentMap.mapName}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-md border border-primary/40 bg-black/40 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-primary">
+                  Map {currentMapIndex + 1}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {lobbyMaps.map((item, index) => {
+              const isCurrent = index === currentMapIndex;
+
+              return (
+                <article
+                  key={item.key}
+                  className={`relative h-20 overflow-hidden rounded-lg border ${
+                    isCurrent
+                      ? "border-primary/70 ring-1 ring-primary/40"
+                      : "border-border/60"
+                  }`}
+                >
+                  <img
+                    src={item.imageUrl}
+                    alt={item.mapName}
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent" />
+                  <div className="relative z-10 h-full px-3 py-2 flex flex-col justify-end">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
+                      Map {index + 1}
+                    </p>
+                    <p className="truncate text-[13px] font-black uppercase tracking-wide text-white">
+                      {item.mapName}
+                    </p>
+                  </div>
+                </article>
+              );
+            })}
+
+            {!lobbyMaps.length && (
+              <div className="rounded-lg border border-border/60 bg-black/20 px-3 py-3 text-[11px] text-muted-foreground sm:col-span-2 xl:col-span-3">
+                Chưa có map được pick/decider.
+              </div>
+            )}
+          </div>
+
+          {banPick && (
+            <div className="space-y-3 rounded-xl border border-border/60 bg-black/20 p-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {banPick.maps.map((mapState) => (
+                  <MapCard
+                    key={mapState.mapId}
+                    mapState={mapState}
+                    isSelected={banPick.selectedMapId === mapState.mapId}
+                    onSelect={selectMap}
+                    disabled={banPick.phase !== "ban_pick" || !isMyTurn}
+                    teamNames={banPick.teamNames}
+                    mapMeta={mapByCode[mapState.mapId]}
+                  />
+                ))}
+              </div>
+
+              {!canAct && (
+                <p className="text-[11px] text-muted-foreground">
+                  Chế độ xem: chỉ thành viên của 2 team mới thao tác ban/pick.
+                </p>
+              )}
+
+              {canAct && !isMyTurn && !draftComplete && (
+                <p className="text-[11px] text-amber-300">
+                  Chưa tới lượt team của bạn.
+                </p>
+              )}
+
+              {banPick.phase === "ban_pick" && canAct && isMyTurn && (
+                <button
+                  onClick={() => void confirmAction()}
+                  disabled={!banPick.selectedMapId}
+                  className={`
+                    w-full rounded-lg py-2.5 text-sm font-black uppercase tracking-[0.14em] transition-all
+                    ${
+                      banPick.selectedMapId
+                        ? currentAction?.type === "ban"
+                          ? "bg-rose-500 text-rose-50 hover:brightness-110"
+                          : "bg-emerald-500 text-emerald-50 hover:brightness-110"
+                        : "bg-val-disabled text-muted-foreground cursor-not-allowed"
+                    }
+                  `}
+                >
+                  {banPick.selectedMapId
+                    ? `Lock ${currentAction?.type === "ban" ? "Ban" : "Pick"}`
+                    : "Select Map"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-border/60 bg-black/20 px-4 py-4">
+          <div className="flex items-center gap-3">
+            <img src={team2.logo} alt={team2.tag} className="w-11 h-11 rounded-md" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
+                Team B
+              </p>
+              <p className="truncate text-[13px] font-black uppercase tracking-wide text-foreground">
+                {team2.name}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-2xl font-black tabular-nums text-emerald-300">
+            {seriesScoreB}
+          </p>
+        </div>
+      </div>
+
+      {isLoading && !banPick && (
+        <div className="border-t border-border/70 px-4 md:px-6 py-3 text-[11px] text-muted-foreground">
+          Đang tải ban/pick lobby...
+        </div>
+      )}
+
+      {banPick?.phase === "side_select" && sideSelectMap && (
+        <SideSelectModal
+          mapName={sideSelectMap.map_name}
+          teamName={sideSelectTeamName}
+          onSelect={(side) => {
+            if (!isMyTurn) return;
+            void selectSide(side);
+          }}
+        />
+      )}
+    </section>
+  );
+};
+
 /* ── FPS Stat Table ── */
 const FPSStatTable = ({ match }: { match: MatchDetail }) => {
   const [activeTab, setActiveTab] = useState(0);
@@ -1875,7 +2240,7 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
 
 /* ── Main Page ── */
 const MatchDetailPage = () => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { tournament } = useOutletContext<{
     tournament?: TournamentBySlugResponse["info"];
   }>();
@@ -1898,6 +2263,7 @@ const MatchDetailPage = () => {
       enabled: Boolean(tournamentId),
       staleTime: 1000 * 60,
       refetchOnWindowFocus: false,
+      refetchInterval: 5000,
       queryFn: async () => {
         const bracketsResponse = await getBracketsByTournamentId(tournamentId!);
         const bracketIds = (bracketsResponse.data?.data ?? [])
@@ -2113,7 +2479,6 @@ const MatchDetailPage = () => {
     matchNo: toNumber(currentMatchRow?.match_no),
     matchId: toNumber(currentMatchRow?.id) ?? numId,
   });
-  const banPickLink = `/round/${roundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`;
 
   const baseMatch = useMemo(() => {
     if (!currentMatchRow) return null;
@@ -2124,15 +2489,12 @@ const MatchDetailPage = () => {
     });
   }, [currentMatchRow, tournament, normalizedRouteGame]);
 
-  const {
-    data: matchGameIds,
-    isLoading: isMatchGameIdsLoading,
-    isError: isMatchGameIdsError,
-  } = useQuery({
+  const { data: matchGameIds } = useQuery({
     queryKey: ["match-game-ids", numId],
     enabled: Boolean(numId),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
+    refetchInterval: 5000,
     queryFn: async () => {
       const response = await getMatchGameIds(numId!);
       return response.data?.data ?? [];
@@ -2175,11 +2537,6 @@ const MatchDetailPage = () => {
     return undefined;
   }, [matchGameIds]);
 
-  const hasValorantMatchId = useMemo(
-    () => Boolean(valorantApiMatchIds && valorantApiMatchIds.length > 0),
-    [valorantApiMatchIds],
-  );
-
   const tftApiMatchIds = useMemo(() => {
     if (preferredProvider !== "tft") {
       return undefined;
@@ -2220,30 +2577,6 @@ const MatchDetailPage = () => {
       return responses.map((response) => response.data);
     },
   });
-
-  const { data: roundBanPickSession } = useQuery({
-    queryKey: ["round-banpick-session", roundSlug, numId],
-    enabled: Boolean(
-      roundSlug &&
-      numId &&
-      baseMatch?.gameType === "valorant" &&
-      hasValorantMatchId,
-    ),
-    staleTime: 1000 * 60,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const response = await getRoundBanPick(roundSlug, {
-        match_id: numId ?? undefined,
-      });
-
-      return response.data?.data ?? null;
-    },
-  });
-
-  const banPickTimeline = useMemo(
-    () => buildBanPickTimeline(roundBanPickSession),
-    [roundBanPickSession],
-  );
 
   const match = useMemo(() => {
     if (!baseMatch) return null;
@@ -2287,22 +2620,6 @@ const MatchDetailPage = () => {
   ]);
 
   if (!match) {
-    const canOpenValorantBanPick =
-      normalizedRouteGame === "val" && Boolean(slug) && Boolean(numId);
-
-    const fallbackRoundSlug = canOpenValorantBanPick
-      ? buildRoundSlug({
-          tournamentSlug: slug,
-          roundNumber: null,
-          matchNo: numId,
-          matchId: numId,
-        })
-      : "";
-
-    const fallbackBanPickLink = canOpenValorantBanPick
-      ? `/round/${fallbackRoundSlug}?matchId=${encodeURIComponent(String(numId ?? ""))}`
-      : "";
-
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -2312,19 +2629,8 @@ const MatchDetailPage = () => {
             </h2>
           ) : (
             <h2 className="text-2xl font-bold text-foreground">
-              {canOpenValorantBanPick
-                ? "Mở Ban/Pick trận Valorant"
-                : "Không tìm thấy trận đấu"}
+              Không tìm thấy trận đấu
             </h2>
-          )}
-
-          {!isMatchListLoading && canOpenValorantBanPick && (
-            <Link
-              to={fallbackBanPickLink}
-              className="inline-flex h-9 items-center rounded-md border border-primary/60 px-4 text-xs font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10 transition-colors"
-            >
-              Mở Ban/Pick
-            </Link>
           )}
 
           <Link
@@ -2336,17 +2642,6 @@ const MatchDetailPage = () => {
         </div>
       </div>
     );
-  }
-
-  const shouldRedirectToBanPick =
-    match.gameType === "valorant" &&
-    Boolean(numId) &&
-    !isMatchGameIdsLoading &&
-    !isMatchGameIdsError &&
-    !hasValorantMatchId;
-
-  if (shouldRedirectToBanPick) {
-    return <Navigate to={banPickLink} replace />;
   }
 
   const currentIndex = sortedMatches.findIndex(
@@ -2375,7 +2670,22 @@ const MatchDetailPage = () => {
     match.team1Roster.players.length > 0 ||
     match.team2Roster.players.length > 0;
   const hasMapData = Boolean(match.maps?.length);
-  const hasBanPickTimeline = banPickTimeline.length > 0;
+  const hasEmbeddedLobby = match.gameType === "valorant" && Boolean(numId);
+
+  const mapCursorFromGameIds = (() => {
+    const items = matchGameIds ?? [];
+    if (!items.length) return 0;
+
+    const maxGameNo = items.reduce(
+      (max, item) => Math.max(max, toNumber(item.game_no) ?? 0),
+      0,
+    );
+
+    if (maxGameNo > 0) return maxGameNo;
+    return items.length;
+  })();
+
+  const matchRoomId = String(currentMatchRow?.room_id ?? "").trim() || null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -2538,48 +2848,34 @@ const MatchDetailPage = () => {
         </div>
       </div>
 
-      {/* ── Map Scores + Ban/Pick timeline ── */}
-      {(hasMapData || hasBanPickTimeline) && (
-        <div className="">
-          <div className="mx-auto px-4 md:px-8 py-6">
-            <div
-              className={`grid gap-4 ${
-                hasBanPickTimeline
-                  ? "grid-cols-1 xl:grid-cols-[minmax(280px,1fr)_minmax(0,1.6fr)]"
-                  : "grid-cols-1"
-              }`}
-            >
-              {hasBanPickTimeline && (
-                <BanPickTimelinePanel
-                  timeline={banPickTimeline}
-                  team1={match.team1}
-                  team2={match.team2}
-                />
-              )}
+      {hasEmbeddedLobby && (
+        <div className="mx-auto px-4 md:px-8 py-6">
+          <BanPickLobbyPanel
+            roundSlug={roundSlug}
+            matchId={numId}
+            token={token}
+            team1={match.team1}
+            team2={match.team2}
+            seriesScoreA={match.team1.score}
+            seriesScoreB={match.team2.score}
+            mapCursorFromGameIds={mapCursorFromGameIds}
+            roomId={matchRoomId}
+          />
+        </div>
+      )}
 
-              <div className="space-y-2.5">
-                {match.maps?.map((map, i) => (
-                  <MapScoreRow
-                    key={i}
-                    map={map}
-                    team1={match.team1}
-                    team2={match.team2}
-                  />
-                ))}
-
-                {!hasMapData && (
-                  <div className="rounded-xl border border-border/60 bg-card/30 px-4 py-3 text-xs text-muted-foreground">
-                    Chưa có dữ liệu tỉ số từng map.
-                  </div>
-                )}
-              </div>
-            </div>
+      {hasMapData && (
+        <div className="mx-auto px-4 md:px-8 py-2">
+          <div className="space-y-2.5">
+            {match.maps?.map((map, i) => (
+              <MapScoreRow key={i} map={map} team1={match.team1} team2={match.team2} />
+            ))}
           </div>
         </div>
       )}
 
       <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
-        {!hasRosterData && !hasMapData && !hasBanPickTimeline ? (
+        {!hasRosterData && !hasMapData && !hasEmbeddedLobby ? (
           <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-sm text-[#EEEEEE]">
             Chua co du lieu chi tiet cho tran dau nay.
           </section>

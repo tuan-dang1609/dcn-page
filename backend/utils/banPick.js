@@ -436,6 +436,13 @@ export const ensureBanPickTables = async () => {
 
     await pool.query(
       `
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS room_id TEXT NULL
+    `,
+    );
+
+    await pool.query(
+      `
     CREATE INDEX IF NOT EXISTS idx_ban_picks_match_id ON ban_picks(match_id)
     `,
     );
@@ -525,6 +532,7 @@ const getMatchContext = async (matchId) => {
            m.round_number,
            m.match_no,
            m.ban_pick_id,
+          m.room_id,
            COALESCE((to_jsonb(m)->>'best_of')::int, 3) AS best_of,
            t.slug AS tournament_slug,
            ta.name AS team_a_name,
@@ -549,6 +557,7 @@ const getBanPickRowBySlug = async (roundSlug) => {
            m.round_number,
            m.match_no,
            m.date_scheduled,
+          m.room_id,
            m.team_a_id AS match_team_a_id,
            m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
@@ -575,6 +584,7 @@ const getBanPickRowByMatchId = async (matchId) => {
            m.round_number,
            m.match_no,
            m.date_scheduled,
+          m.room_id,
            m.team_a_id AS match_team_a_id,
            m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
@@ -865,6 +875,7 @@ export const toBanPickPayload = (session, userTeamSlot = null) => {
     side_select_map_id: state.sideSelectMapId,
     side_select_team: state.sideSelectTeam,
     current_action: currentAction,
+    room_id: String(session.room_id ?? "").trim() || null,
     team_a: {
       id: toNumber(session.team_a_id),
       name: state.teamNames.team1,

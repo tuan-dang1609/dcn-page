@@ -304,6 +304,7 @@ export const updateMatchSchedule = (
 export interface MatchGameIdRecord {
   id: number;
   match_id: number;
+  room_id?: string | null;
   game_no?: number | null;
   game_id?: number | null;
   game_short_name?: string | null;
@@ -323,6 +324,7 @@ export interface UpsertMatchGameIdPayload {
   game_id?: number;
   external_provider?: string | null;
   game_no?: number;
+  room_id?: string | null;
 }
 
 export interface UpdateMatchGameIdPayload {
@@ -331,6 +333,7 @@ export interface UpdateMatchGameIdPayload {
   game_id?: number;
   external_provider?: string | null;
   game_no?: number;
+  room_id?: string | null;
 }
 
 export const getMatchGameIds = (matchId: number | string) =>
