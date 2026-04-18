@@ -301,6 +301,22 @@ export const updateMatchSchedule = (
     getAuthConfig(),
   );
 
+export const updateMatchRoomId = (
+  matchId: number | string,
+  payload: { room_id: string | null },
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/matches/matches/${matchId}/room-id`,
+    payload,
+    getAuthConfig(),
+  );
+
+export const deleteMatchBanPick = (matchId: number | string) =>
+  axios.delete(
+    `${tournamentsBaseUrl}/matches/matches/${matchId}/ban-pick`,
+    getAuthConfig(),
+  );
+
 export interface MatchGameIdRecord {
   id: number;
   match_id: number;

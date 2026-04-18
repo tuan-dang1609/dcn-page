@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
 import logger from "../../utils/logger.js";
+import { deleteBanPickSession } from "../../utils/banPick.js";
 import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
 
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
@@ -28,7 +29,7 @@ const gameProviderRouteTemplates = {
 
 let matchGamesInfoIdColumnCache = null;
 let matchGamesHasGameIdColumnCache = null;
-let ensureMatchesColumnsPromise = null;
+let ensureMatchRoomIdColumnPromise = null;
 
 const toNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -36,6 +37,30 @@ const toNumber = (value) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 };
+
+const ensureMatchRoomIdColumn = async () => {
+  if (ensureMatchRoomIdColumnPromise) {
+    return ensureMatchRoomIdColumnPromise;
+  }
+
+  ensureMatchRoomIdColumnPromise = pool
+    .query(
+      `
+      ALTER TABLE matches
+      ADD COLUMN IF NOT EXISTS room_id TEXT NULL
+      `,
+    )
+    .catch((error) => {
+      ensureMatchRoomIdColumnPromise = null;
+      throw error;
+    });
+
+  return ensureMatchRoomIdColumnPromise;
+};
+
+matchRouter.onBeforeHandle(async () => {
+  await ensureMatchRoomIdColumn();
+});
 
 const normalizePayloadArray = (body, key) => {
   if (Array.isArray(body)) return body;
@@ -73,30 +98,6 @@ const ensureTournamentManagePermission = async (user, tournamentId, set) => {
 
   return { ok: true };
 };
-
-const ensureMatchesColumns = async () => {
-  if (ensureMatchesColumnsPromise) {
-    return ensureMatchesColumnsPromise;
-  }
-
-  ensureMatchesColumnsPromise = (async () => {
-    await pool.query(
-      `
-      ALTER TABLE matches
-      ADD COLUMN IF NOT EXISTS room_id TEXT NULL
-      `,
-    );
-  })().catch((error) => {
-    ensureMatchesColumnsPromise = null;
-    throw error;
-  });
-
-  return ensureMatchesColumnsPromise;
-};
-
-matchRouter.onBeforeHandle(async () => {
-  await ensureMatchesColumns();
-});
 
 const getMatchById = async (matchId) => {
   const { rows } = await pool.query("SELECT * FROM matches WHERE id = $1", [
@@ -540,6 +541,11 @@ matchRouter.get(
              m.match_no,
               m.room_id,
               m.date_scheduled,
+              (to_jsonb(m)->>'room_id') AS room_id,
+              t.slug AS tournament_slug,
+              g.short_name AS tournament_game_short_name,
+              m.ban_pick_id,
+              bp.turn_time_limit_seconds AS ban_pick_countdown_seconds,
              m.team_a_id,
              m.team_b_id,
               m.next_match_id,
@@ -565,6 +571,10 @@ matchRouter.get(
                'team_color_hex', t2.team_color_hex
              ) AS team_b
       FROM matches m
+      LEFT JOIN brackets b ON b.id = m.bracket_id
+      LEFT JOIN tournaments t ON t.id = b.tournament_id
+      LEFT JOIN games g ON g.id = t.game_id
+      LEFT JOIN ban_picks bp ON bp.match_id = m.id
       LEFT JOIN teams t1 ON t1.id = m.team_a_id
       LEFT JOIN teams t2 ON t2.id = m.team_b_id
       WHERE m.bracket_id = $1
@@ -1146,6 +1156,118 @@ matchRouter.patch(
   {
     tags: [TAG],
     summary: "Update match schedule datetime",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.patch(
+  "/matches/:match_id/room-id",
+  async ({ params, body, set, user }) => {
+    await ensureMatchRoomIdColumn();
+
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchById(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    if (body?.room_id === undefined) {
+      set.status = 400;
+      return { error: "room_id là bắt buộc" };
+    }
+
+    const normalizedRoomIdRaw =
+      body?.room_id === null ? "" : String(body.room_id).trim();
+    const nextRoomId = normalizedRoomIdRaw || null;
+
+    if (nextRoomId && nextRoomId.length > 255) {
+      set.status = 400;
+      return { error: "room_id không được vượt quá 255 ký tự" };
+    }
+
+    const { rows } = await pool.query(
+      `
+      UPDATE matches
+      SET room_id = $1
+      WHERE id = $2
+      RETURNING *
+      `,
+      [nextRoomId, matchId],
+    );
+
+    set.status = 200;
+    return {
+      message: "Cập nhật room_id thành công",
+      data: {
+        match: rows[0] ?? null,
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Update match room_id",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.delete(
+  "/matches/:match_id/ban-pick",
+  async ({ params, set, user }) => {
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchById(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const result = await deleteBanPickSession({
+      matchId,
+    });
+
+    if (!result.deleted) {
+      set.status = 200;
+      return {
+        message: "Không có phiên ban/pick để xóa",
+        data: null,
+      };
+    }
+
+    set.status = 200;
+    return {
+      message: "Đã xóa phiên ban/pick",
+      data: result.session,
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Delete ban/pick by match_id",
     security: [{ bearerAuth: [] }],
   },
 );

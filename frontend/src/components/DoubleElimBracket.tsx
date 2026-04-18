@@ -57,6 +57,7 @@ const PickemContext = createContext<PickemContextValue>({});
 type DisplayMatch = {
   id: number;
   routeMatchId?: number;
+  status?: string;
   round: number;
   matchNo: number;
   nextMatchId: number | null;
@@ -488,6 +489,11 @@ const MatchCard = ({
   };
 
   const canPick = Boolean(onPickTeam && realMatchId);
+  const isMatchCompleted = ["complete", "completed"].includes(
+    String(match.status ?? "")
+      .trim()
+      .toLowerCase(),
+  );
 
   const content = (
     <>
@@ -523,7 +529,7 @@ const MatchCard = ({
 
   const faded = hasHover && !isInJourney;
 
-  if (!match.routeMatchId || disableMatchLink || canPick) {
+  if (!match.routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
         className={`block neo-box-sm overflow-hidden transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
@@ -922,6 +928,7 @@ const DoubleElimBracket = ({
         return {
           id: Number(match.id),
           routeMatchId: Number(match.id),
+          status: String(match.status ?? "").trim(),
           round: Number(match.round_number ?? 0),
           matchNo: Number(match.match_no ?? 0),
           nextMatchId: toNumber(match.next_match_id),

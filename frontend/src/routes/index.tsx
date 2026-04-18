@@ -38,6 +38,7 @@ const routes = [
       { path: "participants", element: withSuspense(<PlayersPage />) },
       { path: "leaderboard", element: withSuspense(<LeaderboardPage />) },
       { path: "rule", element: withSuspense(<RulePage />) },
+      { path: "lobby/:id", element: withSuspense(<MatchDetailPage />) },
       { path: "match/:id", element: withSuspense(<MatchDetailPage />) },
     ],
   },

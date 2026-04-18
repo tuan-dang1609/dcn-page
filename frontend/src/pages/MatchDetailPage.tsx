@@ -1,5 +1,5 @@
-import { useParams, Link, useOutletContext } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useParams, Link, useOutletContext, useLocation } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import axios from "axios";
@@ -511,6 +511,8 @@ const buildMatchDetailFromApi = ({
       String(tournament?.date_start ?? "").slice(0, 10) ||
       new Date().toISOString().slice(0, 10),
     gameType,
+    status: String(match.status ?? "").trim() || undefined,
+    roomId: String(match.room_id ?? "").trim() || null,
     team1: {
       name: team1Name,
       tag: team1Tag,
@@ -568,6 +570,7 @@ const toTeamPlayerStat = (
 
   return {
     name: normalizedNickname || normalizedRiot || `Player ${fallbackIndex + 1}`,
+    riotAccount: normalizedRiot || undefined,
     icon: `https://placehold.co/24x24/111827/ffffff?text=${fallbackIndex + 1}`,
     avatar: String(player?.profile_picture ?? "").trim() || undefined,
   };
@@ -639,6 +642,7 @@ const mergeTftApiIntoMatch = (
 
       return {
         name,
+        riotAccount: riotAccount || undefined,
         icon:
           linkedAvatar ||
           `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
@@ -956,9 +960,11 @@ const buildValorantRosterFromApi = (
     players
       .reduce(
         (acc, player) => {
-          const riotAccount = normalizeRiotAccount(
-            buildRiotAccount(player.gameName, player.tagLine),
+          const rawRiotAccount = buildRiotAccount(
+            player.gameName,
+            player.tagLine,
           );
+          const riotAccount = normalizeRiotAccount(rawRiotAccount);
           const key =
             riotAccount ||
             `${String(player.gameName ?? "")}-${String(player.tagLine ?? "")}-${String(player.characterName ?? "")}`
@@ -977,6 +983,7 @@ const buildValorantRosterFromApi = (
               String(player.gameName ?? "").trim() ||
               riotAccount ||
               "Unknown",
+            riotAccount: rawRiotAccount || undefined,
             icon: player.imgCharacter,
             avatar: linkedAvatar || undefined,
             role: player.characterName,
@@ -1028,6 +1035,10 @@ const buildValorantRosterFromApi = (
             current.role = player.characterName;
           }
 
+          if (rawRiotAccount) {
+            current.riotAccount = rawRiotAccount;
+          }
+
           acc.set(key, current);
           return acc;
         },
@@ -1035,6 +1046,7 @@ const buildValorantRosterFromApi = (
           string,
           {
             name: string;
+            riotAccount?: string;
             icon?: string;
             avatar?: string;
             role?: string;
@@ -1056,6 +1068,7 @@ const buildValorantRosterFromApi = (
   )
     .map((player) => ({
       name: player.name,
+      riotAccount: player.riotAccount,
       icon: player.icon,
       avatar: player.avatar,
       role: player.role,
@@ -1396,364 +1409,611 @@ const BanPickTimelinePanel = ({
   );
 };
 
-type BanPickLobbyMapItem = {
-  key: string;
-  mapId: string;
-  mapName: string;
-  imageUrl: string;
-  type: "PICK" | "DECIDER";
+const isCompletedMatchStatus = (value?: string | null) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  return normalized === "complete" || normalized === "completed";
 };
 
-const buildBanPickLobbyMaps = (
+const getPickedMapIdsFromSession = (
   payload?: RoundBanPickPayload | null,
-): BanPickLobbyMapItem[] => {
+): string[] => {
   if (!payload?.state) return [];
 
-  const mapMetaByCode = new Map(
-    (payload.map_pool ?? []).map((mapItem) => [mapItem.map_code, mapItem]),
-  );
-
-  const mapStateById = new Map(
-    (payload.state.maps ?? []).map((mapState) => [mapState.mapId, mapState]),
-  );
-
-  const pickedByOrder = (payload.state.actionLog ?? [])
+  const fromActionLog = (payload.state.actionLog ?? [])
+    .filter((entry) =>
+      String(entry.action ?? "")
+        .trim()
+        .toLowerCase()
+        .includes("pick"),
+    )
     .slice()
     .sort((a, b) => Number(a.step ?? 0) - Number(b.step ?? 0))
-    .filter((entry) => String(entry.action ?? "").toLowerCase() === "pick")
-    .map((entry, index) => {
-      const mapState = mapStateById.get(entry.mapId);
-      const mapMeta = mapMetaByCode.get(entry.mapId);
+    .map((entry) => String(entry.mapId ?? "").trim())
+    .filter(Boolean);
 
-      return {
-        key: `picked-${entry.step}-${entry.mapId}-${index}`,
-        mapId: entry.mapId,
-        mapName: mapMeta?.map_name ?? entry.mapId,
-        imageUrl: mapMeta?.image_url ?? "",
-        type: mapState?.status === "decider" ? "DECIDER" : "PICK",
-      } satisfies BanPickLobbyMapItem;
-    });
-
-  const seen = new Set(pickedByOrder.map((item) => item.mapId));
-
-  const leftovers = (payload.state.maps ?? [])
+  const fromState = (payload.state.maps ?? [])
     .filter(
-      (mapState) =>
-        (mapState.status === "picked" || mapState.status === "decider") &&
-        !seen.has(mapState.mapId),
+      (mapState) => mapState.status === "picked" || mapState.status === "decider",
     )
-    .map((mapState, index) => {
-      const mapMeta = mapMetaByCode.get(mapState.mapId);
+    .map((mapState) => String(mapState.mapId ?? "").trim())
+    .filter(Boolean);
 
-      return {
-        key: `leftover-${mapState.mapId}-${index}`,
-        mapId: mapState.mapId,
-        mapName: mapMeta?.map_name ?? mapState.mapId,
-        imageUrl: mapMeta?.image_url ?? "",
-        type: mapState.status === "decider" ? "DECIDER" : "PICK",
-      } satisfies BanPickLobbyMapItem;
-    });
+  return Array.from(new Set([...fromActionLog, ...fromState]));
+};
 
-  return [...pickedByOrder, ...leftovers];
+const TeamLobbyRoster = ({
+  team,
+  players,
+  align,
+  showRiotMeta,
+}: {
+  team: MatchDetail["team1"];
+  players: MatchDetail["team1Roster"]["players"];
+  align: "left" | "right";
+  showRiotMeta: boolean;
+}) => {
+  const safePlayers = players.slice(0, 5);
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-card/30 p-3 space-y-3">
+      <div
+        className={`flex items-center gap-2 ${align === "right" ? "justify-end" : "justify-start"}`}
+      >
+        {align === "right" ? null : (
+          <img src={team.logo} alt={team.tag} className="w-8 h-8 rounded" />
+        )}
+        <div className={align === "right" ? "text-right" : "text-left"}>
+          <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+            Team
+          </p>
+          <p className="text-sm font-black uppercase tracking-wide">{team.name}</p>
+        </div>
+        {align === "right" ? (
+          <img src={team.logo} alt={team.tag} className="w-8 h-8 rounded" />
+        ) : null}
+      </div>
+
+      <div className="space-y-1.5">
+        {safePlayers.length > 0 ? (
+          safePlayers.map((player, index) => {
+            const displayName = String(player.name ?? "").trim();
+            const riotAccount = String(player.riotAccount ?? "").trim();
+            const shouldShowRiot =
+              showRiotMeta &&
+              Boolean(riotAccount) &&
+              riotAccount.toLowerCase() !== displayName.toLowerCase();
+
+            return (
+              <div
+                key={`${team.tag}-${player.name}-${index}`}
+                className={`rounded-md border border-border/50 bg-black/20 px-2 py-1.5 text-xs ${
+                  align === "right" ? "text-right" : "text-left"
+                }`}
+              >
+                <div
+                  className={`flex items-center gap-2 ${
+                    align === "right" ? "flex-row-reverse" : ""
+                  }`}
+                >
+                  {player.avatar ? (
+                    <img
+                      src={player.avatar}
+                      alt={displayName || "player"}
+                      className="w-7 h-7 rounded object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded bg-muted/30 flex items-center justify-center text-[10px] font-bold shrink-0">
+                      {(displayName || "P").charAt(0).toUpperCase()}
+                    </div>
+                  )}
+
+                  <div className="min-w-0">
+                    <p className="truncate text-foreground font-semibold">
+                      {displayName || `Player ${index + 1}`}
+                    </p>
+                    {shouldShowRiot ? (
+                      <p className="truncate text-[10px] text-muted-foreground">
+                        {riotAccount}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="rounded-md border border-dashed border-border/50 bg-black/10 px-2 py-2 text-xs text-muted-foreground">
+            Chưa có roster
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const BanPickLobbyPanel = ({
-  roundSlug,
-  matchId,
-  token,
-  team1,
-  team2,
-  seriesScoreA,
-  seriesScoreB,
-  mapCursorFromGameIds,
-  roomId,
+  match,
+  session,
+  isLoading,
+  error,
+  viewerTeamSlot,
+  canAct,
+  selectMap,
+  confirmAction,
+  selectSide,
 }: {
-  roundSlug: string;
-  matchId: number | null;
-  token?: string | null;
-  team1: MatchDetail["team1"];
-  team2: MatchDetail["team2"];
-  seriesScoreA: number;
-  seriesScoreB: number;
-  mapCursorFromGameIds: number;
-  roomId?: string | null;
+  match: MatchDetail;
+  session: RoundBanPickPayload | null;
+  isLoading: boolean;
+  error: string | null;
+  viewerTeamSlot: "team1" | "team2" | null;
+  canAct: boolean;
+  selectMap: (mapId: string) => void | Promise<void>;
+  confirmAction: () => void | Promise<void>;
+  selectSide: (side: "ATK" | "DEF") => void | Promise<void>;
 }) => {
-  const {
-    session,
-    isLoading,
-    error,
-    viewerTeamSlot,
-    canAct,
-    selectMap,
-    confirmAction,
-    selectSide,
-  } = useRoundBanPickSocket({
-    roundSlug,
-    matchId,
-    token,
-  });
+  if (isLoading && !session) {
+    return (
+      <section className="mx-auto px-4 md:px-8 py-6">
+        <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-6 text-sm text-muted-foreground">
+          Đang tải lobby ban/pick...
+        </div>
+      </section>
+    );
+  }
 
-  const banPick = session?.state ?? null;
+  if (!session?.state) {
+    return (
+      <section className="mx-auto px-4 md:px-8 py-6">
+        <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-6 space-y-2">
+          <p className="text-sm">Chưa có phiên ban/pick cho trận này.</p>
+          {error ? (
+            <p className="text-xs text-rose-300">{error}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Có thể cần setup ban/pick trước ở trang quản trị.
+            </p>
+          )}
+        </div>
+      </section>
+    );
+  }
 
-  const mapByCode = useMemo(() => {
-    const entries = (session?.map_pool ?? []).map((item) => [
-      item.map_code,
-      item,
-    ]);
-    return Object.fromEntries(entries);
-  }, [session?.map_pool]);
-
-  const lobbyMaps = useMemo(() => buildBanPickLobbyMaps(session), [session]);
-
-  const currentAction = session?.current_action ?? null;
-
-  const isMyTurn =
-    Boolean(viewerTeamSlot) &&
-    ((banPick?.phase === "ban_pick" && currentAction?.team === viewerTeamSlot) ||
-      (banPick?.phase === "side_select" &&
-        banPick?.sideSelectTeam === viewerTeamSlot));
-
-  const progressByScore = Math.max(
-    0,
-    (toNumber(seriesScoreA) ?? 0) + (toNumber(seriesScoreB) ?? 0),
+  const banPick = session.state;
+  const mapByCode = Object.fromEntries(
+    (session.map_pool ?? []).map((item) => [item.map_code, item]),
   );
-  const progressByMatchIds = Math.max(0, toNumber(mapCursorFromGameIds) ?? 0);
-  const nextMapCursor = Math.max(progressByScore, progressByMatchIds);
-
-  const currentMapIndex =
-    lobbyMaps.length > 0
-      ? Math.min(nextMapCursor, Math.max(lobbyMaps.length - 1, 0))
-      : -1;
-
-  const currentMap = currentMapIndex >= 0 ? lobbyMaps[currentMapIndex] : null;
-
+  const currentAction = session.current_action;
   const sideSelectMap =
-    banPick?.sideSelectMapId && mapByCode[banPick.sideSelectMapId]
+    banPick.sideSelectMapId && mapByCode[banPick.sideSelectMapId]
       ? mapByCode[banPick.sideSelectMapId]
       : null;
 
-  const sideSelectTeamName =
-    banPick?.sideSelectTeam && banPick?.teamNames
-      ? banPick.teamNames[banPick.sideSelectTeam]
-      : "";
+  const isMyTurn =
+    Boolean(viewerTeamSlot) &&
+    ((banPick.phase === "ban_pick" && currentAction?.team === viewerTeamSlot) ||
+      (banPick.phase === "side_select" &&
+        banPick.sideSelectTeam === viewerTeamSlot));
+  const isRiotGame = ["valorant", "lol", "wildrift", "tft"].includes(
+    match.gameType,
+  );
 
-  const draftComplete = banPick?.phase === "complete";
-  const effectiveRoomId =
-    String(session?.room_id ?? roomId ?? "").trim() || null;
+  const currentActionLabel = (() => {
+    if (banPick.phase === "side_select" && banPick.sideSelectTeam) {
+      return `${banPick.teamNames[banPick.sideSelectTeam]} chọn side`;
+    }
 
-  if (!matchId) {
+    if (!currentAction) return "Đang chờ thao tác";
+
+    return `${banPick.teamNames[currentAction.team]} ${
+      currentAction.type === "ban" ? "ban map" : "pick map"
+    }`;
+  })();
+
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const hasLiveCountdown =
+      banPick.phase !== "complete" && Boolean(session.turn_deadline_at);
+
+    if (!hasLiveCountdown) return;
+
+    const timerId = window.setInterval(() => {
+      setCountdownNow(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [banPick.phase, session.turn_deadline_at]);
+
+  const countdownRemainingSeconds = useMemo(() => {
+    if (banPick.phase === "complete") return null;
+
+    const deadlineRaw = String(session.turn_deadline_at ?? "").trim();
+    if (deadlineRaw) {
+      const deadlineMs = new Date(deadlineRaw).getTime();
+      if (Number.isFinite(deadlineMs)) {
+        return Math.max(0, Math.ceil((deadlineMs - countdownNow) / 1000));
+      }
+    }
+
+    const fallbackSeconds = Number(session.turn_remaining_seconds);
+    if (Number.isFinite(fallbackSeconds) && fallbackSeconds >= 0) {
+      return Math.max(0, Math.floor(fallbackSeconds));
+    }
+
     return null;
-  }
+  }, [
+    banPick.phase,
+    countdownNow,
+    session.turn_deadline_at,
+    session.turn_remaining_seconds,
+  ]);
+
+  const formatCountdown = (totalSeconds: number) => {
+    const safe = Math.max(0, Math.floor(totalSeconds));
+    const minutes = Math.floor(safe / 60);
+    const seconds = safe % 60;
+
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  };
+
+  const mapRows = banPick.maps.map((mapState, index) => {
+    const mapMeta = mapByCode[mapState.mapId];
+    const fallbackMapName = String(mapState.mapId ?? "").trim().toUpperCase();
+
+    return {
+      mapId: mapState.mapId,
+      status: mapState.status,
+      actionBy: mapState.actionBy,
+      actionType: mapState.actionType,
+      mapName: mapMeta?.map_name ?? (fallbackMapName || `MAP ${index + 1}`),
+      imageUrl: mapMeta?.image_url ?? "",
+    };
+  });
+
+  const mapPanelStatusText =
+    banPick.phase === "side_select"
+      ? "Đang chờ chọn side"
+      : isMyTurn
+        ? "Bạn đang vote"
+        : "Đang chờ đối thủ";
 
   return (
-    <section className="rounded-2xl border border-border/70 bg-[#0f1115] text-foreground overflow-hidden">
-      <div className="border-b border-border/70 px-4 md:px-6 py-3.5 bg-[#14181d]">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-primary">
-              Match Lobby
-            </p>
-            <p className="text-[11px] text-[#EEEEEE] mt-0.5">
-              {roundSlug.toUpperCase()}
-            </p>
-          </div>
-
-          <div className="text-right">
-            {draftComplete ? (
-              <span className="inline-flex items-center rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-300">
-                Draft Complete
-              </span>
-            ) : (
-              <span className="inline-flex items-center rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-300">
-                {currentAction?.type === "pick" ? "Pick Turn" : "Ban Turn"}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {draftComplete && (
-          <div className="mt-3 inline-flex items-center gap-2 rounded-md border border-border/70 bg-black/25 px-3 py-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
-              Room ID
-            </span>
-            <span className="text-[11px] font-black tracking-[0.1em] text-primary">
-              {effectiveRoomId ?? "TBD"}
-            </span>
-          </div>
-        )}
-
-        {error && (
-          <p className="mt-3 text-[11px] text-rose-300">{error}</p>
-        )}
-      </div>
-
-      <div className="px-4 md:px-6 py-4 grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_220px] gap-4 lg:gap-5 items-start">
-        <div className="rounded-xl border border-border/60 bg-black/20 px-4 py-4">
-          <div className="flex items-center gap-3">
-            <img src={team1.logo} alt={team1.tag} className="w-11 h-11 rounded-md" />
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
-                Team A
-              </p>
-              <p className="truncate text-[13px] font-black uppercase tracking-wide text-foreground">
-                {team1.name}
-              </p>
-            </div>
-          </div>
-          <p className="mt-3 text-2xl font-black tabular-nums text-rose-300">
-            {seriesScoreA}
+    <section className="mx-auto px-4 md:px-8 py-6 space-y-3">
+      <div className="rounded-2xl border border-border/70 bg-black/25 p-4 md:p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-primary">
+            Lobby Ban/Pick
           </p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-muted-foreground">{currentActionLabel}</p>
+            {countdownRemainingSeconds !== null ? (
+              <span
+                className={`inline-flex h-7 items-center rounded-md border px-2.5 text-xs font-black tabular-nums ${
+                  countdownRemainingSeconds <= 5
+                    ? "border-rose-500/50 bg-rose-500/10 text-rose-300"
+                    : "border-primary/45 bg-primary/10 text-primary"
+                }`}
+              >
+                {formatCountdown(countdownRemainingSeconds)}
+              </span>
+            ) : null}
+          </div>
         </div>
 
-        <div className="space-y-4">
-          {currentMap && (
-            <div className="relative rounded-xl overflow-hidden border border-primary/30 h-24">
-              <img
-                src={currentMap.imageUrl}
-                alt={currentMap.mapName}
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-linear-to-r from-black/75 via-black/35 to-black/75" />
-              <div className="relative z-10 h-full px-4 py-3 flex items-end justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-primary font-black">
-                    Current Map
-                  </p>
-                  <p className="truncate text-lg font-black uppercase tracking-wide text-white">
-                    {currentMap.mapName}
-                  </p>
-                </div>
-                <span className="shrink-0 rounded-md border border-primary/40 bg-black/40 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-primary">
-                  Map {currentMapIndex + 1}
-                </span>
+        {!canAct ? (
+          <div className="rounded-md border border-border/60 bg-black/20 px-3 py-2 text-xs text-muted-foreground">
+            Chế độ xem: chỉ thành viên của 2 team trong trận mới có thể thao tác.
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(200px,1fr)_minmax(0,1.7fr)_minmax(200px,1fr)]">
+          <TeamLobbyRoster
+            team={match.team1}
+            players={match.team1Roster.players}
+            align="left"
+            showRiotMeta={isRiotGame}
+          />
+
+          <div className="space-y-3">
+            <div
+              className={`rounded-lg border px-3 py-3 space-y-2.5 ${
+                isMyTurn
+                  ? "border-primary/45 bg-primary/5"
+                  : "border-border/60 bg-black/20"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-bold uppercase truncate">Map Pool</p>
+                <p className="text-[10px] uppercase tracking-[0.13em] text-muted-foreground">
+                  {mapPanelStatusText}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                {mapRows.map((row) => {
+                  const canSelectMap =
+                    banPick.phase === "ban_pick" &&
+                    isMyTurn &&
+                    row.status === "available";
+                  const isSelected = banPick.selectedMapId === row.mapId;
+
+                  const statusBadge =
+                    row.status === "banned"
+                      ? "BAN"
+                      : row.status === "picked"
+                        ? "PICK"
+                        : row.status === "decider"
+                          ? "DECIDER"
+                          : isSelected
+                            ? "SELECTED"
+                            : null;
+
+                  const statusToneClass =
+                    row.status === "banned"
+                      ? "text-rose-300 border-rose-500/40 bg-rose-500/10"
+                      : row.status === "picked"
+                        ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
+                        : row.status === "decider"
+                          ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
+                          : isSelected
+                            ? "text-amber-300 border-amber-500/40 bg-amber-500/10"
+                            : "text-muted-foreground border-border/50 bg-black/10";
+
+                  const actionMeta =
+                    row.actionBy && row.actionType
+                      ? `${banPick.teamNames[row.actionBy]} ${
+                          row.actionType === "ban" ? "ban" : "pick"
+                        }`
+                      : row.status === "decider"
+                        ? "Map quyết định"
+                        : null;
+
+                  return (
+                    <button
+                      key={row.mapId}
+                      type="button"
+                      onClick={() => {
+                        if (!canSelectMap) return;
+                        void selectMap(row.mapId);
+                      }}
+                      disabled={!canSelectMap}
+                      className={`w-full rounded-md border border-border/50 px-2.5 py-2 flex items-center justify-between gap-2 transition-colors ${
+                        canSelectMap
+                          ? "hover:bg-primary/10 hover:border-primary/40"
+                          : "cursor-default"
+                      }`}
+                    >
+                      <span className="min-w-0 flex items-center gap-2">
+                        {row.imageUrl ? (
+                          <img
+                            src={row.imageUrl}
+                            alt={row.mapName}
+                            className="w-12 h-7 rounded object-cover border border-border/40"
+                          />
+                        ) : (
+                          <span className="w-12 h-7 rounded border border-border/40 bg-black/30" />
+                        )}
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold">
+                            {row.mapName}
+                          </span>
+                          {actionMeta ? (
+                            <span className="block truncate text-[10px] text-muted-foreground text-left">
+                              {actionMeta}
+                            </span>
+                          ) : null}
+                        </span>
+                      </span>
+
+                      {statusBadge ? (
+                        <span
+                          className={`shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-black uppercase tracking-[0.12em] ${statusToneClass}`}
+                        >
+                          {statusBadge}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          )}
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {lobbyMaps.map((item, index) => {
-              const isCurrent = index === currentMapIndex;
-
-              return (
-                <article
-                  key={item.key}
-                  className={`relative h-20 overflow-hidden rounded-lg border ${
-                    isCurrent
-                      ? "border-primary/70 ring-1 ring-primary/40"
-                      : "border-border/60"
-                  }`}
-                >
-                  <img
-                    src={item.imageUrl}
-                    alt={item.mapName}
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent" />
-                  <div className="relative z-10 h-full px-3 py-2 flex flex-col justify-end">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
-                      Map {index + 1}
-                    </p>
-                    <p className="truncate text-[13px] font-black uppercase tracking-wide text-white">
-                      {item.mapName}
-                    </p>
-                  </div>
-                </article>
-              );
-            })}
-
-            {!lobbyMaps.length && (
-              <div className="rounded-lg border border-border/60 bg-black/20 px-3 py-3 text-[11px] text-muted-foreground sm:col-span-2 xl:col-span-3">
-                Chưa có map được pick/decider.
-              </div>
-            )}
-          </div>
-
-          {banPick && (
-            <div className="space-y-3 rounded-xl border border-border/60 bg-black/20 p-3">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {banPick.maps.map((mapState) => (
-                  <MapCard
-                    key={mapState.mapId}
-                    mapState={mapState}
-                    isSelected={banPick.selectedMapId === mapState.mapId}
-                    onSelect={selectMap}
-                    disabled={banPick.phase !== "ban_pick" || !isMyTurn}
-                    teamNames={banPick.teamNames}
-                    mapMeta={mapByCode[mapState.mapId]}
-                  />
-                ))}
-              </div>
-
-              {!canAct && (
-                <p className="text-[11px] text-muted-foreground">
-                  Chế độ xem: chỉ thành viên của 2 team mới thao tác ban/pick.
-                </p>
-              )}
-
-              {canAct && !isMyTurn && !draftComplete && (
-                <p className="text-[11px] text-amber-300">
-                  Chưa tới lượt team của bạn.
-                </p>
-              )}
-
-              {banPick.phase === "ban_pick" && canAct && isMyTurn && (
+            <div className="flex items-center justify-end gap-2">
+              {banPick.phase === "ban_pick" && isMyTurn ? (
                 <button
                   onClick={() => void confirmAction()}
                   disabled={!banPick.selectedMapId}
-                  className={`
-                    w-full rounded-lg py-2.5 text-sm font-black uppercase tracking-[0.14em] transition-all
-                    ${
-                      banPick.selectedMapId
-                        ? currentAction?.type === "ban"
-                          ? "bg-rose-500 text-rose-50 hover:brightness-110"
-                          : "bg-emerald-500 text-emerald-50 hover:brightness-110"
-                        : "bg-val-disabled text-muted-foreground cursor-not-allowed"
-                    }
-                  `}
+                  className={`h-10 rounded-md px-4 text-xs font-black uppercase tracking-[0.12em] transition-colors ${
+                    banPick.selectedMapId
+                      ? currentAction?.type === "ban"
+                        ? "bg-rose-500/90 text-white hover:bg-rose-400"
+                        : "bg-emerald-500/90 text-black hover:bg-emerald-400"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  }`}
                 >
                   {banPick.selectedMapId
                     ? `Lock ${currentAction?.type === "ban" ? "Ban" : "Pick"}`
-                    : "Select Map"}
+                    : "Select map"}
+                </button>
+              ) : (
+                <button
+                  disabled
+                  className="h-10 rounded-md px-4 text-xs font-black uppercase tracking-[0.12em] bg-muted text-muted-foreground cursor-not-allowed"
+                >
+                  {banPick.phase === "side_select"
+                    ? "Đang chọn side"
+                    : "Đang chờ lượt"}
                 </button>
               )}
             </div>
-          )}
+          </div>
+
+          <TeamLobbyRoster
+            team={match.team2}
+            players={match.team2Roster.players}
+            align="right"
+            showRiotMeta={isRiotGame}
+          />
         </div>
 
-        <div className="rounded-xl border border-border/60 bg-black/20 px-4 py-4">
-          <div className="flex items-center gap-3">
-            <img src={team2.logo} alt={team2.tag} className="w-11 h-11 rounded-md" />
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
-                Team B
-              </p>
-              <p className="truncate text-[13px] font-black uppercase tracking-wide text-foreground">
-                {team2.name}
-              </p>
-            </div>
-          </div>
-          <p className="mt-3 text-2xl font-black tabular-nums text-emerald-300">
-            {seriesScoreB}
-          </p>
-        </div>
+        {error ? (
+          <p className="text-xs text-rose-300">{error}</p>
+        ) : null}
       </div>
 
-      {isLoading && !banPick && (
-        <div className="border-t border-border/70 px-4 md:px-6 py-3 text-[11px] text-muted-foreground">
-          Đang tải ban/pick lobby...
-        </div>
-      )}
-
-      {banPick?.phase === "side_select" && sideSelectMap && (
+      {banPick.phase === "side_select" && sideSelectMap ? (
         <SideSelectModal
           mapName={sideSelectMap.map_name}
-          teamName={sideSelectTeamName}
+          teamName={
+            banPick.sideSelectTeam
+              ? banPick.teamNames[banPick.sideSelectTeam]
+              : "Team"
+          }
           onSelect={(side) => {
             if (!isMyTurn) return;
             void selectSide(side);
           }}
         />
-      )}
+      ) : null}
+    </section>
+  );
+};
+
+const PendingMatchOverviewPanel = ({
+  match,
+  session,
+  matchGameIds,
+}: {
+  match: MatchDetail;
+  session: RoundBanPickPayload | null;
+  matchGameIds: MatchGameIdRecord[];
+}) => {
+  const mapNameByCode = new Map(
+    (session?.map_pool ?? []).map((item) => [item.map_code, item.map_name]),
+  );
+
+  const pickedMapNames = getPickedMapIdsFromSession(session).map(
+    (mapId) => mapNameByCode.get(mapId) ?? mapId.toUpperCase(),
+  );
+
+  const sortedGameIds = [...(matchGameIds ?? [])].sort((a, b) => {
+    const gameNoA = toNumber(a.game_no) ?? Number.MAX_SAFE_INTEGER;
+    const gameNoB = toNumber(b.game_no) ?? Number.MAX_SAFE_INTEGER;
+    if (gameNoA !== gameNoB) return gameNoA - gameNoB;
+    return Number(a.id ?? 0) - Number(b.id ?? 0);
+  });
+
+  const filledGameNoSet = new Set<number>();
+  sortedGameIds.forEach((item, index) => {
+    const parsedGameNo = toNumber(item.game_no);
+    const gameNo = parsedGameNo ?? index + 1;
+    const infoGameId = String(item.info_game_id ?? "").trim();
+    if (infoGameId) {
+      filledGameNoSet.add(gameNo);
+    }
+  });
+
+  const highestFilledMapNo =
+    filledGameNoSet.size > 0 ? Math.max(...Array.from(filledGameNoSet)) : 0;
+  const format = session?.state?.format ?? "BO3";
+  const expectedMapCount = format === "BO1" ? 1 : format === "BO5" ? 5 : 3;
+  const totalMaps = Math.max(
+    expectedMapCount,
+    pickedMapNames.length,
+    highestFilledMapNo,
+    1,
+  );
+  const activeMapNo =
+    highestFilledMapNo >= totalMaps
+      ? totalMaps
+      : Math.min(totalMaps, Math.max(1, highestFilledMapNo + 1));
+  const activeMapLabel =
+    pickedMapNames[activeMapNo - 1] ?? `MAP ${activeMapNo}`;
+  const roomId = String(match.roomId ?? session?.room_id ?? "").trim();
+  const isRiotGame = ["valorant", "lol", "wildrift", "tft"].includes(
+    match.gameType,
+  );
+
+  return (
+    <section className="mx-auto px-4 md:px-8 py-6">
+      <div className="rounded-2xl border border-border/70 bg-black/30 p-4 md:p-6 space-y-4">
+        <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+          <span className="text-primary">Quick Match</span>
+          <span>Overview</span>
+          <span>Scoreboard</span>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[minmax(220px,1fr)_minmax(0,1.7fr)_minmax(220px,1fr)]">
+          <TeamLobbyRoster
+            team={match.team1}
+            players={match.team1Roster.players}
+            align="left"
+            showRiotMeta={isRiotGame}
+          />
+
+          <div className="space-y-3">
+            <div className="rounded-md border border-border/70 bg-black/20 px-3 py-2 flex items-center justify-between gap-3">
+              <p className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                Room ID
+              </p>
+              <p className="text-sm font-semibold text-foreground">
+                {roomId || "Chưa gán room_id"}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {Array.from({ length: totalMaps }, (_, index) => {
+                const mapNo = index + 1;
+                const mapLabel = pickedMapNames[index] ?? `MAP ${mapNo}`;
+                const hasMatchId = filledGameNoSet.has(mapNo);
+                const isCurrent = mapNo === activeMapNo;
+
+                return (
+                  <div
+                    key={`map-step-${mapNo}`}
+                    className={`rounded-md border px-3 py-2 flex items-center justify-between gap-3 ${
+                      isCurrent
+                        ? "border-primary/60 bg-primary/10"
+                        : hasMatchId
+                          ? "border-emerald-500/40 bg-emerald-500/10"
+                          : "border-border/60 bg-black/10"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold">
+                      Map {mapNo}: {mapLabel}
+                    </p>
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                      {isCurrent
+                        ? "Current"
+                        : hasMatchId
+                          ? "Done"
+                          : "Upcoming"}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Trạng thái hiện tại: Map {activeMapNo} - {activeMapLabel}. Khi
+              nhập match_id map 1, hệ thống sẽ tự chuyển sang map 2.
+            </p>
+          </div>
+
+          <TeamLobbyRoster
+            team={match.team2}
+            players={match.team2Roster.players}
+            align="right"
+            showRiotMeta={isRiotGame}
+          />
+        </div>
+      </div>
     </section>
   );
 };
@@ -2245,11 +2505,17 @@ const MatchDetailPage = () => {
     tournament?: TournamentBySlugResponse["info"];
   }>();
   const { id, game, slug } = useParams();
+  const location = useLocation();
   const normalizedRouteGame = normalizeGameSlug(game);
+  const isLobbyRoute = /\/lobby\//.test(location.pathname);
   const backTo =
     normalizedRouteGame && slug
       ? `/tournament/${normalizedRouteGame}/${slug}/bracket`
       : "/bracket";
+  const buildLobbyLink = (matchId: number | string) =>
+    normalizedRouteGame && slug
+      ? `/tournament/${normalizedRouteGame}/${slug}/lobby/${matchId}`
+      : "/";
   const buildMatchLink = (matchId: number | string) =>
     normalizedRouteGame && slug
       ? `/tournament/${normalizedRouteGame}/${slug}/match/${matchId}`
@@ -2480,6 +2746,33 @@ const MatchDetailPage = () => {
     matchId: toNumber(currentMatchRow?.id) ?? numId,
   });
 
+  const requestedBanPickFormat = useMemo(() => {
+    const bestOf = toNumber((currentMatchRow as { best_of?: unknown } | null)?.best_of);
+
+    if (bestOf === 1) return "BO1";
+    if (bestOf === 5) return "BO5";
+    if (bestOf === 3) return "BO3";
+
+    return undefined;
+  }, [currentMatchRow]);
+
+  const {
+    session: liveBanPickSession,
+    isLoading: isLobbyBanPickLoading,
+    error: lobbyBanPickError,
+    viewerTeamSlot,
+    canAct,
+    selectMap,
+    confirmAction,
+    selectSide,
+  } = useRoundBanPickSocket({
+    roundSlug:
+      normalizedRouteGame === "val" && Boolean(numId) ? roundSlug : undefined,
+    matchId: numId,
+    format: requestedBanPickFormat,
+    token,
+  });
+
   const baseMatch = useMemo(() => {
     if (!currentMatchRow) return null;
     return buildMatchDetailFromApi({
@@ -2578,6 +2871,10 @@ const MatchDetailPage = () => {
     },
   });
 
+  const banPickTimeline = useMemo(
+    () => buildBanPickTimeline(liveBanPickSession),
+    [liveBanPickSession],
+  );
   const match = useMemo(() => {
     if (!baseMatch) return null;
 
@@ -2670,22 +2967,25 @@ const MatchDetailPage = () => {
     match.team1Roster.players.length > 0 ||
     match.team2Roster.players.length > 0;
   const hasMapData = Boolean(match.maps?.length);
-  const hasEmbeddedLobby = match.gameType === "valorant" && Boolean(numId);
-
-  const mapCursorFromGameIds = (() => {
-    const items = matchGameIds ?? [];
-    if (!items.length) return 0;
-
-    const maxGameNo = items.reduce(
-      (max, item) => Math.max(max, toNumber(item.game_no) ?? 0),
-      0,
-    );
-
-    if (maxGameNo > 0) return maxGameNo;
-    return items.length;
-  })();
-
-  const matchRoomId = String(currentMatchRow?.room_id ?? "").trim() || null;
+  const hasBanPickTimeline = banPickTimeline.length > 0;
+  const isValorantMatch = match.gameType === "valorant";
+  const isMatchCompleted = isCompletedMatchStatus(match.status);
+  const shouldShowLobby = isLobbyRoute && isValorantMatch && !isMatchCompleted;
+  const shouldShowEmbeddedBanPick =
+    shouldShowLobby &&
+    Boolean(liveBanPickSession) &&
+    liveBanPickSession?.phase !== "complete";
+  const shouldShowPendingMatchOverview =
+    shouldShowLobby &&
+    Boolean(liveBanPickSession) &&
+    liveBanPickSession?.phase === "complete";
+  const shouldShowPostMatchData =
+    !isLobbyRoute && (!isValorantMatch || isMatchCompleted);
+  const shouldShowMatchDetailBlockedNotice =
+    !isLobbyRoute && isValorantMatch && !isMatchCompleted;
+  const shouldShowLobbyCompletedNotice =
+    isLobbyRoute && isValorantMatch && isMatchCompleted;
+  const shouldShowLobbyUnsupportedNotice = isLobbyRoute && !isValorantMatch;
 
   return (
     <div className="min-h-screen bg-background">
@@ -2820,9 +3120,11 @@ const MatchDetailPage = () => {
               {match.team1.score}
             </span>
             <div className="text-center leading-tight min-w-[76px] lg:block hidden">
-              <p className="text-[20px] font-black">FIN</p>
+              <p className="text-[20px] font-black">
+                {isMatchCompleted ? "FIN" : "LIVE"}
+              </p>
               <p className="text-[11px] text-[#EEEEEE]">
-                {formatDate(match.date)}
+                {isMatchCompleted ? formatDate(match.date) : "MATCH LOBBY"}
               </p>
             </div>
             <span className="text-2xl md:text-4xl font-black tabular-nums text-emerald-400">
@@ -2848,61 +3150,171 @@ const MatchDetailPage = () => {
         </div>
       </div>
 
-      {hasEmbeddedLobby && (
-        <div className="mx-auto px-4 md:px-8 py-6">
-          <BanPickLobbyPanel
-            roundSlug={roundSlug}
-            matchId={numId}
-            token={token}
-            team1={match.team1}
-            team2={match.team2}
-            seriesScoreA={match.team1.score}
-            seriesScoreB={match.team2.score}
-            mapCursorFromGameIds={mapCursorFromGameIds}
-            roomId={matchRoomId}
-          />
-        </div>
-      )}
-
-      {hasMapData && (
-        <div className="mx-auto px-4 md:px-8 py-2">
-          <div className="space-y-2.5">
-            {match.maps?.map((map, i) => (
-              <MapScoreRow key={i} map={map} team1={match.team1} team2={match.team2} />
-            ))}
+      {shouldShowMatchDetailBlockedNotice ? (
+        <section className="mx-auto px-4 md:px-8 py-6">
+          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-5 space-y-2">
+            <p className="text-sm font-semibold">
+              Trang này chỉ hiển thị dữ liệu sau trận khi match đã completed.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Trận này đang diễn ra hoặc chưa hoàn tất. Vui lòng mở lobby page
+              riêng để theo dõi ban/pick và tiến trình map.
+            </p>
+            {numId ? (
+              <Link
+                to={buildLobbyLink(numId)}
+                className="inline-flex h-9 items-center rounded-md border border-primary/60 px-3 text-xs font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10"
+              >
+                Mở Lobby Page
+              </Link>
+            ) : null}
           </div>
-        </div>
-      )}
+        </section>
+      ) : null}
 
-      <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
-        {!hasRosterData && !hasMapData && !hasEmbeddedLobby ? (
-          <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-sm text-[#EEEEEE]">
-            Chua co du lieu chi tiet cho tran dau nay.
-          </section>
-        ) : (
-          <>
-            <section className="">
-              <RosterSection match={match} />
-            </section>
+      {shouldShowLobbyCompletedNotice ? (
+        <section className="mx-auto px-4 md:px-8 py-6">
+          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-5 space-y-2">
+            <p className="text-sm font-semibold">
+              Match đã completed.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Lobby page chỉ dùng cho giai đoạn trước/trong trận. Dữ liệu chi
+              tiết sau trận nằm ở match detail page.
+            </p>
+            {numId ? (
+              <Link
+                to={buildMatchLink(numId)}
+                className="inline-flex h-9 items-center rounded-md border border-primary/60 px-3 text-xs font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10"
+              >
+                Mở Match Detail
+              </Link>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
-            {(match.gameType === "cs2" || match.gameType === "valorant") && (
-              <section className="rounded-2xl ">
-                <FPSStatTable match={match} />
-              </section>
+      {shouldShowLobbyUnsupportedNotice ? (
+        <section className="mx-auto px-4 md:px-8 py-6">
+          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-5 text-sm text-muted-foreground">
+            Lobby page hiện chỉ áp dụng cho Valorant.
+          </div>
+        </section>
+      ) : null}
+
+      {shouldShowEmbeddedBanPick ? (
+        <BanPickLobbyPanel
+          match={match}
+          session={liveBanPickSession}
+          isLoading={isLobbyBanPickLoading}
+          error={lobbyBanPickError}
+          viewerTeamSlot={viewerTeamSlot}
+          canAct={canAct}
+          selectMap={selectMap}
+          confirmAction={confirmAction}
+          selectSide={selectSide}
+        />
+      ) : null}
+
+      {shouldShowPendingMatchOverview ? (
+        <PendingMatchOverviewPanel
+          match={match}
+          session={liveBanPickSession}
+          matchGameIds={matchGameIds ?? []}
+        />
+      ) : null}
+
+      {shouldShowLobby &&
+      !shouldShowEmbeddedBanPick &&
+      !shouldShowPendingMatchOverview ? (
+        <section className="mx-auto px-4 md:px-8 py-6">
+          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-6 space-y-2">
+            <p className="text-sm">Đang chờ setup ban/pick cho lobby trận này.</p>
+            {lobbyBanPickError ? (
+              <p className="text-xs text-rose-300">{lobbyBanPickError}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Hãy khởi tạo ban/pick ở trang quản trị nếu trận chưa được setup.
+              </p>
             )}
-            {(match.gameType === "lol" || match.gameType === "wildrift") && (
-              <section className="rounded-2xl ">
-                <MOBAStatTable match={match} />
+          </div>
+        </section>
+      ) : null}
+
+      {shouldShowPostMatchData ? (
+        <>
+          {(hasMapData || hasBanPickTimeline) && (
+            <div className="">
+              <div className="mx-auto px-4 md:px-8 py-6">
+                <div
+                  className={`grid gap-4 ${
+                    hasBanPickTimeline
+                      ? "grid-cols-1 xl:grid-cols-[minmax(280px,1fr)_minmax(0,1.6fr)]"
+                      : "grid-cols-1"
+                  }`}
+                >
+                  {hasBanPickTimeline && (
+                    <BanPickTimelinePanel
+                      timeline={banPickTimeline}
+                      team1={match.team1}
+                      team2={match.team2}
+                    />
+                  )}
+
+                  <div className="space-y-2.5">
+                    {match.maps?.map((map, i) => (
+                      <MapScoreRow
+                        key={i}
+                        map={map}
+                        team1={match.team1}
+                        team2={match.team2}
+                      />
+                    ))}
+
+                    {!hasMapData && (
+                      <div className="rounded-xl border border-border/60 bg-card/30 px-4 py-3 text-xs text-muted-foreground">
+                        Chưa có dữ liệu tỉ số từng map.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
+            {!hasRosterData && !hasMapData && !hasBanPickTimeline ? (
+              <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-sm text-[#EEEEEE]">
+                Chua co du lieu chi tiet cho tran dau nay.
               </section>
+            ) : (
+              <>
+                <section className="">
+                  <RosterSection match={match} />
+                </section>
+
+                {(match.gameType === "cs2" ||
+                  match.gameType === "valorant") && (
+                  <section className="rounded-2xl ">
+                    <FPSStatTable match={match} />
+                  </section>
+                )}
+                {(match.gameType === "lol" ||
+                  match.gameType === "wildrift") && (
+                  <section className="rounded-2xl ">
+                    <MOBAStatTable match={match} />
+                  </section>
+                )}
+                {match.gameType === "tft" && (
+                  <section className="rounded-2xl ">
+                    <TFTStatTable match={match} />
+                  </section>
+                )}
+              </>
             )}
-            {match.gameType === "tft" && (
-              <section className="rounded-2xl ">
-                <TFTStatTable match={match} />
-              </section>
-            )}
-          </>
-        )}
-      </div>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 };
