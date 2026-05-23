@@ -5,6 +5,9 @@ const Sidebar = ({ tournament, isLoading }) => {
   const profilePicture = tournament?.created_by?.profile_picture;
   const registeredCount = Number(tournament?.registered_count ?? 0);
   const maxParticipate = Number(tournament?.max_participate ?? 0);
+  const requirement = tournament?.requirement ?? {};
+  const rankMin = requirement?.rank_min ?? "--";
+  const rankMax = requirement?.rank_max ?? "--";
   const progressPercent =
     maxParticipate > 0
       ? Math.min(100, Math.max(0, (registeredCount / maxParticipate) * 100))
@@ -52,8 +55,7 @@ const Sidebar = ({ tournament, isLoading }) => {
           <div className="flex justify-between py-3">
             <span className="text-muted-foreground">Mức rank</span>
             <span className="font-bold">
-              {tournament?.requirement.rank_min} →{" "}
-              {tournament?.requirement.rank_max}
+              {rankMin} → {rankMax}
             </span>
           </div>
           <div className="flex justify-between py-3">
@@ -63,15 +65,15 @@ const Sidebar = ({ tournament, isLoading }) => {
           <div className="flex justify-between py-3">
             <span className="text-muted-foreground">Thiết bị</span>
             <span className="font-bold">
-              {Array.isArray(tournament?.requirement?.device)
-                ? tournament!.requirement!.device.join(", ")
-                : (tournament?.requirement?.device ?? "--")}
+              {Array.isArray(requirement?.device)
+                ? requirement.device.join(", ")
+                : (requirement?.device ?? "--")}
             </span>
           </div>
           <div className="flex justify-between py-3">
             <span className="text-muted-foreground">Vào Discord PN</span>
             <span className="font-bold text-success">
-              {tournament?.requirement.discord ? "Có" : "Không"}
+              {requirement?.discord ? "Có" : "Không"}
             </span>
           </div>
         </div>

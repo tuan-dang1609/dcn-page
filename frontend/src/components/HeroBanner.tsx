@@ -12,6 +12,7 @@ interface HeroBannerProps {
     max_player_per_team?: number | string;
     register_start?: string;
     register_end?: string;
+    name?: string;
   } | null;
 }
 
@@ -77,11 +78,8 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
         <div className="absolute left-0 right-0 bottom-0 p-4 sm:p-6 md:p-10 flex flex-col md:flex-row items-center md:items-end justify-between gap-4">
           {/* Left: tournament info (center on small, left on md+) */}
           <div className="min-w-0 w-full md:w-auto text-center md:text-left">
-            <span className="inline-block bg-primary/10 text-primary border border-primary/20 backdrop-blur-sm px-3 py-1 text-xs sm:text-xs md:text-sm font-semibold tracking-widest uppercase rounded-full mb-3">
-              KẾT THÚC • MON, 01 SEPT 2025, 20:30 GMT+7
-            </span>
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold leading-tight mb-2 max-w-[720px] mx-auto md:mx-0">
-              TFT Set 15 – KO Coliseum
+              {tournament?.name || "Đang tải..."}
             </h1>
             <p className="text-sm sm:text-sm md:text-basetext-[#EEEEEE]">
               Tổ chức bởi{" "}

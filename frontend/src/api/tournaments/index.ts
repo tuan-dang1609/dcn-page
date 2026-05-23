@@ -214,6 +214,16 @@ export interface RankGame {
   name: string;
 }
 
+export interface GameOption {
+  id: number;
+  name: string;
+  short_name: string;
+  icon_game_url?: string | null;
+}
+
+export const getGames = () =>
+  axios.get<DataEnvelope<GameOption[]>>(`${tournamentsBaseUrl}/games`);
+
 export const getRankGames = () =>
   axios.get<DataEnvelope<RankGame[]>>(
     `${tournamentsBaseUrl}/requirements/ranks`,

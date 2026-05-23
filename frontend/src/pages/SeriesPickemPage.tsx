@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import {
   getBracketPickemData,
   saveBracketPicks,
+  type PickemMatch,
   type UserBracketPick,
 } from "@/api/pickem";
 import {
@@ -29,6 +30,14 @@ const toNumber = (value: unknown): number | null => {
 };
 
 const normalizeText = (value: unknown) => String(value ?? "").trim();
+
+const firstNonEmptyText = (...values: unknown[]) => {
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (normalized) return normalized;
+  }
+  return "";
+};
 
 const toErrorMessage = (error: unknown, fallback: string) => {
   if (!error || typeof error !== "object") return fallback;
@@ -88,6 +97,29 @@ const buildPickStatusByMatchId = (picks: UserBracketPick[] | undefined) => {
   });
 
   return map;
+};
+
+const getSwissSignature = (matches: PickemMatch[] | undefined) => {
+  const countsByRound = new Map<number, number>();
+
+  (matches ?? []).forEach((match) => {
+    const round = toNumber(match.round_number);
+    if (!round || round < 1) return;
+    countsByRound.set(round, (countsByRound.get(round) ?? 0) + 1);
+  });
+
+  return [...countsByRound.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, count]) => count)
+    .join(",");
+};
+
+const isSwissBracketShape = (matches: PickemMatch[] | undefined) => {
+  const signature = getSwissSignature(matches);
+  return (
+    signature.startsWith("4,2,2,2") ||
+    signature.startsWith("8,4,4,2,2,4,3,3,3")
+  );
 };
 
 type SeriesTournamentOption = {
@@ -208,9 +240,17 @@ const SeriesPickemPage = () => {
     [seriesTournaments, bracketQueries],
   );
 
+  const visibleTournamentBundles = useMemo(
+    () =>
+      tournamentBundles.filter(
+        (bundle) => bundle.query?.isLoading || bundle.brackets.length > 0,
+      ),
+    [tournamentBundles],
+  );
+
   const allBracketItems = useMemo(
     () =>
-      tournamentBundles.flatMap((bundle) =>
+      visibleTournamentBundles.flatMap((bundle) =>
         bundle.brackets.map((bracket) => ({
           ...bracket,
           tournamentId: bundle.tournament.id,
@@ -218,7 +258,7 @@ const SeriesPickemPage = () => {
           section: bundle.tournament.section,
         })),
       ),
-    [tournamentBundles],
+    [visibleTournamentBundles],
   );
 
   const pickemDataQueries = useQueries({
@@ -248,11 +288,11 @@ const SeriesPickemPage = () => {
     return sectionOrder.map((section) => ({
       section,
       label: sectionLabel[section],
-      bundles: tournamentBundles.filter(
+      bundles: visibleTournamentBundles.filter(
         (bundle) => bundle.tournament.section === section,
       ),
     }));
-  }, [tournamentBundles]);
+  }, [visibleTournamentBundles]);
 
   useEffect(() => {
     setPickedTeamByBracket((previous) => {
@@ -442,9 +482,9 @@ const SeriesPickemPage = () => {
             <CardTitle className="text-base">Pick'em Theo Muc</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {!seriesTournaments.length ? (
+            {!visibleTournamentBundles.length ? (
               <p className="text-sm text-muted-foreground">
-                Series nay chua co tournament.
+                Series nay chua co giai nao co pick'em.
               </p>
             ) : (
               <div className="space-y-4">
@@ -453,10 +493,6 @@ const SeriesPickemPage = () => {
 
                   return (
                     <div key={group.section} className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {group.label}
-                      </p>
-
                       <div className="space-y-2">
                         {group.bundles.map((bundle) => {
                           const tournamentLabel =
@@ -466,11 +502,13 @@ const SeriesPickemPage = () => {
                           return (
                             <div
                               key={bundle.tournament.id}
-                              className="space-y-2"
+                              className="space-y-2 p-3"
                             >
-                              <p className="mb-2 text-sm font-semibold">
-                                {tournamentLabel}
-                              </p>
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold leading-none">
+                                  {tournamentLabel}
+                                </p>
+                              </div>
 
                               {bundle.query.isLoading ? (
                                 <p className="text-sm text-muted-foreground">
@@ -488,7 +526,7 @@ const SeriesPickemPage = () => {
                               ) : null}
 
                               {bundle.brackets.length ? (
-                                <div className="space-y-3">
+                                <div className="space-y-3 pt-1">
                                   {bundle.brackets.map((bracket) => {
                                     const bracketId = Number(bracket.id);
                                     const pickemQuery =
@@ -509,16 +547,30 @@ const SeriesPickemPage = () => {
                                         toNumber(match.team_b_id),
                                     ).length;
                                     const bracketInfo = pickemData?.bracket;
-                                    const formatId = toNumber(
-                                      bracketInfo?.format_id ??
-                                        bracket.format_id,
-                                    );
-                                    const formatType = normalizeText(
-                                      bracketInfo?.format_type ??
-                                        bracket.format_type,
+                                    const formatText = firstNonEmptyText(
+                                      bracketInfo?.format_type,
+                                      bracket.format_type,
+                                      bracketInfo?.format_name,
+                                      bracket.format_name,
                                     ).toLowerCase();
+                                    const formatId =
+                                      toNumber(
+                                        bracketInfo?.format_id ??
+                                          bracket.format_id,
+                                      ) ??
+                                      (bracketInfo?.has_losers_bracket ||
+                                      bracket.has_losers_bracket
+                                        ? 2
+                                        : null);
                                     const isSwissBracket =
-                                      formatType === "swiss";
+                                      formatText.includes("swiss") ||
+                                      isSwissBracketShape(matches);
+                                    const isDoubleElimBracket =
+                                      formatText.includes("double") ||
+                                      bracketInfo?.has_losers_bracket ===
+                                        true ||
+                                      bracket.has_losers_bracket === true ||
+                                      formatId === 2;
                                     const isSavingThisBracket =
                                       saveMutation.isPending &&
                                       saveMutation.variables?.bracketId ===
@@ -560,8 +612,7 @@ const SeriesPickemPage = () => {
                                             </p>
                                           ) : null}
 
-                                          {!pickemQuery?.isLoading &&
-                                          !pickemQuery?.isError ? (
+                                          {!pickemQuery?.isError ? (
                                             <>
                                               <p className="text-sm text-muted-foreground">
                                                 Bam vao ten doi trong moi cap
@@ -577,8 +628,57 @@ const SeriesPickemPage = () => {
                                                 </p>
                                               ) : null}
 
-                                              <AutoFitContent>
-                                                {formatId === 1 ? (
+                                              {isDoubleElimBracket ||
+                                              isSwissBracket ? (
+                                                <div className="overflow-x-auto">
+                                                  <div className="min-w-max">
+                                                    {isDoubleElimBracket ? (
+                                                      <DoubleElimBracket
+                                                        bracketId={bracketId}
+                                                        selectedTeamByMatchId={
+                                                          selectedPicks
+                                                        }
+                                                        pickStatusByMatchId={
+                                                          pickStatusByMatchId
+                                                        }
+                                                        onPickTeam={(
+                                                          matchId,
+                                                          teamId,
+                                                        ) =>
+                                                          pickTeam(
+                                                            bracketId,
+                                                            matchId,
+                                                            teamId,
+                                                          )
+                                                        }
+                                                        disableMatchLink
+                                                      />
+                                                    ) : (
+                                                      <SwissBracket
+                                                        bracketId={bracketId}
+                                                        selectedTeamByMatchId={
+                                                          selectedPicks
+                                                        }
+                                                        pickStatusByMatchId={
+                                                          pickStatusByMatchId
+                                                        }
+                                                        onPickTeam={(
+                                                          matchId,
+                                                          teamId,
+                                                        ) =>
+                                                          pickTeam(
+                                                            bracketId,
+                                                            matchId,
+                                                            teamId,
+                                                          )
+                                                        }
+                                                        disableMatchLink
+                                                      />
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <AutoFitContent>
                                                   <SingleElimBracket
                                                     bracketId={bracketId}
                                                     selectedTeamByMatchId={
@@ -599,94 +699,44 @@ const SeriesPickemPage = () => {
                                                     }
                                                     disableMatchLink
                                                   />
-                                                ) : null}
-
-                                                {formatId === 2 ? (
-                                                  <DoubleElimBracket
-                                                    bracketId={bracketId}
-                                                    selectedTeamByMatchId={
-                                                      selectedPicks
-                                                    }
-                                                    pickStatusByMatchId={
-                                                      pickStatusByMatchId
-                                                    }
-                                                    onPickTeam={(
-                                                      matchId,
-                                                      teamId,
-                                                    ) =>
-                                                      pickTeam(
-                                                        bracketId,
-                                                        matchId,
-                                                        teamId,
-                                                      )
-                                                    }
-                                                    disableMatchLink
-                                                  />
-                                                ) : null}
-
-                                                {isSwissBracket ? (
-                                                  <SwissBracket
-                                                    bracketId={bracketId}
-                                                    selectedTeamByMatchId={
-                                                      selectedPicks
-                                                    }
-                                                    pickStatusByMatchId={
-                                                      pickStatusByMatchId
-                                                    }
-                                                    onPickTeam={(
-                                                      matchId,
-                                                      teamId,
-                                                    ) =>
-                                                      pickTeam(
-                                                        bracketId,
-                                                        matchId,
-                                                        teamId,
-                                                      )
-                                                    }
-                                                    disableMatchLink
-                                                  />
-                                                ) : null}
-
-                                                {!isSwissBracket &&
-                                                formatId !== 1 &&
-                                                formatId !== 2 ? (
-                                                  <p className="text-sm text-muted-foreground">
-                                                    Bracket nay co format khac.
-                                                    He thong hien chi render
-                                                    single, double va swiss.
-                                                  </p>
-                                                ) : null}
-                                              </AutoFitContent>
-
-                                              {!pickableCount ? (
-                                                <p className="text-sm text-muted-foreground">
-                                                  Bracket nay chua co tran nao
-                                                  du doi hinh de pick.
-                                                </p>
-                                              ) : null}
+                                                </AutoFitContent>
+                                              )}
 
                                               <div className="flex flex-wrap items-center justify-between gap-3">
-                                                {!user ? (
-                                                  <p className="text-sm text-muted-foreground">
-                                                    Dang nhap de tu dong luu
-                                                    Pick'em cua ban ngay khi
-                                                    chon doi.
-                                                  </p>
-                                                ) : (
-                                                  <p className="text-sm text-muted-foreground">
-                                                    Chon doi la he thong se tu
-                                                    dong luu ngay cho bracket
-                                                    nay.
-                                                  </p>
-                                                )}
+                                                <div className="space-y-1">
+                                                  {!pickableCount ? (
+                                                    <p className="text-sm text-muted-foreground">
+                                                      Bracket nay chua co tran
+                                                      nao du doi hinh de pick.
+                                                    </p>
+                                                  ) : null}
 
-                                                {user ? (
                                                   <p className="text-xs text-muted-foreground">
-                                                    {isSavingThisBracket
-                                                      ? "Dang tu dong luu..."
-                                                      : "Da bat tu dong luu."}
+                                                    Da tra loi{" "}
+                                                    {pickStats?.resolvedPicks ??
+                                                      0}
+                                                    /
+                                                    {pickStats?.totalPicks ??
+                                                      pickableCount}{" "}
+                                                    cau hoi.
                                                   </p>
-                                                ) : null}
+                                                </div>
+
+                                                <div className="space-y-1 text-right">
+                                                  {!user ? (
+                                                    <p className="text-sm text-muted-foreground">
+                                                      Dang nhap de tu dong luu
+                                                      Pick'em cua ban ngay khi
+                                                      chon doi.
+                                                    </p>
+                                                  ) : (
+                                                    <p className="text-sm text-muted-foreground">
+                                                      Chon doi la he thong se tu
+                                                      dong luu ngay cho bracket
+                                                      nay.
+                                                    </p>
+                                                  )}
+                                                </div>
                                               </div>
                                             </>
                                           ) : null}

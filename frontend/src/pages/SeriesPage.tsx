@@ -61,25 +61,6 @@ const Section = ({
   );
 };
 
-/* ── Status badge ── */
-const statusMap = {
-  ongoing: {
-    label: "LIVE",
-    dot: true,
-    cls: "text-primary border-primary/30 bg-primary/10",
-  },
-  upcoming: {
-    label: "SẮP DIỄN RA",
-    dot: false,
-    cls: "text-warning border-warning/30 bg-warning/10",
-  },
-  completed: {
-    label: "ĐÃ KẾT THÚC",
-    dot: false,
-    cls: "text-muted-foreground border-border bg-muted",
-  },
-};
-
 const getTournamentStatus = (
   dateStart?: string,
   dateEnd?: string,
@@ -137,7 +118,6 @@ const TournamentCard = ({
   t: UiTournament;
   seriesSlug?: string;
 }) => {
-  const status = statusMap[t.status];
   const now = Date.now();
   const start = t.startDate ? new Date(t.startDate).getTime() : NaN;
   const end = t.endDate ? new Date(t.endDate).getTime() : NaN;
@@ -164,20 +144,10 @@ const TournamentCard = ({
           loading="lazy"
         />
         <div className="absolute inset-0 bg-linear-to-t from-card via-card/30 to-transparent" />
-        <div className="absolute top-3 left-3">
-          <span
-            className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${status.cls}`}
-          >
-            {status.dot && (
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            )}
-            {status.label}
-          </span>
-        </div>
       </div>
 
       {/* Body */}
-      <div className="p-5 flex flex-col flex-1">
+      <div className="p-4 flex flex-col flex-1">
         <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary/80 mb-1.5">
           {t.game}
         </p>

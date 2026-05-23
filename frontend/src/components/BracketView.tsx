@@ -14,6 +14,12 @@ const CONN_W = 48;
 const QF_GAP = 24;
 const QF_PAIR_GAP = 56;
 const ROUND_COL_GAP = 56;
+const BRACKET_CARD_CLASS =
+  "block overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 shadow-lg";
+const BRACKET_ROW_BASE_CLASS =
+  "flex items-center justify-between px-3 transition-colors duration-150 border-b border-neutral-800";
+const BRACKET_HEADER_CLASS =
+  "rounded-md border border-neutral-300 bg-neutral-200 px-4 py-2 text-xs font-extrabold uppercase tracking-widest text-neutral-900 shadow-sm text-center";
 
 const qfPairH = 2 * CARD_H + QF_GAP;
 const qfTops = [
@@ -30,7 +36,7 @@ const sfTops = [
 
 const finalTop = (sfTops[0] + sfTops[1] + CARD_H) / 2 - CARD_H / 2;
 const totalH = qfTops[3] + CARD_H;
-const HEADER_H = 28;
+const HEADER_H = 44;
 
 type BracketOutletContext = {
   tournament?: {
@@ -75,7 +81,7 @@ const PickemContext = createContext<PickemContextValue>({});
 type DisplayMatch = {
   id: number;
   routeMatchId: number;
-  status?: string;
+  status: string;
   round: number;
   matchNo: number;
   nextMatchId: number | null;
@@ -85,8 +91,8 @@ type DisplayMatch = {
   s1: number | null;
   s2: number | null;
   winner: string | null;
-  p1Logo?: string | null;
-  p2Logo?: string | null;
+  p1Logo: string | null;
+  p2Logo: string | null;
   teamAId: number | null;
   teamBId: number | null;
 };
@@ -352,14 +358,14 @@ const PlayerRow = ({
 
   const stateToneCls =
     pickState === "correct"
-      ? "bg-emerald-500/20 text-emerald-100 font-semibold"
+      ? "bg-emerald-900/30 text-emerald-100 font-semibold border-l-4 border-l-emerald-400"
       : pickState === "wrong"
-        ? "bg-rose-500/20 text-rose-100 font-semibold"
+        ? "bg-rose-900/30 text-rose-100 font-semibold border-l-4 border-l-rose-400"
         : pickState === "selected"
-          ? "bg-amber-500/20 text-amber-100 font-semibold"
+          ? "bg-amber-900/30 text-amber-100 font-semibold border-l-4 border-l-amber-300"
           : isWinner
-            ? "bg-primary/20 font-semibold"
-            : "bg-card";
+            ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
+            : "bg-neutral-900 text-neutral-300";
 
   const hoverCls = hasHover
     ? isHoveredPlayer
@@ -369,7 +375,7 @@ const PlayerRow = ({
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`${BRACKET_ROW_BASE_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-neutral-800" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHover(name)}
       onMouseLeave={() => onHover(null)}
@@ -382,11 +388,11 @@ const PlayerRow = ({
         <img
           src={logo_url || TOURNAMENT_LOGO}
           alt=""
-          className="w-6 h-6 rounded-sm"
+          className="w-5 h-5 rounded-sm"
         />
         {name}
       </span>
-      <span className="text-sm font-bold ml-2 w-6 text-right">
+      <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
         {score !== null ? score : "-"}
       </span>
     </div>
@@ -505,7 +511,7 @@ const MatchCard = ({
   if (!routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
-        className={`block neo-box-sm overflow-hidden transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
+        className={`${BRACKET_CARD_CLASS} transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
         style={{ width: CARD_W }}
       >
         {content}
@@ -516,7 +522,7 @@ const MatchCard = ({
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
       style={{ width: CARD_W }}
     >
       {content}
@@ -550,8 +556,8 @@ const Connector = ({
   const lOut = outY - svgTop + 1;
   const midX = CONN_W / 2;
   const baseOpacity = hasHover ? 0.35 : 1;
-  const baseStroke = "white";
-  const hiStroke = "hsl(var(--primary))";
+  const baseStroke = "rgba(255,255,255,0.82)";
+  const hiStroke = "rgba(255,255,255,0.96)";
 
   const fromY =
     activeFrom === "top" ? lY1 : activeFrom === "bottom" ? lY2 : null;
@@ -765,11 +771,12 @@ const SingleElimBracket = ({
       s1: null,
       s2: null,
       winner: null,
+      status: "scheduled",
     };
   };
 
   if (isLoading) {
-    return <p className="text-smtext-[#EEEEEE]">Đang tải bracket...</p>;
+    return <p className="text-sm text-[#EEEEEE]">Đang tải bracket...</p>;
   }
 
   if (isError) {
@@ -782,7 +789,7 @@ const SingleElimBracket = ({
 
   if (!projectedMatches.length) {
     return (
-      <p className="text-smtext-[#EEEEEE]">Chưa có match trong bracket này.</p>
+      <p className="text-sm text-[#EEEEEE]">Chưa có match trong bracket này.</p>
     );
   }
 
@@ -802,8 +809,8 @@ const SingleElimBracket = ({
             style={{ gap: ROUND_COL_GAP }}
           >
             {roundGroups.map((group, index) => (
-              <div key={`round-${group.round}`} className="space-y-3">
-                <div className="text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider text-center">
+              <div key={`round-${group.round}`} className="space-y-1">
+                <div className={BRACKET_HEADER_CLASS}>
                   {getSingleElimRoundTitle(
                     index + 1,
                     roundGroups.length,
@@ -917,13 +924,13 @@ const SingleElimBracket = ({
           style={{ width: totalW, height: totalH4 + HEADER_H }}
         >
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className={`absolute ${BRACKET_HEADER_CLASS}`}
             style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
           >
             Bán kết
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className={`absolute ${BRACKET_HEADER_CLASS}`}
             style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
           >
             Chung kết
@@ -975,7 +982,8 @@ const SingleElimBracket = ({
               hoveredPlayer={hoveredPlayer}
               onHover={setHoveredPlayer}
               isInJourney={
-                !journeySet || journeySet.has(getMatchOrPlaceholder(secondRound, 1).id)
+                !journeySet ||
+                journeySet.has(getMatchOrPlaceholder(secondRound, 1).id)
               }
             />
           </div>
@@ -998,19 +1006,19 @@ const SingleElimBracket = ({
         style={{ width: totalW, height: totalH + HEADER_H }}
       >
         <div
-          className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+          className={`absolute ${BRACKET_HEADER_CLASS}`}
           style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
         >
           Tứ kết
         </div>
         <div
-          className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+          className={`absolute ${BRACKET_HEADER_CLASS}`}
           style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
         >
           Bán kết
         </div>
         <div
-          className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+          className={`absolute ${BRACKET_HEADER_CLASS}`}
           style={{ left: col4, width: CARD_W, textAlign: "center", top: 0 }}
         >
           Chung kết
@@ -1107,7 +1115,8 @@ const SingleElimBracket = ({
             hoveredPlayer={hoveredPlayer}
             onHover={setHoveredPlayer}
             isInJourney={
-              !journeySet || journeySet.has(getMatchOrPlaceholder(thirdRound, 1).id)
+              !journeySet ||
+              journeySet.has(getMatchOrPlaceholder(thirdRound, 1).id)
             }
           />
         </div>

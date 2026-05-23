@@ -73,12 +73,16 @@ type DisplayMatch = {
   winner: string | null;
 };
 
-const CARD_W = 240;
-const ROW_H = 36;
+const CARD_W = 252;
+const ROW_H = 38;
 const CARD_H = ROW_H * 2;
 const CONN_W = 48;
 const ROUND_GAP = 24;
 const HEADER_H = 28;
+const BRACKET_CARD_CLASS =
+  "block overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 shadow-lg";
+const BRACKET_ROW_BASE_CLASS =
+  "flex items-center justify-between px-3 transition-colors duration-150 border-b border-neutral-800";
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -276,20 +280,33 @@ const projectDoubleElimMatches = ({
 
   const applyTeamToSlot = (
     target: DisplayMatch,
-    slot: "A" | "B",
+    preferredSlot: "A" | "B",
     teamId: number,
+    options?: { allowFallback?: boolean },
   ) => {
     const winnerInfo = teamInfoById.get(teamId);
 
+    const canUseSlot = (slot: "A" | "B") => {
+      if (slot === "A") return !target.teamAId || target.teamAId === teamId;
+      return !target.teamBId || target.teamBId === teamId;
+    };
+
+    let slot = preferredSlot;
+    if (!canUseSlot(slot)) {
+      if (options?.allowFallback) {
+        slot = slot === "A" ? "B" : "A";
+      }
+
+      if (!canUseSlot(slot)) return;
+    }
+
     if (slot === "A") {
-      if (target.teamAId && target.teamAId !== teamId) return;
       target.teamAId = teamId;
       target.p1 = winnerInfo?.name ?? `Team #${teamId}`;
       target.p1Logo = winnerInfo?.logoUrl ?? null;
       return;
     }
 
-    if (target.teamBId && target.teamBId !== teamId) return;
     target.teamBId = teamId;
     target.p2 = winnerInfo?.name ?? `Team #${teamId}`;
     target.p2Logo = winnerInfo?.logoUrl ?? null;
@@ -332,7 +349,9 @@ const projectDoubleElimMatches = ({
 
     if (!targetMatch) return;
 
-    applyTeamToSlot(targetMatch, loserTarget.slot, loserTeamId);
+    applyTeamToSlot(targetMatch, loserTarget.slot, loserTeamId, {
+      allowFallback: true,
+    });
   });
 
   projectedById.forEach((match) => {
@@ -390,14 +409,14 @@ const PlayerRow = ({
 
   const stateToneCls =
     pickState === "correct"
-      ? "bg-emerald-500/20 text-emerald-100 font-semibold"
+      ? "bg-emerald-900/30 text-emerald-100 font-semibold border-l-4 border-l-emerald-400"
       : pickState === "wrong"
-        ? "bg-rose-500/20 text-rose-100 font-semibold"
+        ? "bg-rose-900/30 text-rose-100 font-semibold border-l-4 border-l-rose-400"
         : pickState === "selected"
-          ? "bg-amber-500/20 text-amber-100 font-semibold"
+          ? "bg-amber-900/30 text-amber-100 font-semibold border-l-4 border-l-amber-300"
           : isWinner
-            ? "bg-primary/20 font-semibold"
-            : "bg-card";
+            ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
+            : "bg-neutral-900 text-neutral-300";
 
   const hoverCls = hasHover
     ? isHoveredPlayer
@@ -407,7 +426,7 @@ const PlayerRow = ({
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`${BRACKET_ROW_BASE_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-neutral-800" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHover(name)}
       onMouseLeave={() => onHover(null)}
@@ -420,11 +439,11 @@ const PlayerRow = ({
         <img
           src={logoUrl || TOURNAMENT_LOGO}
           alt=""
-          className="w-6 h-6 rounded-sm"
+          className="w-5 h-5 rounded-sm"
         />
         {name}
       </span>
-      <span className="text-sm font-bold ml-2 w-6 text-right">
+      <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
         {score !== null ? score : "-"}
       </span>
     </div>
@@ -571,8 +590,8 @@ const RoundConnector = ({
   const svgTop = top;
   const svgHeight = bottom - top + 2;
   const midX = CONN_W / 2;
-  const baseStroke = "white";
-  const hiStroke = "hsl(var(--primary))";
+  const baseStroke = "rgba(255,255,255,0.82)";
+  const hiStroke = "rgba(255,255,255,0.96)";
   const baseOpacity = hasHover ? 0.25 : 1;
 
   const normalizedInYs = inYs.map((y) => y - svgTop + 1);
@@ -698,7 +717,7 @@ const ElbowConnector = ({
       <path
         d={path}
         fill="none"
-        stroke="white"
+        stroke="rgba(255,255,255,0.82)"
         strokeWidth={2}
         opacity={hasHover ? 0.25 : 1}
       />
@@ -706,7 +725,7 @@ const ElbowConnector = ({
         <path
           d={path}
           fill="none"
-          stroke="hsl(var(--primary))"
+          stroke="rgba(255,255,255,0.96)"
           strokeWidth={3}
         />
       ) : null}
@@ -1155,7 +1174,7 @@ const DoubleElimBracket = ({
   }, [rounds]);
 
   if (isLoading) {
-    return <p className="text-smtext-[#EEEEEE]">Đang tải bracket...</p>;
+    return <p className="text-sm text-[#EEEEEE]">Đang tải bracket...</p>;
   }
 
   if (isError) {
@@ -1168,7 +1187,7 @@ const DoubleElimBracket = ({
 
   if (!rounds.length) {
     return (
-      <p className="text-smtext-[#EEEEEE]">Chưa có match trong bracket này.</p>
+      <p className="text-sm text-[#EEEEEE]">Chưa có match trong bracket này.</p>
     );
   }
 
@@ -1224,26 +1243,26 @@ const DoubleElimBracket = ({
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 8)}
           </div>
 
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x1,
               width: CARD_W,
@@ -1254,7 +1273,7 @@ const DoubleElimBracket = ({
             {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x2,
               width: CARD_W,
@@ -1265,7 +1284,7 @@ const DoubleElimBracket = ({
             {getDoubleElimRoundTitle(5, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x3,
               width: CARD_W,
@@ -1276,7 +1295,7 @@ const DoubleElimBracket = ({
             {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x4,
               width: CARD_W,
@@ -1287,7 +1306,7 @@ const DoubleElimBracket = ({
             {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 8)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x5,
               width: CARD_W,
@@ -1619,26 +1638,26 @@ const DoubleElimBracket = ({
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 6)}
           </div>
 
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x1,
               width: CARD_W,
@@ -1649,7 +1668,7 @@ const DoubleElimBracket = ({
             {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x5,
               width: CARD_W,
@@ -1660,7 +1679,7 @@ const DoubleElimBracket = ({
             {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x4,
               width: CARD_W,
@@ -1671,7 +1690,7 @@ const DoubleElimBracket = ({
             {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 6)}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x2,
               width: CARD_W,
@@ -1896,7 +1915,7 @@ const DoubleElimBracket = ({
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(
@@ -1907,7 +1926,7 @@ const DoubleElimBracket = ({
             )}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(
@@ -1918,7 +1937,7 @@ const DoubleElimBracket = ({
             )}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{ left: x5, width: CARD_W, textAlign: "center", top: 0 }}
           >
             {getDoubleElimRoundTitle(
@@ -1929,7 +1948,7 @@ const DoubleElimBracket = ({
             )}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x1,
               width: CARD_W,
@@ -1945,7 +1964,7 @@ const DoubleElimBracket = ({
             )}
           </div>
           <div
-            className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
             style={{
               left: x2,
               width: CARD_W,
@@ -2079,7 +2098,7 @@ const DoubleElimBracket = ({
 
   if (!layout) {
     return (
-      <p className="text-smtext-[#EEEEEE]">Không thể dựng layout bracket.</p>
+      <p className="text-sm text-[#EEEEEE]">Không thể dựng layout bracket.</p>
     );
   }
 
@@ -2102,7 +2121,7 @@ const DoubleElimBracket = ({
           return (
             <div key={`col-${colIndex}`}>
               <div
-                className="absolute text-xs font-boldtext-[#EEEEEE] uppercase tracking-wider"
+                className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
                 style={{
                   left: colLeft,
                   width: CARD_W,

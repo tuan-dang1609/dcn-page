@@ -140,7 +140,17 @@ const PickemPage = () => {
 
   useEffect(() => {
     const brackets = bracketsQuery.data ?? [];
-    if (!brackets.length || activeBracketId) return;
+    if (!brackets.length) {
+      if (activeBracketId !== null) {
+        setActiveBracketId(null);
+      }
+      return;
+    }
+
+    const hasActiveBracket = brackets.some(
+      (bracket) => Number(bracket.id) === activeBracketId,
+    );
+    if (hasActiveBracket) return;
 
     const firstBracketId = Number(brackets[0].id);
     setActiveBracketId(firstBracketId);
@@ -260,17 +270,29 @@ const PickemPage = () => {
     }
   };
 
-  const selectedBracket = pickemDataQuery.data?.bracket;
+  const activeBracketMeta = useMemo(() => {
+    return (bracketsQuery.data ?? []).find(
+      (bracket) => Number(bracket.id) === activeBracketId,
+    );
+  }, [activeBracketId, bracketsQuery.data]);
+
+  const selectedBracket = pickemDataQuery.data?.bracket ?? activeBracketMeta;
   const pickStats = pickemDataQuery.data?.myPicks?.stats;
   const correctCount =
     pickStats?.correctPicks ??
     Object.values(pickStatusByMatchId).filter((status) => status.isCorrect)
       .length;
-  const selectedFormatId = toNumber(selectedBracket?.format_id);
-  const selectedFormatType = normalizeText(
-    selectedBracket?.format_type,
+  const selectedFormatText = normalizeText(
+    selectedBracket?.format_type ?? selectedBracket?.format_name,
   ).toLowerCase();
-  const isSwissBracket = selectedFormatType === "swiss";
+  const selectedFormatId =
+    toNumber(selectedBracket?.format_id) ??
+    (selectedBracket?.has_losers_bracket ? 2 : null);
+  const isSwissBracket = selectedFormatText.includes("swiss");
+  const isDoubleElimBracket =
+    selectedFormatText.includes("double") ||
+    selectedBracket?.has_losers_bracket === true ||
+    selectedFormatId === 2;
 
   return (
     <div className="space-y-6">
@@ -345,9 +367,7 @@ const PickemPage = () => {
         </p>
       ) : null}
 
-      {activeBracketId &&
-      !pickemDataQuery.isLoading &&
-      !pickemDataQuery.isError ? (
+      {activeBracketId && !pickemDataQuery.isError ? (
         <Card className="border-0 bg-transparent shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Bracket View</CardTitle>
@@ -364,46 +384,48 @@ const PickemPage = () => {
               </p>
             ) : null}
 
-            <AutoFitContent>
-              {selectedFormatId === 1 ? (
-                <SingleElimBracket
-                  bracketId={activeBracketId}
-                  selectedTeamByMatchId={pickedTeamByMatch}
-                  pickStatusByMatchId={pickStatusByMatchId}
-                  onPickTeam={pickTeam}
-                  disableMatchLink
-                />
-              ) : null}
+            {isDoubleElimBracket ? (
+              <div className="overflow-x-auto">
+                <div className="min-w-max">
+                  <DoubleElimBracket
+                    bracketId={activeBracketId}
+                    selectedTeamByMatchId={pickedTeamByMatch}
+                    pickStatusByMatchId={pickStatusByMatchId}
+                    onPickTeam={pickTeam}
+                    disableMatchLink
+                  />
+                </div>
+              </div>
+            ) : (
+              <AutoFitContent>
+                {!isSwissBracket ? (
+                  <SingleElimBracket
+                    bracketId={activeBracketId}
+                    selectedTeamByMatchId={pickedTeamByMatch}
+                    pickStatusByMatchId={pickStatusByMatchId}
+                    onPickTeam={pickTeam}
+                    disableMatchLink
+                  />
+                ) : null}
 
-              {selectedFormatId === 2 ? (
-                <DoubleElimBracket
-                  bracketId={activeBracketId}
-                  selectedTeamByMatchId={pickedTeamByMatch}
-                  pickStatusByMatchId={pickStatusByMatchId}
-                  onPickTeam={pickTeam}
-                  disableMatchLink
-                />
-              ) : null}
+                {isSwissBracket ? (
+                  <SwissBracket
+                    bracketId={activeBracketId}
+                    selectedTeamByMatchId={pickedTeamByMatch}
+                    pickStatusByMatchId={pickStatusByMatchId}
+                    onPickTeam={pickTeam}
+                    disableMatchLink
+                  />
+                ) : null}
 
-              {isSwissBracket ? (
-                <SwissBracket
-                  bracketId={activeBracketId}
-                  selectedTeamByMatchId={pickedTeamByMatch}
-                  pickStatusByMatchId={pickStatusByMatchId}
-                  onPickTeam={pickTeam}
-                  disableMatchLink
-                />
-              ) : null}
-
-              {!isSwissBracket &&
-              selectedFormatId !== 1 &&
-              selectedFormatId !== 2 ? (
-                <p className="text-sm text-muted-foreground">
-                  Bracket nay co format khac. He thong hien chi render style cho
-                  single, double va swiss.
-                </p>
-              ) : null}
-            </AutoFitContent>
+                {!isSwissBracket && selectedFormatId === null ? (
+                  <p className="text-sm text-muted-foreground">
+                    Bracket nay co format khac. He thong hien chi render style
+                    cho single, double va swiss.
+                  </p>
+                ) : null}
+              </AutoFitContent>
+            )}
           </CardContent>
         </Card>
       ) : null}
@@ -419,25 +441,7 @@ const PickemPage = () => {
       {activeBracketId ? (
         <Card className="border-0 bg-transparent shadow-none">
           <CardContent className="p-4">
-            <div className="space-y-1">
-              {!user ? (
-                <p className="text-sm text-muted-foreground">
-                  Dang nhap de tu dong luu Pick'em cua ban ngay khi chon doi.
-                </p>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Chon doi la he thong se tu dong luu ngay.
-                </p>
-              )}
-
-              {user ? (
-                <p className="text-xs text-muted-foreground">
-                  {saveMutation.isPending
-                    ? "Dang tu dong luu..."
-                    : "Da bat tu dong luu."}
-                </p>
-              ) : null}
-            </div>
+            <div className="space-y-1"></div>
           </CardContent>
         </Card>
       ) : null}

@@ -49,6 +49,7 @@ const AutoFitContent = ({ children, className }: AutoFitContentProps) => {
     recalc();
 
     const container = containerRef.current;
+    const content = contentRef.current;
     if (!container) return;
 
     const observer = new ResizeObserver(() => {
@@ -56,6 +57,9 @@ const AutoFitContent = ({ children, className }: AutoFitContentProps) => {
     });
 
     observer.observe(container);
+    if (content) {
+      observer.observe(content);
+    }
 
     return () => {
       observer.disconnect();
