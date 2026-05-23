@@ -1,21 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import {
-  generateSeriesPickemChallenge,
-  getMyPickemAnswers,
-  getPickemQuestions,
-  submitPickemPrediction,
-  type PickemOption,
-  type PickemQuestion,
+  getBracketPickemData,
+  saveBracketPicks,
+  type PickemMatch,
+  type UserBracketPick,
 } from "@/api/pickem";
-import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/hooks/use-toast";
-import { useSeriesById } from "@/hooks/useSeriesById";
-import { cn } from "@/lib/utils";
+import {
+  getBracketsByTournamentId,
+  type Bracket,
+} from "@/api/tournaments/index";
+import AutoFitContent from "@/components/AutoFitContent";
+import SingleElimBracket from "@/components/BracketView";
+import DoubleElimBracket from "@/components/DoubleElimBracket";
+import SwissBracket from "@/components/SwissBracket";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSeriesById } from "@/hooks/useSeriesById";
+import { useToast } from "@/hooks/use-toast";
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -25,64 +31,13 @@ const toNumber = (value: unknown): number | null => {
 
 const normalizeText = (value: unknown) => String(value ?? "").trim();
 
-const normalizeGameShort = (value: unknown) => {
-  const normalized = normalizeText(value).toLowerCase();
-  if (!normalized) return "";
-  if (normalized === "val" || normalized === "valorantv2") return "valorant";
-  if (normalized === "leagueoflegends" || normalized === "league_of_legends") {
-    return "lol";
+const firstNonEmptyText = (...values: unknown[]) => {
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (normalized) return normalized;
   }
-  if (normalized === "teamfighttactics" || normalized === "teamfight_tactics") {
-    return "tft";
-  }
-  return normalized;
+  return "";
 };
-
-const formatGameLabel = (value: string) => {
-  if (value === "all") return "Tat ca";
-  if (value === "valorant") return "Valorant";
-  if (value === "lol") return "LoL";
-  if (value === "tft") return "TFT";
-  return value.toUpperCase();
-};
-
-const toOptionLabel = (option: PickemOption) => {
-  if (typeof option === "string") return option;
-  if (!option || typeof option !== "object") return "";
-
-  const candidate =
-    option.label ?? option.name ?? option.value ?? option.id ?? option.team_id;
-
-  return normalizeText(candidate);
-};
-
-const toOptionArray = (value: unknown): PickemOption[] => {
-  if (Array.isArray(value)) return value as PickemOption[];
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return [];
-
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed as PickemOption[];
-      if (parsed && typeof parsed === "object") {
-        return [parsed as Record<string, unknown>];
-      }
-      return [trimmed];
-    } catch {
-      return [trimmed];
-    }
-  }
-
-  if (value && typeof value === "object") {
-    return [value as Record<string, unknown>];
-  }
-
-  return [];
-};
-
-const toOptionKey = (value: unknown) => normalizeText(value).toLowerCase();
 
 const toErrorMessage = (error: unknown, fallback: string) => {
   if (!error || typeof error !== "object") return fallback;
@@ -104,210 +59,342 @@ const toErrorMessage = (error: unknown, fallback: string) => {
   );
 };
 
-const resolveSection = (question: PickemQuestion) => {
-  const fromMeta = normalizeText(question.meta?.section).toLowerCase();
-  if (fromMeta) return fromMeta;
-
-  const fromType = normalizeText(question.type).toLowerCase();
-  if (fromType.includes("single")) return "single-elim";
-  if (fromType.includes("double")) return "double-elim";
-  if (fromType.includes("swiss")) return "swiss";
-  if (fromType.includes("prop") || fromType.includes("champion")) return "prop";
-
-  return "other";
+type MatchPickStatus = {
+  isResolved: boolean;
+  isCorrect: boolean | null;
+  winnerTeamId: number | null;
 };
 
-const groupMatchQuestionsByRound = (questions: PickemQuestion[]) => {
-  const roundMap = new Map<number, PickemQuestion[]>();
+const serializePicks = (pickedTeamByMatch: Record<number, number>) =>
+  Object.entries(pickedTeamByMatch)
+    .map(([matchIdRaw, selectedTeamIdRaw]) => {
+      const matchId = Number(matchIdRaw);
+      const selectedTeamId = Number(selectedTeamIdRaw);
 
-  for (const question of questions) {
-    const round = toNumber(question.meta?.roundNumber) ?? 1;
-    if (!roundMap.has(round)) roundMap.set(round, []);
-    roundMap.get(round)!.push(question);
-  }
+      if (!Number.isFinite(matchId) || !Number.isFinite(selectedTeamId)) {
+        return null;
+      }
 
-  return Array.from(roundMap.entries())
+      return {
+        matchId,
+        selectedTeamId,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+const buildPickStatusByMatchId = (picks: UserBracketPick[] | undefined) => {
+  const map: Record<number, MatchPickStatus> = {};
+
+  (picks ?? []).forEach((pick) => {
+    const matchId = toNumber(pick.matchId);
+    if (!matchId) return;
+
+    map[matchId] = {
+      isResolved: Boolean(pick.isResolved),
+      isCorrect: typeof pick.isCorrect === "boolean" ? pick.isCorrect : null,
+      winnerTeamId: toNumber(pick.winnerTeamId),
+    };
+  });
+
+  return map;
+};
+
+const getSwissSignature = (matches: PickemMatch[] | undefined) => {
+  const countsByRound = new Map<number, number>();
+
+  (matches ?? []).forEach((match) => {
+    const round = toNumber(match.round_number);
+    if (!round || round < 1) return;
+    countsByRound.set(round, (countsByRound.get(round) ?? 0) + 1);
+  });
+
+  return [...countsByRound.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([round, items]) => ({
-      round,
-      questions: [...items].sort((a, b) => {
-        const aMatchNo = toNumber(a.meta?.matchNo) ?? 0;
-        const bMatchNo = toNumber(b.meta?.matchNo) ?? 0;
-        if (aMatchNo !== bMatchNo) return aMatchNo - bMatchNo;
-        return (toNumber(a.id) ?? 0) - (toNumber(b.id) ?? 0);
-      }),
-    }));
+    .map(([, count]) => count)
+    .join(",");
+};
+
+const isSwissBracketShape = (matches: PickemMatch[] | undefined) => {
+  const signature = getSwissSignature(matches);
+  return (
+    signature.startsWith("4,2,2,2") ||
+    signature.startsWith("8,4,4,2,2,4,3,3,3")
+  );
+};
+
+type SeriesTournamentOption = {
+  id: number;
+  name: string;
+  shortName?: string;
+  dateStart?: string;
+  dateEnd?: string;
+  section: "ongoing" | "upcoming" | "completed";
+};
+
+type BracketOption = Bracket & {
+  id: number;
+  format_id: number;
+  tournament_id: number;
+};
+
+const getTournamentSection = (
+  dateStart?: string,
+  dateEnd?: string,
+): SeriesTournamentOption["section"] => {
+  const now = Date.now();
+  const start = dateStart ? new Date(dateStart).getTime() : null;
+  const end = dateEnd ? new Date(dateEnd).getTime() : null;
+
+  if (start && now < start) return "upcoming";
+  if (end && now > end) return "completed";
+  return "ongoing";
 };
 
 const SeriesPickemPage = () => {
   const { slug } = useParams<{ slug?: string }>();
   const seriesSlug = slug ?? "";
-  const { series, isLoading: isSeriesLoading, error: seriesError } =
-    useSeriesById(seriesSlug);
+  const navigate = useNavigate();
 
-  const leagueId = toNumber(series?.id);
-
+  const { series, isLoading, error } = useSeriesById(seriesSlug);
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [answersByQuestion, setAnswersByQuestion] = useState<
-    Record<number, string[]>
+  const seriesTournaments = useMemo<SeriesTournamentOption[]>(() => {
+    return (series?.all_tournaments ?? [])
+      .map<SeriesTournamentOption | null>((item) => {
+        const id = toNumber(item.id);
+        if (!id) return null;
+
+        return {
+          id,
+          name: item.name,
+          shortName: item.short_name ?? undefined,
+          dateStart: item.date_start,
+          dateEnd: item.date_end,
+          section: getTournamentSection(item.date_start, item.date_end),
+        };
+      })
+      .filter((item): item is SeriesTournamentOption => item !== null);
+  }, [series?.all_tournaments]);
+
+  const [pickedTeamByBracket, setPickedTeamByBracket] = useState<
+    Record<number, Record<number, number>>
   >({});
-  const [selectedGame, setSelectedGame] = useState("all");
-
-  const pickemQuestionsQuery = useQuery({
-    queryKey: ["series-pickem-questions", leagueId],
-    enabled: Boolean(leagueId),
-    queryFn: async () => {
-      const response = await getPickemQuestions({
-        leagueId: leagueId!,
-        gameShort: "all",
-        type: "all",
-      });
-      return response.data;
-    },
-    staleTime: 15000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  });
-
-  const myAnswersQuery = useQuery({
-    queryKey: ["series-pickem-my-answers", leagueId, user?.id],
-    enabled: Boolean(leagueId && user?.id),
-    queryFn: async () => {
-      const response = await getMyPickemAnswers(leagueId!, user!.id);
-      return response.data;
-    },
-    staleTime: 10000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  });
+  const pickedTeamByBracketRef = useRef<Record<number, Record<number, number>>>(
+    {},
+  );
+  const [dirtyBracketMap, setDirtyBracketMap] = useState<
+    Record<number, boolean>
+  >({});
 
   useEffect(() => {
-    const rows = myAnswersQuery.data?.answers ?? [];
-    if (!rows.length) return;
-
-    const nextState: Record<number, string[]> = {};
-    rows.forEach((answer) => {
-      const questionId = toNumber(answer.questionId);
-      if (!questionId) return;
-
-      const selectedOptions = Array.isArray(answer.selectedOptions)
-        ? answer.selectedOptions
-        : [];
-
-      nextState[questionId] = selectedOptions
-        .map((item) => normalizeText(item))
-        .filter(Boolean);
-    });
-
-    setAnswersByQuestion(nextState);
-  }, [myAnswersQuery.data?.answers]);
-
-  const allQuestions = pickemQuestionsQuery.data?.questions ?? [];
-
-  const gameFilters = useMemo(() => {
-    const games = new Set<string>();
-    allQuestions.forEach((question) => {
-      const gameShort = normalizeGameShort(question.game_short);
-      if (gameShort) games.add(gameShort);
-    });
-
-    return ["all", ...Array.from(games)];
-  }, [allQuestions]);
-
-  useEffect(() => {
-    if (!gameFilters.includes(selectedGame)) {
-      setSelectedGame("all");
+    if (series?.slug && series.slug !== seriesSlug) {
+      navigate(`/series/${series.slug}/pickem`, { replace: true });
     }
-  }, [gameFilters, selectedGame]);
+  }, [navigate, series?.slug, seriesSlug]);
 
-  const questions = useMemo(() => {
-    if (selectedGame === "all") return allQuestions;
+  const bracketQueries = useQueries({
+    queries: seriesTournaments.map((tournament) => ({
+      queryKey: ["series-pickem-brackets", tournament.id],
+      queryFn: async (): Promise<BracketOption[]> => {
+        const response = await getBracketsByTournamentId(tournament.id);
+        const items = response.data?.data ?? [];
 
-    return allQuestions.filter(
-      (question) => normalizeGameShort(question.game_short) === selectedGame,
-    );
-  }, [allQuestions, selectedGame]);
+        return items
+          .map((bracket) => ({
+            ...bracket,
+            id: toNumber(bracket.id),
+            format_id: toNumber(bracket.format_id) ?? 0,
+            tournament_id: toNumber(bracket.tournament_id) ?? tournament.id,
+          }))
+          .filter((bracket): bracket is BracketOption =>
+            Number.isFinite(bracket.id),
+          );
+      },
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    })),
+  });
 
-  const questionMapById = useMemo(
+  const sectionOrder: Array<SeriesTournamentOption["section"]> = [
+    "ongoing",
+    "upcoming",
+    "completed",
+  ];
+
+  const sectionLabel: Record<SeriesTournamentOption["section"], string> = {
+    ongoing: "Dang dien ra",
+    upcoming: "Sap dien ra",
+    completed: "Da ket thuc",
+  };
+
+  const tournamentBundles = useMemo(
     () =>
-      new Map(allQuestions.map((question) => [Number(question.id), question])),
-    [allQuestions],
+      seriesTournaments.map((tournament, index) => ({
+        tournament,
+        query: bracketQueries[index],
+        brackets: bracketQueries[index]?.data ?? [],
+      })),
+    [seriesTournaments, bracketQueries],
   );
 
-  const selectedAnswerCount = useMemo(() => {
-    if (!questions.length) return 0;
+  const visibleTournamentBundles = useMemo(
+    () =>
+      tournamentBundles.filter(
+        (bundle) => bundle.query?.isLoading || bundle.brackets.length > 0,
+      ),
+    [tournamentBundles],
+  );
 
-    const visibleQuestionIds = new Set(questions.map((q) => Number(q.id)));
-    return Object.entries(answersByQuestion).filter(([questionId, selected]) => {
-      const id = Number(questionId);
-      return visibleQuestionIds.has(id) && selected.length > 0;
-    }).length;
-  }, [answersByQuestion, questions]);
+  const allBracketItems = useMemo(
+    () =>
+      visibleTournamentBundles.flatMap((bundle) =>
+        bundle.brackets.map((bracket) => ({
+          ...bracket,
+          tournamentId: bundle.tournament.id,
+          tournamentName: bundle.tournament.name,
+          section: bundle.tournament.section,
+        })),
+      ),
+    [visibleTournamentBundles],
+  );
 
-  const canManagePickem = useMemo(() => {
-    const roleId = toNumber(user?.role_id);
-    return roleId !== null && [1, 2, 3].includes(roleId);
-  }, [user?.role_id]);
-
-  const regenerateMutation = useMutation({
-    mutationFn: async () => {
-      if (!leagueId) throw new Error("Missing series id");
-      return generateSeriesPickemChallenge(leagueId, {
-        leagueId,
-        gameShort: "all",
-      });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ["series-pickem-questions", leagueId],
-      });
-
-      toast({
-        title: "Da tao Pick'em cho series",
-        description: "Danh sach cau hoi da duoc cap nhat.",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Khong the tao Pick'em",
-        description: toErrorMessage(error, "Vui long thu lai sau."),
-        variant: "destructive",
-      });
-    },
+  const pickemDataQueries = useQueries({
+    queries: allBracketItems.map((item) => ({
+      queryKey: ["series-pickem-data", item.id, user?.id],
+      queryFn: async () => {
+        const response = await getBracketPickemData(item.id, user?.id);
+        return response.data;
+      },
+      staleTime: 10000,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    })),
   });
 
-  const submitMutation = useMutation({
-    mutationFn: async () => {
-      if (!leagueId || !user?.id) {
-        throw new Error("Bạn cần đăng nhập để gửi dự đoán");
-      }
+  const pickemQueryByBracketId = useMemo(() => {
+    const map = new Map<number, (typeof pickemDataQueries)[number]>();
 
-      const answers = Object.entries(answersByQuestion)
-        .map(([questionIdRaw, selectedOptions]) => {
-          const questionId = Number(questionIdRaw);
-          if (!Number.isFinite(questionId) || selectedOptions.length === 0) {
-            return null;
-          }
+    allBracketItems.forEach((item, index) => {
+      map.set(item.id, pickemDataQueries[index]);
+    });
 
-          const question = questionMapById.get(questionId);
+    return map;
+  }, [allBracketItems, pickemDataQueries]);
 
-          return {
-            questionId,
-            selectedOptions,
-            openTime: question?.openTime ?? null,
-            closeTime: question?.closeTime ?? null,
+  const bundleGroups = useMemo(() => {
+    return sectionOrder.map((section) => ({
+      section,
+      label: sectionLabel[section],
+      bundles: visibleTournamentBundles.filter(
+        (bundle) => bundle.tournament.section === section,
+      ),
+    }));
+  }, [visibleTournamentBundles]);
+
+  useEffect(() => {
+    setPickedTeamByBracket((previous) => {
+      let changed = false;
+      const next = { ...previous };
+
+      allBracketItems.forEach((item, index) => {
+        const bracketId = toNumber(item.id);
+        if (!bracketId || dirtyBracketMap[bracketId]) return;
+
+        const picks = pickemDataQueries[index]?.data?.myPicks?.picks ?? [];
+        if (!pickemDataQueries[index]?.data) return;
+
+        const incoming: Record<number, number> = {};
+        picks.forEach((pick) => {
+          const matchId = toNumber(pick.matchId);
+          const selectedTeamId = toNumber(pick.selectedTeamId);
+          if (!matchId || !selectedTeamId) return;
+          incoming[matchId] = selectedTeamId;
+        });
+
+        const current = previous[bracketId] ?? {};
+        const currentKeys = Object.keys(current);
+        const incomingKeys = Object.keys(incoming);
+        const isSame =
+          currentKeys.length === incomingKeys.length &&
+          currentKeys.every(
+            (key) => current[Number(key)] === incoming[Number(key)],
+          );
+
+        if (!isSame) {
+          next[bracketId] = incoming;
+          changed = true;
+        }
+      });
+
+      return changed ? next : previous;
+    });
+  }, [allBracketItems, dirtyBracketMap, pickemDataQueries]);
+
+  useEffect(() => {
+    pickedTeamByBracketRef.current = pickedTeamByBracket;
+  }, [pickedTeamByBracket]);
+
+  const totalCorrectCount = useMemo(
+    () =>
+      pickemDataQueries.reduce((sum, query) => {
+        return sum + (query.data?.myPicks?.stats?.correctPicks ?? 0);
+      }, 0),
+    [pickemDataQueries],
+  );
+
+  const pickTeam = (bracketId: number, matchId: number, teamId: number) => {
+    const previous = pickedTeamByBracketRef.current;
+    const currentBracket = previous[bracketId] ?? {};
+
+    const nextBracket =
+      currentBracket[matchId] === teamId
+        ? (() => {
+            const removed = { ...currentBracket };
+            delete removed[matchId];
+            return removed;
+          })()
+        : {
+            ...currentBracket,
+            [matchId]: teamId,
           };
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null);
 
-      if (!answers.length) {
-        throw new Error("Bạn chưa chọn đáp án nào");
+    const next = {
+      ...previous,
+      [bracketId]: nextBracket,
+    };
+
+    pickedTeamByBracketRef.current = next;
+    setPickedTeamByBracket(next);
+
+    setDirtyBracketMap((previous) => ({
+      ...previous,
+      [bracketId]: true,
+    }));
+
+    if (user?.id) {
+      saveMutation.mutate({
+        bracketId,
+        picksByMatch: nextBracket,
+      });
+    }
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async ({
+      bracketId,
+      picksByMatch,
+    }: {
+      bracketId: number;
+      picksByMatch: Record<number, number>;
+    }) => {
+      if (!bracketId || !user?.id) {
+        throw new Error("Ban can dang nhap de luu du doan");
       }
 
-      return submitPickemPrediction(leagueId, {
+      return saveBracketPicks(bracketId, {
         userId: user.id,
         user: {
           userId: user.id,
@@ -316,487 +403,367 @@ const SeriesPickemPage = () => {
           teamName: user.team?.name ?? null,
           logoTeam: user.team?.logo_url ?? null,
         },
-        answers,
+        picks: serializePicks(picksByMatch),
       });
     },
-    onSuccess: async (response) => {
-      const score = response.data?.data?.totalScore;
-
+    onSuccess: async (_response, variables) => {
       await queryClient.invalidateQueries({
-        queryKey: ["series-pickem-my-answers", leagueId, user?.id],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["series-pickem-questions", leagueId],
+        queryKey: ["series-pickem-data", variables.bracketId, user?.id],
       });
 
-      toast({
-        title: "Da luu du doan",
-        description:
-          typeof score === "number"
-            ? `Tong diem hien tai: ${score}`
-            : "Du doan cua ban da duoc cap nhat.",
+      setDirtyBracketMap((previous) => {
+        if (!previous[variables.bracketId]) return previous;
+
+        const next = { ...previous };
+        delete next[variables.bracketId];
+        return next;
       });
     },
-    onError: (error) => {
+    onError: (err) => {
       toast({
-        title: "Luu du doan that bai",
-        description: toErrorMessage(error, "Vui long thu lai sau."),
+        title: "Luu Pick'em that bai",
+        description: toErrorMessage(err, "Vui long thu lai sau."),
         variant: "destructive",
       });
     },
   });
+  const backSeriesSlug = series?.slug ?? seriesSlug;
 
-  const selectSingleOption = (questionId: number, optionLabel: string) => {
-    setAnswersByQuestion((previous) => ({
-      ...previous,
-      [questionId]: [optionLabel],
-    }));
-  };
-
-  const toggleMultiOption = (question: PickemQuestion, optionLabel: string) => {
-    const questionId = Number(question.id);
-    const maxChoose = Math.max(toNumber(question.maxChoose) ?? 1, 1);
-
-    setAnswersByQuestion((previous) => {
-      const current = previous[questionId] ?? [];
-      const targetKey = toOptionKey(optionLabel);
-      const hasOption = current.some((value) => toOptionKey(value) === targetKey);
-
-      if (hasOption) {
-        return {
-          ...previous,
-          [questionId]: current.filter((value) => toOptionKey(value) !== targetKey),
-        };
-      }
-
-      if (current.length >= maxChoose) {
-        return previous;
-      }
-
-      return {
-        ...previous,
-        [questionId]: [...current, optionLabel],
-      };
-    });
-  };
-
-  const isOptionSelected = (questionId: number, optionLabel: string) => {
-    const selected = answersByQuestion[questionId] ?? [];
-    const targetKey = toOptionKey(optionLabel);
-    return selected.some((item) => toOptionKey(item) === targetKey);
-  };
-
-  const sectionedQuestions = useMemo(() => {
-    const buckets: Record<
-      "single" | "double" | "swiss" | "prop" | "other",
-      PickemQuestion[]
-    > = {
-      single: [],
-      double: [],
-      swiss: [],
-      prop: [],
-      other: [],
-    };
-
-    for (const question of questions) {
-      const section = resolveSection(question);
-
-      if (section === "single-elim") {
-        buckets.single.push(question);
-        continue;
-      }
-
-      if (section === "double-elim") {
-        buckets.double.push(question);
-        continue;
-      }
-
-      if (section === "swiss") {
-        buckets.swiss.push(question);
-        continue;
-      }
-
-      if (section === "prop") {
-        buckets.prop.push(question);
-        continue;
-      }
-
-      buckets.other.push(question);
-    }
-
-    return {
-      single: groupMatchQuestionsByRound(buckets.single),
-      double: groupMatchQuestionsByRound(buckets.double),
-      swiss: buckets.swiss,
-      prop: buckets.prop,
-      other: buckets.other,
-    };
-  }, [questions]);
-
-  if (isSeriesLoading) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <p className="text-sm text-muted-foreground">Dang tai du lieu series...</p>
+        <p className="text-sm text-muted-foreground">
+          Dang tai du lieu series...
+        </p>
       </div>
     );
   }
 
-  if (seriesError || !series) {
+  if (error) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <div className="text-center max-w-md space-y-3">
-          <p className="text-base font-semibold text-foreground">
-            Khong tai duoc series
+        <div className="text-center max-w-md">
+          <p className="text-base font-semibold text-foreground mb-2">
+            Khong tai duoc du lieu series
           </p>
           <p className="text-sm text-muted-foreground">
-            Vui long quay lai trang series va thu lai.
+            Vui long thu lai sau hoac kiem tra ket noi API.
           </p>
-          <Button asChild variant="outline">
-            <Link to={seriesSlug ? `/series/${seriesSlug}` : "/"}>Quay lai</Link>
-          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background px-4 py-8 md:px-8">
+    <div className="min-h-screen bg-background p-6 md:p-10">
       <div className="mx-auto max-w-6xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Series Pick'em
-            </p>
-            <h1 className="text-2xl font-bold text-foreground">{series.name}</h1>
+          <div className="space-y-2">
+            <Button asChild variant="outline" size="sm">
+              <Link to={`/series/${backSeriesSlug}`}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Quay lai series
+              </Link>
+            </Button>
+            <h1 className="text-2xl font-heading">Pick'em Series</h1>
             <p className="text-sm text-muted-foreground">
-              Chon ket qua match tung tournament trong series va tra loi cac prop
-              question.
+              Hien tat ca bracket theo tung muc. Bam truc tiep vao doi tren
+              bracket de pick.
             </p>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button asChild variant="outline" size="sm">
-                <Link to={`/series/${series.slug ?? seriesSlug}`}>Ve trang series</Link>
-              </Button>
-              {canManagePickem ? (
-                <Button asChild variant="outline" size="sm">
-                  <Link
-                    to={`/ops/series-pickem-setup?series=${encodeURIComponent(String(series.slug ?? series.id))}`}
-                  >
-                    Trang tao Pick'em
-                  </Link>
-                </Button>
-              ) : null}
-            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">
-              Da chon {selectedAnswerCount}/{questions.length}
-            </Badge>
-
-            {typeof myAnswersQuery.data?.totalScore === "number" ? (
-              <Badge variant="secondary">
-                Diem hien tai: {myAnswersQuery.data.totalScore}
-              </Badge>
-            ) : null}
-
-            {pickemQuestionsQuery.data?.autoGenerated ? <Badge>Tao tu dong</Badge> : null}
-
-            {canManagePickem ? (
-              <Button
-                variant="outline"
-                onClick={() => regenerateMutation.mutate()}
-                disabled={regenerateMutation.isPending || !leagueId}
-              >
-                {regenerateMutation.isPending ? "Dang tao lai..." : "Tao lai challenge"}
-              </Button>
-            ) : null}
+            <Badge variant="outline">Dung {totalCorrectCount}</Badge>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {gameFilters.map((gameShort) => (
-            <Button
-              key={gameShort}
-              type="button"
-              size="sm"
-              variant={selectedGame === gameShort ? "default" : "outline"}
-              onClick={() => setSelectedGame(gameShort)}
-            >
-              {formatGameLabel(gameShort)}
-            </Button>
-          ))}
-        </div>
+        <Card className="border-0 bg-transparent shadow-none">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Pick'em Theo Muc</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!visibleTournamentBundles.length ? (
+              <p className="text-sm text-muted-foreground">
+                Series nay chua co giai nao co pick'em.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {bundleGroups.map((group) => {
+                  if (!group.bundles.length) return null;
 
-        {pickemQuestionsQuery.isLoading ? (
-          <p className="text-sm text-muted-foreground">Dang tai Pick'em...</p>
-        ) : null}
+                  return (
+                    <div key={group.section} className="space-y-2">
+                      <div className="space-y-2">
+                        {group.bundles.map((bundle) => {
+                          const tournamentLabel =
+                            normalizeText(bundle.tournament.shortName) ||
+                            normalizeText(bundle.tournament.name);
 
-        {pickemQuestionsQuery.isError ? (
-          <p className="text-sm text-destructive">
-            {toErrorMessage(
-              pickemQuestionsQuery.error,
-              "Khong tai duoc danh sach cau hoi Pick'em.",
+                          return (
+                            <div
+                              key={bundle.tournament.id}
+                              className="space-y-2 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold leading-none">
+                                  {tournamentLabel}
+                                </p>
+                              </div>
+
+                              {bundle.query.isLoading ? (
+                                <p className="text-sm text-muted-foreground">
+                                  Dang tai bracket...
+                                </p>
+                              ) : null}
+
+                              {bundle.query.isError ? (
+                                <p className="text-sm text-destructive">
+                                  {toErrorMessage(
+                                    bundle.query.error,
+                                    "Khong tai duoc danh sach bracket.",
+                                  )}
+                                </p>
+                              ) : null}
+
+                              {bundle.brackets.length ? (
+                                <div className="space-y-3 pt-1">
+                                  {bundle.brackets.map((bracket) => {
+                                    const bracketId = Number(bracket.id);
+                                    const pickemQuery =
+                                      pickemQueryByBracketId.get(bracketId);
+                                    const pickemData = pickemQuery?.data;
+                                    const selectedPicks =
+                                      pickedTeamByBracket[bracketId] ?? {};
+                                    const matches = pickemData?.matches ?? [];
+                                    const pickStats =
+                                      pickemData?.myPicks?.stats;
+                                    const pickStatusByMatchId =
+                                      buildPickStatusByMatchId(
+                                        pickemData?.myPicks?.picks,
+                                      );
+                                    const pickableCount = matches.filter(
+                                      (match) =>
+                                        toNumber(match.team_a_id) &&
+                                        toNumber(match.team_b_id),
+                                    ).length;
+                                    const bracketInfo = pickemData?.bracket;
+                                    const formatText = firstNonEmptyText(
+                                      bracketInfo?.format_type,
+                                      bracket.format_type,
+                                      bracketInfo?.format_name,
+                                      bracket.format_name,
+                                    ).toLowerCase();
+                                    const formatId =
+                                      toNumber(
+                                        bracketInfo?.format_id ??
+                                          bracket.format_id,
+                                      ) ??
+                                      (bracketInfo?.has_losers_bracket ||
+                                      bracket.has_losers_bracket
+                                        ? 2
+                                        : null);
+                                    const isSwissBracket =
+                                      formatText.includes("swiss") ||
+                                      isSwissBracketShape(matches);
+                                    const isDoubleElimBracket =
+                                      formatText.includes("double") ||
+                                      bracketInfo?.has_losers_bracket ===
+                                        true ||
+                                      bracket.has_losers_bracket === true ||
+                                      formatId === 2;
+                                    const isSavingThisBracket =
+                                      saveMutation.isPending &&
+                                      saveMutation.variables?.bracketId ===
+                                        bracketId;
+
+                                    return (
+                                      <Card
+                                        key={bracketId}
+                                        className="border-0 bg-transparent shadow-none"
+                                      >
+                                        <CardHeader className="pb-2">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <CardTitle className="text-sm">
+                                              {normalizeText(bracket.name) ||
+                                                "Bracket"}
+                                            </CardTitle>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <Badge variant="outline">
+                                                Dung{" "}
+                                                {pickStats?.correctPicks ?? 0}
+                                              </Badge>
+                                            </div>
+                                          </div>
+                                        </CardHeader>
+
+                                        <CardContent className="space-y-3 px-0 pb-4 pt-0">
+                                          {pickemQuery?.isLoading ? (
+                                            <p className="text-sm text-muted-foreground">
+                                              Dang tai du lieu Pick'em...
+                                            </p>
+                                          ) : null}
+
+                                          {pickemQuery?.isError ? (
+                                            <p className="text-sm text-destructive">
+                                              {toErrorMessage(
+                                                pickemQuery.error,
+                                                "Khong tai duoc du lieu Pick'em theo bracket.",
+                                              )}
+                                            </p>
+                                          ) : null}
+
+                                          {!pickemQuery?.isError ? (
+                                            <>
+                                              <p className="text-sm text-muted-foreground">
+                                                Bam vao ten doi trong moi cap
+                                                dau de chon doi thang.
+                                              </p>
+
+                                              {pickStats ? (
+                                                <p className="text-xs text-muted-foreground">
+                                                  Match da co ket qua se tu dong
+                                                  danh dau Dung/Sai. Diem tinh
+                                                  theo round: R1 = 1, R2 = 2, R3
+                                                  = 4...
+                                                </p>
+                                              ) : null}
+
+                                              {isDoubleElimBracket ||
+                                              isSwissBracket ? (
+                                                <div className="overflow-x-auto">
+                                                  <div className="min-w-max">
+                                                    {isDoubleElimBracket ? (
+                                                      <DoubleElimBracket
+                                                        bracketId={bracketId}
+                                                        selectedTeamByMatchId={
+                                                          selectedPicks
+                                                        }
+                                                        pickStatusByMatchId={
+                                                          pickStatusByMatchId
+                                                        }
+                                                        onPickTeam={(
+                                                          matchId,
+                                                          teamId,
+                                                        ) =>
+                                                          pickTeam(
+                                                            bracketId,
+                                                            matchId,
+                                                            teamId,
+                                                          )
+                                                        }
+                                                        disableMatchLink
+                                                      />
+                                                    ) : (
+                                                      <SwissBracket
+                                                        bracketId={bracketId}
+                                                        selectedTeamByMatchId={
+                                                          selectedPicks
+                                                        }
+                                                        pickStatusByMatchId={
+                                                          pickStatusByMatchId
+                                                        }
+                                                        onPickTeam={(
+                                                          matchId,
+                                                          teamId,
+                                                        ) =>
+                                                          pickTeam(
+                                                            bracketId,
+                                                            matchId,
+                                                            teamId,
+                                                          )
+                                                        }
+                                                        disableMatchLink
+                                                      />
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <AutoFitContent>
+                                                  <SingleElimBracket
+                                                    bracketId={bracketId}
+                                                    selectedTeamByMatchId={
+                                                      selectedPicks
+                                                    }
+                                                    pickStatusByMatchId={
+                                                      pickStatusByMatchId
+                                                    }
+                                                    onPickTeam={(
+                                                      matchId,
+                                                      teamId,
+                                                    ) =>
+                                                      pickTeam(
+                                                        bracketId,
+                                                        matchId,
+                                                        teamId,
+                                                      )
+                                                    }
+                                                    disableMatchLink
+                                                  />
+                                                </AutoFitContent>
+                                              )}
+
+                                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                                <div className="space-y-1">
+                                                  {!pickableCount ? (
+                                                    <p className="text-sm text-muted-foreground">
+                                                      Bracket nay chua co tran
+                                                      nao du doi hinh de pick.
+                                                    </p>
+                                                  ) : null}
+
+                                                  <p className="text-xs text-muted-foreground">
+                                                    Da tra loi{" "}
+                                                    {pickStats?.resolvedPicks ??
+                                                      0}
+                                                    /
+                                                    {pickStats?.totalPicks ??
+                                                      pickableCount}{" "}
+                                                    cau hoi.
+                                                  </p>
+                                                </div>
+
+                                                <div className="space-y-1 text-right">
+                                                  {!user ? (
+                                                    <p className="text-sm text-muted-foreground">
+                                                      Dang nhap de tu dong luu
+                                                      Pick'em cua ban ngay khi
+                                                      chon doi.
+                                                    </p>
+                                                  ) : (
+                                                    <p className="text-sm text-muted-foreground">
+                                                      Chon doi la he thong se tu
+                                                      dong luu ngay cho bracket
+                                                      nay.
+                                                    </p>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            </>
+                                          ) : null}
+                                        </CardContent>
+                                      </Card>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+
+                              {!bundle.query.isLoading &&
+                              !bundle.brackets.length ? (
+                                <p className="text-sm text-muted-foreground">
+                                  Tournament nay chua co bracket.
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
-          </p>
-        ) : null}
-
-        {!pickemQuestionsQuery.isLoading && !questions.length ? (
-          <p className="text-sm text-muted-foreground">
-            Chua co cau hoi Pick'em cho series nay.
-          </p>
-        ) : null}
-
-        {sectionedQuestions.single.length > 0 ? (
-          <section className="space-y-3">
-            <h3 className="text-lg font-bold">Single Elimination</h3>
-            <div className="overflow-x-auto pb-1">
-              <div className="flex min-w-max gap-4">
-                {sectionedQuestions.single.map((roundGroup) => (
-                  <div key={`single-round-${roundGroup.round}`} className="w-72 shrink-0">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Round {roundGroup.round}
-                    </p>
-                    <div className="space-y-3">
-                      {roundGroup.questions.map((question) => {
-                        const questionId = Number(question.id);
-                        const options = toOptionArray(question.options)
-                          .map((option) => toOptionLabel(option))
-                          .filter(Boolean);
-
-                        return (
-                          <Card key={question.id} className="border-border/60 bg-card/70">
-                            <CardContent className="space-y-3 p-4">
-                              <p className="text-xs text-muted-foreground">
-                                Match {toNumber(question.meta?.matchNo) ?? "-"}
-                              </p>
-                              <p className="text-sm font-semibold leading-relaxed">
-                                {question.question}
-                              </p>
-
-                              <div className="space-y-2">
-                                {options.map((optionLabel) => {
-                                  const selected = isOptionSelected(questionId, optionLabel);
-                                  return (
-                                    <button
-                                      key={`${question.id}-${optionLabel}`}
-                                      type="button"
-                                      onClick={() =>
-                                        selectSingleOption(questionId, optionLabel)
-                                      }
-                                      className={cn(
-                                        "w-full rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors",
-                                        selected
-                                          ? "border-primary bg-primary text-primary-foreground"
-                                          : "border-border bg-muted/40 hover:bg-muted",
-                                      )}
-                                    >
-                                      {optionLabel}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {sectionedQuestions.double.length > 0 ? (
-          <section className="space-y-3">
-            <h3 className="text-lg font-bold">Double Elimination</h3>
-            <div className="overflow-x-auto pb-1">
-              <div className="flex min-w-max gap-4">
-                {sectionedQuestions.double.map((roundGroup) => (
-                  <div key={`double-round-${roundGroup.round}`} className="w-72 shrink-0">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Round {roundGroup.round}
-                    </p>
-                    <div className="space-y-3">
-                      {roundGroup.questions.map((question) => {
-                        const questionId = Number(question.id);
-                        const options = toOptionArray(question.options)
-                          .map((option) => toOptionLabel(option))
-                          .filter(Boolean);
-
-                        return (
-                          <Card key={question.id} className="border-border/60 bg-card/70">
-                            <CardContent className="space-y-3 p-4">
-                              <p className="text-xs text-muted-foreground">
-                                {normalizeText(question.meta?.stage) || "Bracket"} - Match{" "}
-                                {toNumber(question.meta?.matchNo) ?? "-"}
-                              </p>
-                              <p className="text-sm font-semibold leading-relaxed">
-                                {question.question}
-                              </p>
-
-                              <div className="space-y-2">
-                                {options.map((optionLabel) => {
-                                  const selected = isOptionSelected(questionId, optionLabel);
-                                  return (
-                                    <button
-                                      key={`${question.id}-${optionLabel}`}
-                                      type="button"
-                                      onClick={() =>
-                                        selectSingleOption(questionId, optionLabel)
-                                      }
-                                      className={cn(
-                                        "w-full rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors",
-                                        selected
-                                          ? "border-primary bg-primary text-primary-foreground"
-                                          : "border-border bg-muted/40 hover:bg-muted",
-                                      )}
-                                    >
-                                      {optionLabel}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {sectionedQuestions.swiss.length > 0 ? (
-          <section className="space-y-3">
-            <h3 className="text-lg font-bold">Swiss</h3>
-            <div className="grid gap-4">
-              {sectionedQuestions.swiss.map((question) => {
-                const questionId = Number(question.id);
-                const options = toOptionArray(question.options)
-                  .map((option) => toOptionLabel(option))
-                  .filter(Boolean);
-                const pickCount = Math.max(toNumber(question.maxChoose) ?? 1, 1);
-                const selectedCount = (answersByQuestion[questionId] ?? []).length;
-
-                return (
-                  <Card key={question.id} className="border-border/70 bg-card/70">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base leading-relaxed">
-                        {question.question}
-                      </CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        Chon toi da {pickCount} doi ({selectedCount}/{pickCount})
-                      </p>
-                    </CardHeader>
-                    <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {options.map((optionLabel) => {
-                        const selected = isOptionSelected(questionId, optionLabel);
-                        const disableSelect =
-                          !selected &&
-                          selectedCount >= pickCount &&
-                          !isOptionSelected(questionId, optionLabel);
-
-                        return (
-                          <button
-                            key={`${question.id}-${optionLabel}`}
-                            type="button"
-                            onClick={() => toggleMultiOption(question, optionLabel)}
-                            disabled={disableSelect}
-                            className={cn(
-                              "rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors",
-                              selected
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border bg-muted/40 hover:bg-muted",
-                              disableSelect && "cursor-not-allowed opacity-50",
-                            )}
-                          >
-                            {optionLabel}
-                          </button>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
-
-        {sectionedQuestions.prop.length > 0 ? (
-          <section className="space-y-3">
-            <h3 className="text-lg font-bold">Prop Questions</h3>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {sectionedQuestions.prop.map((question) => {
-                const questionId = Number(question.id);
-                const options = toOptionArray(question.options)
-                  .map((option) => toOptionLabel(option))
-                  .filter(Boolean);
-
-                return (
-                  <Card key={question.id} className="border-border/70 bg-card/70">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base leading-relaxed">
-                        {question.question}
-                      </CardTitle>
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                        {normalizeText(question.meta?.statKey) || question.type}
-                      </p>
-                    </CardHeader>
-
-                    <CardContent className="space-y-2">
-                      {options.map((optionLabel) => {
-                        const selected = isOptionSelected(questionId, optionLabel);
-                        return (
-                          <button
-                            key={`${question.id}-${optionLabel}`}
-                            type="button"
-                            onClick={() => selectSingleOption(questionId, optionLabel)}
-                            className={cn(
-                              "w-full rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors",
-                              selected
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border bg-muted/40 hover:bg-muted",
-                            )}
-                          >
-                            {optionLabel}
-                          </button>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </section>
-        ) : null}
-
-        {questions.length > 0 ? (
-          <Card className="border-border/70 bg-card/70">
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-              <div className="space-y-1">
-                {!user ? (
-                  <p className="text-sm text-muted-foreground">
-                    Dang nhap de luu du doan Pick'em cua ban.
-                  </p>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Co the doi lua chon va bam luu nhieu lan truoc khi khoa cau hoi.
-                  </p>
-                )}
-              </div>
-
-              <Button
-                onClick={() => submitMutation.mutate()}
-                disabled={!user || submitMutation.isPending}
-              >
-                {submitMutation.isPending ? "Dang luu..." : "Luu du doan"}
-              </Button>
-            </CardContent>
-          </Card>
-        ) : null}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

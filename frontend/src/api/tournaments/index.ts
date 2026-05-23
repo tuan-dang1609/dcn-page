@@ -38,6 +38,18 @@ export const getBracketsByTournamentId = (tournamentId: number | string) =>
     `${tournamentsBaseUrl}/brackets/${tournamentId}`,
   );
 
+export const deleteBracket = (bracketId: number | string) =>
+  axios.delete<{
+    data: {
+      bracket_id: number;
+      tournament_id: number;
+      deleted_matches: number;
+      deleted_match_games: number;
+      deleted_pickem_picks: number;
+      deleted_pickem_submissions: number;
+    };
+  }>(`${tournamentsBaseUrl}/brackets/${bracketId}`, getAuthConfig());
+
 export const getMatchesByBracketId = (bracketId: number | string) =>
   axios.get<DataEnvelope<Match[]>>(
     `${tournamentsBaseUrl}/matches/brackets/${bracketId}/matches`,
@@ -46,6 +58,23 @@ export const getMatchesByBracketId = (bracketId: number | string) =>
 export const getTournamentTeamPlayers = (tournamentTeamId: number | string) =>
   axios.get<TournamentTeamPlayersResponse>(
     `${tournamentsBaseUrl}/team/players/${tournamentTeamId}`,
+  );
+
+export interface TournamentTeamRecord {
+  id: number;
+  team_id: number;
+  name?: string | null;
+  short_name?: string | null;
+  logo_url?: string | null;
+  team_color_hex?: string | null;
+  nickname?: string | null;
+  created_by?: string | null;
+  isCheckedIn?: boolean;
+}
+
+export const getTournamentTeams = (tournamentId: number | string) =>
+  axios.get<{ total: number; teams: TournamentTeamRecord[] }>(
+    `${tournamentsBaseUrl}/teams/${tournamentId}`,
   );
 
 export const getMatchesByTournamentId = async (
@@ -185,6 +214,16 @@ export interface RankGame {
   name: string;
 }
 
+export interface GameOption {
+  id: number;
+  name: string;
+  short_name: string;
+  icon_game_url?: string | null;
+}
+
+export const getGames = () =>
+  axios.get<DataEnvelope<GameOption[]>>(`${tournamentsBaseUrl}/games`);
+
 export const getRankGames = () =>
   axios.get<DataEnvelope<RankGame[]>>(
     `${tournamentsBaseUrl}/requirements/ranks`,
@@ -272,9 +311,26 @@ export const updateMatchSchedule = (
     getAuthConfig(),
   );
 
+export const updateMatchRoomId = (
+  matchId: number | string,
+  payload: { room_id: string | null },
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/matches/matches/${matchId}/room-id`,
+    payload,
+    getAuthConfig(),
+  );
+
+export const deleteMatchBanPick = (matchId: number | string) =>
+  axios.delete(
+    `${tournamentsBaseUrl}/matches/matches/${matchId}/ban-pick`,
+    getAuthConfig(),
+  );
+
 export interface MatchGameIdRecord {
   id: number;
   match_id: number;
+  room_id?: string | null;
   game_no?: number | null;
   game_id?: number | null;
   game_short_name?: string | null;
@@ -294,6 +350,7 @@ export interface UpsertMatchGameIdPayload {
   game_id?: number;
   external_provider?: string | null;
   game_no?: number;
+  room_id?: string | null;
 }
 
 export interface UpdateMatchGameIdPayload {
@@ -302,6 +359,7 @@ export interface UpdateMatchGameIdPayload {
   game_id?: number;
   external_provider?: string | null;
   game_no?: number;
+  room_id?: string | null;
 }
 
 export const getMatchGameIds = (matchId: number | string) =>

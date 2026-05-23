@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import {
@@ -9,18 +9,42 @@ import { TOURNAMENT_LOGO } from "@/data/tournament";
 
 type SwissBracketProps = {
   bracketId?: number | null;
+  selectedTeamByMatchId?: Record<number, number>;
+  pickStatusByMatchId?: Record<number, PickStatus>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+  tournamentRegistered?: RegisteredTeam[];
+};
+
+type PickStatus = {
+  isResolved?: boolean;
+  isCorrect?: boolean | null;
+  winnerTeamId?: number | null;
+};
+
+type PickVisualState = "selected" | "correct" | "wrong";
+
+type RegisteredTeam = {
+  id?: number | string;
+  team_id?: number | string;
+  name?: string;
+  short_name?: string;
 };
 
 type BracketOutletContext = {
   tournament?: {
-    registered?: Array<{
-      id?: number | string;
-      team_id?: number | string;
-      name?: string;
-      short_name?: string;
-    }>;
+    registered?: RegisteredTeam[];
   };
 };
+
+type PickemContextValue = {
+  selectedTeamByMatchId?: Record<number, number>;
+  pickStatusByMatchId?: Record<number, PickStatus>;
+  onPickTeam?: (matchId: number, teamId: number) => void;
+  disableMatchLink?: boolean;
+};
+
+const PickemContext = createContext<PickemContextValue>({});
 
 type DisplayMatch = {
   id: number;
@@ -71,6 +95,13 @@ const CONNECTOR_W = 54;
 const COL_GAP = 42;
 
 const STAGE_W = CARD_W + STAGE_PAD_X * 2;
+const BRACKET_CARD_CLASS =
+  "block overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 shadow-lg";
+const BRACKET_ROW_BASE_CLASS =
+  "flex items-center justify-between px-3 transition-colors duration-150 border-b border-neutral-800";
+const STAGE_HEADER_CLASS =
+  "flex items-center justify-between rounded-md border border-neutral-300 bg-neutral-200 px-3 py-1 text-[11px] font-extrabold uppercase tracking-widest text-neutral-900";
+const STAGE_HEADER_DOT_CLASS = "h-2 w-2 rounded-sm";
 
 const SWISS_LABELS_8 = ["0-0", "1-0", "0-1", "1-1"];
 const SWISS_LABELS_16 = [
@@ -127,7 +158,10 @@ const getTeamLabel = (
 };
 
 const resolveMatchWinnerTeamId = (match: DisplayMatch) => {
-  if (match.winnerTeamId !== null) return match.winnerTeamId;
+  if (match.winnerTeamId !== null && match.winnerTeamId > 0)
+    return match.winnerTeamId;
+  if (match.teamAId !== null && match.teamBId === null) return match.teamAId;
+  if (match.teamBId !== null && match.teamAId === null) return match.teamBId;
   if (match.s1 !== null && match.s2 !== null) {
     if (match.s1 > match.s2) return match.teamAId;
     if (match.s2 > match.s1) return match.teamBId;
@@ -136,13 +170,17 @@ const resolveMatchWinnerTeamId = (match: DisplayMatch) => {
 };
 
 const isResolvedSwissMatch = (match: DisplayMatch) => {
+  if (match.teamAId === null && match.teamBId === null) return true;
+
   const winner = resolveMatchWinnerTeamId(match);
   if (winner !== null) return true;
 
   return (
     match.s1 !== null &&
     match.s2 !== null &&
-    String(match.status || "").toLowerCase() === "completed"
+    ["complete", "completed"].includes(
+      String(match.status || "").toLowerCase(),
+    )
   );
 };
 
@@ -163,7 +201,9 @@ const toDisplayMatches = (
     const teamBId = toNumber(match.team_b_id);
     const scoreA = toNumber(match.score_a);
     const scoreB = toNumber(match.score_b);
-    const winnerTeamId = toNumber(match.winner_team_id);
+    const rawWinnerTeamId = toNumber(match.winner_team_id);
+    const winnerTeamId =
+      rawWinnerTeamId !== null && rawWinnerTeamId > 0 ? rawWinnerTeamId : null;
 
     const p1 =
       (match as any)?.team_a?.name ?? getTeamLabel(teamAId, teamNameById);
@@ -173,7 +213,7 @@ const toDisplayMatches = (
     const p2Logo = (match as any)?.team_b?.logo_url ?? null;
 
     let winner: string | null = null;
-    if (winnerTeamId !== null) {
+    if (winnerTeamId) {
       if (toNumber((match as any)?.team_a?.id) === winnerTeamId) winner = p1;
       else if (toNumber((match as any)?.team_b?.id) === winnerTeamId)
         winner = p2;
@@ -203,8 +243,46 @@ const toDisplayMatches = (
   });
 };
 
-const getLayoutForRounds = (roundCount: number) => {
-  if (roundCount === 4) {
+const getLayoutForRounds = (
+  rounds: number[],
+  matchCountByRound: Map<number, number>,
+) => {
+  const roundCounts = rounds.map(
+    (round) => matchCountByRound.get(round) ?? 0,
+  );
+
+  const isEightSwissPattern =
+    roundCounts.length >= 4 &&
+    roundCounts.slice(0, 4).join(",") === "4,2,2,2";
+  const isSixteenSwissPattern =
+    roundCounts.length >= 9 &&
+    roundCounts.slice(0, 9).join(",") === "8,4,4,2,2,4,3,3,3";
+
+  if (isEightSwissPattern) {
+    const extraLabels = rounds.slice(4).map((round) => `R${round}`);
+
+    return {
+      labels: [...SWISS_LABELS_8, ...extraLabels],
+      layout: [...SWISS_LAYOUT_8, ...extraLabels.map((label) => [label])],
+      relations: SWISS_RELATIONS_8,
+      advanceWins: 2,
+      eliminateLosses: 2,
+    };
+  }
+
+  if (isSixteenSwissPattern) {
+    const extraLabels = rounds.slice(9).map((round) => `R${round}`);
+
+    return {
+      labels: [...SWISS_LABELS_16, ...extraLabels],
+      layout: [...SWISS_LAYOUT_16, ...extraLabels.map((label) => [label])],
+      relations: SWISS_RELATIONS_16,
+      advanceWins: 3,
+      eliminateLosses: 3,
+    };
+  }
+
+  if (roundCounts.length === 4) {
     return {
       labels: SWISS_LABELS_8,
       layout: SWISS_LAYOUT_8,
@@ -214,7 +292,7 @@ const getLayoutForRounds = (roundCount: number) => {
     };
   }
 
-  if (roundCount === 9) {
+  if (roundCounts.length === 9) {
     return {
       labels: SWISS_LABELS_16,
       layout: SWISS_LAYOUT_16,
@@ -224,12 +302,12 @@ const getLayoutForRounds = (roundCount: number) => {
     };
   }
 
-  const labels = Array.from(
-    { length: roundCount },
-    (_, index) => `R${index + 1}`,
-  );
+  const labels = rounds.map((round) => `R${round}`);
   const layout = labels.map((label) => [label]);
-  const fallback = Math.max(1, Math.ceil(Math.log2(Math.max(2, roundCount))));
+  const fallback = Math.max(
+    1,
+    Math.ceil(Math.log2(Math.max(2, rounds.length))),
+  );
 
   return {
     labels,
@@ -278,7 +356,7 @@ const StageConnectorSingle = ({
     >
       <polyline
         points={`0,${nY1} ${bendX},${nY1} ${bendX},${nY2} ${width},${nY2}`}
-        stroke="white"
+        stroke="rgba(255,255,255,0.82)"
         strokeOpacity={hasHover ? 0.28 : 1}
         strokeWidth={2}
         fill="none"
@@ -287,7 +365,7 @@ const StageConnectorSingle = ({
       {active ? (
         <polyline
           points={`0,${nY1} ${bendX},${nY1} ${bendX},${nY2} ${width},${nY2}`}
-          stroke="hsl(var(--primary))"
+          stroke="rgba(255,255,255,0.96)"
           strokeWidth={3}
           fill="none"
           strokeLinejoin="miter"
@@ -345,7 +423,7 @@ const StageConnectorMerge = ({
         y1={nTop}
         x2={joinX}
         y2={nTop}
-        stroke="white"
+        stroke="rgba(255,255,255,0.82)"
         strokeOpacity={hasHover ? 0.28 : 1}
         strokeWidth={2}
       />
@@ -354,7 +432,7 @@ const StageConnectorMerge = ({
         y1={nBottom}
         x2={joinX}
         y2={nBottom}
-        stroke="white"
+        stroke="rgba(255,255,255,0.82)"
         strokeOpacity={hasHover ? 0.28 : 1}
         strokeWidth={2}
       />
@@ -363,13 +441,13 @@ const StageConnectorMerge = ({
         y1={Math.min(nTop, nBottom)}
         x2={joinX}
         y2={Math.max(nTop, nBottom)}
-        stroke="white"
+        stroke="rgba(255,255,255,0.82)"
         strokeOpacity={hasHover ? 0.28 : 1}
         strokeWidth={2}
       />
       <polyline
         points={`${joinX},${nJoin} ${bendX},${nJoin} ${bendX},${nOut} ${outX},${nOut}`}
-        stroke="white"
+        stroke="rgba(255,255,255,0.82)"
         strokeOpacity={hasHover ? 0.28 : 1}
         strokeWidth={2}
         fill="none"
@@ -384,7 +462,7 @@ const StageConnectorMerge = ({
               y1={y}
               x2={joinX}
               y2={y}
-              stroke="hsl(var(--primary))"
+              stroke="rgba(255,255,255,0.96)"
               strokeWidth={3}
             />
           ))}
@@ -393,12 +471,12 @@ const StageConnectorMerge = ({
             y1={Math.min(nOut, ...activeYs)}
             x2={joinX}
             y2={Math.max(nOut, ...activeYs)}
-            stroke="hsl(var(--primary))"
+            stroke="rgba(255,255,255,0.96)"
             strokeWidth={3}
           />
           <polyline
             points={`${joinX},${nOut} ${bendX},${nOut} ${bendX},${nOut} ${outX},${nOut}`}
-            stroke="hsl(var(--primary))"
+            stroke="rgba(255,255,255,0.96)"
             strokeWidth={3}
             fill="none"
             strokeLinejoin="miter"
@@ -415,9 +493,12 @@ const PlayerRow = ({
   name,
   score,
   isWinner,
+  isSelected,
+  pickState,
   isHoveredTeam,
   hasHover,
   isTop,
+  onPick,
   onHoverTeam,
 }: {
   teamId: number | null;
@@ -425,43 +506,54 @@ const PlayerRow = ({
   name: string;
   score: number | null;
   isWinner: boolean;
+  isSelected?: boolean;
+  pickState?: PickVisualState | null;
   isHoveredTeam: boolean;
   hasHover: boolean;
   isTop?: boolean;
+  onPick?: (teamId: number) => void;
   onHoverTeam: (teamId: number | null) => void;
 }) => {
-  const bg = hasHover
-    ? isHoveredTeam
-      ? "bg-primary text-primary-foreground"
-      : "bg-card"
-    : isWinner
-      ? "bg-primary/20"
-      : "bg-card";
+  const canPick =
+    typeof onPick === "function" && Number.isFinite(Number(teamId));
 
-  const textClass = hasHover
+  const stateToneCls =
+    pickState === "correct"
+      ? "bg-emerald-900/30 text-emerald-100 font-semibold border-l-4 border-l-emerald-400"
+      : pickState === "wrong"
+        ? "bg-rose-900/30 text-rose-100 font-semibold border-l-4 border-l-rose-400"
+        : pickState === "selected"
+          ? "bg-amber-900/30 text-amber-100 font-semibold border-l-4 border-l-amber-300"
+          : isWinner
+            ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
+            : "bg-neutral-900 text-neutral-300";
+
+  const hoverCls = hasHover
     ? isHoveredTeam
-      ? "font-bold"
+      ? "brightness-110"
       : "text-muted-foreground"
-    : isWinner
-      ? "font-semibold"
-      : "";
+    : "";
 
   return (
     <div
-      className={`flex items-center justify-between px-3 transition-colors duration-150 cursor-default ${bg} ${textClass} ${isTop ? "border-b border-border/40" : ""}`}
+      className={`${BRACKET_ROW_BASE_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-neutral-800" : ""}`}
       style={{ height: ROW_H }}
       onMouseEnter={() => onHoverTeam(teamId)}
       onMouseLeave={() => onHoverTeam(null)}
+      onClick={() => {
+        if (!canPick || !teamId) return;
+        onPick(teamId);
+      }}
     >
       <span className="flex items-center gap-2 text-sm truncate flex-1">
         <img
           src={logoUrl || TOURNAMENT_LOGO}
           alt=""
-          className="w-6 h-6 rounded-sm"
+          className="w-5 h-5 rounded-sm"
         />
         {name}
       </span>
-      <span className="text-sm font-bold ml-2 w-6 text-right">
+      <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
         {score ?? "-"}
       </span>
     </div>
@@ -479,26 +571,75 @@ const MatchCard = ({
   onHoverTeam: (teamId: number | null) => void;
   isInJourney: boolean;
 }) => {
+  const {
+    selectedTeamByMatchId,
+    pickStatusByMatchId,
+    onPickTeam,
+    disableMatchLink,
+  } = useContext(PickemContext);
   const hasHover = hoveredTeamId !== null;
   const faded = hasHover && !isInJourney;
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
+  const realMatchId = toNumber(match.routeMatchId);
+  const selectedTeamId = realMatchId
+    ? selectedTeamByMatchId?.[realMatchId]
+    : null;
+  const pickStatus = realMatchId
+    ? pickStatusByMatchId?.[realMatchId]
+    : undefined;
+  const officialWinnerTeamId =
+    pickStatus?.winnerTeamId ??
+    match.winnerTeamId ??
+    (match.s1 !== null && match.s2 !== null
+      ? match.s1 > match.s2
+        ? match.teamAId
+        : match.s2 > match.s1
+          ? match.teamBId
+          : null
+      : null);
 
-  return (
-    <Link
-      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
-      style={{ width: CARD_W, height: CARD_H }}
-    >
+  const resolvePickState = (teamId: number | null): PickVisualState | null => {
+    if (!teamId || selectedTeamId !== teamId) return null;
+
+    if (typeof pickStatus?.isCorrect === "boolean") {
+      return pickStatus.isCorrect ? "correct" : "wrong";
+    }
+
+    if (pickStatus?.isResolved || officialWinnerTeamId) {
+      if (!officialWinnerTeamId) return "selected";
+      return officialWinnerTeamId === selectedTeamId ? "correct" : "wrong";
+    }
+
+    return "selected";
+  };
+
+  const handlePick = (teamId: number) => {
+    if (!onPickTeam || !realMatchId) return;
+    onPickTeam(realMatchId, teamId);
+  };
+
+  const canPick = Boolean(onPickTeam && realMatchId && realMatchId > 0);
+  const isMatchCompleted = ["complete", "completed"].includes(
+    String(match.status ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+
+  const content = (
+    <>
       <PlayerRow
         teamId={match.teamAId}
         logoUrl={match.p1Logo}
         name={match.p1}
         score={match.s1}
         isWinner={match.winner === match.p1}
+        isSelected={selectedTeamId === match.teamAId}
+        pickState={resolvePickState(match.teamAId)}
         isHoveredTeam={hoveredTeamId === match.teamAId}
         hasHover={hasHover}
         isTop
+        onPick={canPick ? handlePick : undefined}
         onHoverTeam={onHoverTeam}
       />
       <PlayerRow
@@ -507,10 +648,34 @@ const MatchCard = ({
         name={match.p2}
         score={match.s2}
         isWinner={match.winner === match.p2}
+        isSelected={selectedTeamId === match.teamBId}
+        pickState={resolvePickState(match.teamBId)}
         isHoveredTeam={hoveredTeamId === match.teamBId}
         hasHover={hasHover}
+        onPick={canPick ? handlePick : undefined}
         onHoverTeam={onHoverTeam}
       />
+    </>
+  );
+
+  if (disableMatchLink || canPick || !isMatchCompleted) {
+    return (
+      <div
+        className={`${BRACKET_CARD_CLASS} transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+        style={{ width: CARD_W, height: CARD_H }}
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
+      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      style={{ width: CARD_W, height: CARD_H }}
+    >
+      {content}
     </Link>
   );
 };
@@ -530,24 +695,36 @@ const TeamListCard = ({
 }) => {
   const toneClass =
     tone === "advanced"
-      ? "text-emerald-300 border-emerald-400/30"
-      : "text-rose-300 border-rose-400/30";
+      ? {
+          title: "text-emerald-300",
+          record: "text-emerald-200",
+          empty: "text-emerald-200",
+          hover: "bg-emerald-500/20",
+        }
+      : {
+          title: "text-rose-300",
+          record: "text-rose-200",
+          empty: "text-rose-200",
+          hover: "bg-rose-500/20",
+        };
 
   const hasHover = hoveredTeamId !== null;
 
   return (
-    <div
-      className={`neo-box-sm bg-card/50 border ${toneClass} p-3 flex flex-col w-full`}
-    >
-      <p className="text-sm font-bold uppercase tracking-wide mb-2">
-        {title} ({teams.length})
-      </p>
-      <div className="space-y-1.5 flex-1 min-h-0 overflow-auto pr-1">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span
+          className={`text-xs font-extrabold uppercase tracking-widest ${toneClass.title}`}
+        >
+          {title}
+        </span>
+      </div>
+      <div className="space-y-2">
         {teams.length ? (
           teams.map((team) => (
             <div
               key={`${title}-${team.id}`}
-              className={`flex items-center justify-between text-xs rounded-sm px-1 py-0.5 transition-colors duration-150 cursor-default ${hasHover ? (hoveredTeamId === team.id ? "bg-primary/20" : "opacity-50") : ""}`}
+              className={`flex items-center justify-between rounded-sm border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs transition-colors duration-150 ${hasHover ? (hoveredTeamId === team.id ? toneClass.hover : "opacity-60") : ""}`}
               onMouseEnter={() => onHoverTeam(team.id)}
               onMouseLeave={() => onHoverTeam(null)}
             >
@@ -559,32 +736,44 @@ const TeamListCard = ({
                 />
                 <span className="truncate">{team.name}</span>
               </span>
-              <span className="font-semibold ml-2 whitespace-nowrap">
-                {team.wins}-{team.losses}
+              <span
+                className={`font-semibold ml-2 whitespace-nowrap ${toneClass.record}`}
+              >
+                {team.wins}T - {team.losses}B
               </span>
             </div>
           ))
         ) : (
-          <p className="text-xstext-[#EEEEEE]">Chưa có đội.</p>
+          <p className={`text-xs ${toneClass.empty}`}>Chưa có đội.</p>
         )}
       </div>
     </div>
   );
 };
 
-const SwissBracket = ({ bracketId }: SwissBracketProps) => {
-  const { tournament } = useOutletContext<BracketOutletContext>();
+const SwissBracket = ({
+  bracketId,
+  selectedTeamByMatchId,
+  pickStatusByMatchId,
+  onPickTeam,
+  disableMatchLink,
+  tournamentRegistered,
+}: SwissBracketProps) => {
+  const outletContext = useOutletContext<BracketOutletContext | undefined>();
+  const tournament = outletContext?.tournament;
   const [hoveredTeamId, setHoveredTeamId] = useState<number | null>(null);
+
+  const registeredTeams = tournamentRegistered ?? tournament?.registered ?? [];
 
   const teamNameById = useMemo(() => {
     const map: Record<number, string> = {};
-    (tournament?.registered ?? []).forEach((team) => {
+    registeredTeams.forEach((team) => {
       const teamId = toNumber(team.team_id ?? team.id);
       if (!teamId) return;
       map[teamId] = team.name || team.short_name || `Team #${teamId}`;
     });
     return map;
-  }, [tournament?.registered]);
+  }, [registeredTeams]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["swiss-bracket-matches", bracketId],
@@ -605,17 +794,25 @@ const SwissBracket = ({ bracketId }: SwissBracketProps) => {
     [data, teamNameById],
   );
 
+  const matchCountByRound = useMemo(() => {
+    const map = new Map<number, number>();
+
+    displayMatches.forEach((match) => {
+      if (match.round <= 0) return;
+      map.set(match.round, (map.get(match.round) ?? 0) + 1);
+    });
+
+    return map;
+  }, [displayMatches]);
+
   const rounds = useMemo(
-    () =>
-      Array.from(new Set(displayMatches.map((match) => match.round))).sort(
-        (a, b) => a - b,
-      ),
-    [displayMatches],
+    () => [...matchCountByRound.keys()].sort((a, b) => a - b),
+    [matchCountByRound],
   );
 
   const { labels, layout, relations, advanceWins, eliminateLosses } = useMemo(
-    () => getLayoutForRounds(rounds.length),
-    [rounds.length],
+    () => getLayoutForRounds(rounds, matchCountByRound),
+    [rounds, matchCountByRound],
   );
 
   const stageMatches = useMemo(() => {
@@ -813,19 +1010,26 @@ const SwissBracket = ({ bracketId }: SwissBracketProps) => {
 
     for (const match of displayMatches) {
       if (!isResolvedSwissMatch(match)) continue;
-      if (!match.teamAId || !match.teamBId) continue;
 
       const winnerTeamId = resolveMatchWinnerTeamId(match);
       if (!winnerTeamId) continue;
 
-      const loserTeamId =
-        winnerTeamId === match.teamAId ? match.teamBId : match.teamAId;
+      const hasTeamA = match.teamAId !== null;
+      const hasTeamB = match.teamBId !== null;
 
-      const winner = teamMap.get(winnerTeamId);
-      const loser = teamMap.get(loserTeamId);
+      if (hasTeamA && hasTeamB) {
+        const loserTeamId =
+          winnerTeamId === match.teamAId ? match.teamBId : match.teamAId;
 
-      if (winner) winner.wins += 1;
-      if (loser) loser.losses += 1;
+        const winner = teamMap.get(winnerTeamId);
+        const loser = teamMap.get(loserTeamId);
+
+        if (winner) winner.wins += 1;
+        if (loser) loser.losses += 1;
+      } else {
+        const winner = teamMap.get(winnerTeamId);
+        if (winner) winner.wins += 1;
+      }
     }
 
     const teams = [...teamMap.values()];
@@ -869,157 +1073,189 @@ const SwissBracket = ({ bracketId }: SwissBracketProps) => {
   }
 
   return (
-    <div className="w-full overflow-x-auto">
-      <div className="flex items-start gap-4 min-w-max">
-        <div
-          className="relative shrink-0"
-          style={{
-            width: layoutInfo.contentWidth,
-            height: layoutInfo.contentHeight,
-          }}
-        >
-          {layout.flat().map((label) => {
-            const metrics = layoutInfo.stageMetrics.get(label);
-            if (!metrics) return null;
+    <PickemContext.Provider
+      value={{
+        selectedTeamByMatchId,
+        pickStatusByMatchId,
+        onPickTeam,
+        disableMatchLink,
+      }}
+    >
+      <div className="w-full">
+        <div className="flex items-start gap-4 min-w-max">
+          <div
+            className="relative shrink-0"
+            style={{
+              width: layoutInfo.contentWidth,
+              height: layoutInfo.contentHeight,
+            }}
+          >
+            {layout.flat().map((label) => {
+              const metrics = layoutInfo.stageMetrics.get(label);
+              if (!metrics) return null;
 
-            const matches = stageMatches.get(label) ?? [];
-            const renderMatches = matches.length
-              ? matches
-              : [
-                  {
-                    id: -1,
-                    routeMatchId: -1,
-                    round: 0,
-                    matchNo: 0,
-                    teamAId: null,
-                    teamBId: null,
-                    winnerTeamId: null,
-                    p1: "TBD",
-                    p2: "TBD",
-                    p1Logo: null,
-                    p2Logo: null,
-                    s1: null,
-                    s2: null,
-                    winner: null,
-                    status: "scheduled",
-                  } as DisplayMatch,
-                ];
+              const matches = stageMatches.get(label) ?? [];
+              const stageTitle =
+                label.startsWith("R") && matches.length
+                  ? `Vòng ${matches[0].round}`
+                  : label;
+              const outcomeDots = matches
+                .flatMap((match) =>
+                  isResolvedSwissMatch(match) ? ["win", "loss"] : ["pending"],
+                )
+                .slice(0, 4);
+              while (outcomeDots.length < 4) outcomeDots.push("pending");
+              const renderMatches = matches.length
+                ? matches
+                : [
+                    {
+                      id: -1,
+                      routeMatchId: -1,
+                      round: 0,
+                      matchNo: 0,
+                      teamAId: null,
+                      teamBId: null,
+                      winnerTeamId: null,
+                      p1: "TBD",
+                      p2: "TBD",
+                      p1Logo: null,
+                      p2Logo: null,
+                      s1: null,
+                      s2: null,
+                      winner: null,
+                      status: "scheduled",
+                    } as DisplayMatch,
+                  ];
 
-            return (
-              <div
-                key={label}
-                className="absolute neo-box-sm bg-card/50 border border-border/60"
-                style={{
-                  left: metrics.x,
-                  top: metrics.y,
-                  width: STAGE_W,
-                  height: metrics.height,
-                  padding: `${STAGE_PAD_Y}px ${STAGE_PAD_X}px`,
-                }}
-              >
-                <div className="h-6 flex items-center justify-center text-xs font-bold tracking-wider uppercase text-primary">
-                  {label}
+              return (
+                <div
+                  key={label}
+                  className="absolute rounded-md border border-neutral-700 bg-neutral-900 shadow-lg"
+                  style={{
+                    left: metrics.x,
+                    top: metrics.y,
+                    width: STAGE_W,
+                    height: metrics.height,
+                    padding: `${STAGE_PAD_Y}px ${STAGE_PAD_X}px`,
+                  }}
+                >
+                  <div className={STAGE_HEADER_CLASS}>
+                    <span>{stageTitle}</span>
+                    <div className="flex items-center gap-1">
+                      {outcomeDots.map((tone, index) => (
+                        <span
+                          key={`${label}-dot-${index}`}
+                          className={`${STAGE_HEADER_DOT_CLASS} ${
+                            tone === "win"
+                              ? "bg-emerald-500"
+                              : tone === "loss"
+                                ? "bg-rose-500"
+                                : "bg-neutral-400"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {renderMatches.map((match) =>
+                      match.routeMatchId > 0 ? (
+                        <MatchCard
+                          key={match.id}
+                          match={match}
+                          hoveredTeamId={hoveredTeamId}
+                          onHoverTeam={setHoveredTeamId}
+                          isInJourney={
+                            !journeyMatchIds || journeyMatchIds.has(match.id)
+                          }
+                        />
+                      ) : (
+                        <div
+                          key={`${label}-placeholder`}
+                          className="rounded-md border border-neutral-800 bg-neutral-950"
+                          style={{ width: CARD_W, height: CARD_H }}
+                        />
+                      ),
+                    )}
+                  </div>
                 </div>
+              );
+            })}
 
-                <div className="space-y-3">
-                  {renderMatches.map((match) =>
-                    match.routeMatchId > 0 ? (
-                      <MatchCard
-                        key={match.id}
-                        match={match}
-                        hoveredTeamId={hoveredTeamId}
-                        onHoverTeam={setHoveredTeamId}
-                        isInJourney={
-                          !journeyMatchIds || journeyMatchIds.has(match.id)
-                        }
-                      />
-                    ) : (
-                      <div
-                        key={`${label}-placeholder`}
-                        className="neo-box-sm bg-card/40"
-                        style={{ width: CARD_W, height: CARD_H }}
-                      />
-                    ),
+            {connectors.map((connector) =>
+              connector.type === "single" ? (
+                <StageConnectorSingle
+                  key={connector.key}
+                  x1={connector.x1}
+                  x2={connector.x2}
+                  y1={connector.y1}
+                  y2={connector.y2}
+                  hasHover={hoveredTeamId !== null}
+                  active={Boolean(
+                    journeyStageLabels &&
+                    journeyStageLabels.has(connector.fromLabel) &&
+                    journeyStageLabels.has(connector.toLabel),
                   )}
-                </div>
-              </div>
-            );
-          })}
-
-          {connectors.map((connector) =>
-            connector.type === "single" ? (
-              <StageConnectorSingle
-                key={connector.key}
-                x1={connector.x1}
-                x2={connector.x2}
-                y1={connector.y1}
-                y2={connector.y2}
-                hasHover={hoveredTeamId !== null}
-                active={Boolean(
-                  journeyStageLabels &&
-                  journeyStageLabels.has(connector.fromLabel) &&
-                  journeyStageLabels.has(connector.toLabel),
-                )}
-              />
-            ) : (
-              <StageConnectorMerge
-                key={connector.key}
-                x1={connector.x1}
-                x2={connector.x2}
-                yTop={connector.yTop}
-                yBottom={connector.yBottom}
-                yOut={connector.yOut}
-                hasHover={hoveredTeamId !== null}
-                activeInputIndexes={
-                  journeyStageLabels
-                    ? connector.sourceLabels
-                        .map((label, index) =>
-                          journeyStageLabels.has(label) ? index : -1,
-                        )
-                        .filter((index) => index !== -1)
-                    : []
-                }
-                activeOutput={Boolean(
-                  journeyStageLabels &&
-                  connector.sourceLabels.some((label) =>
-                    journeyStageLabels.has(label),
-                  ) &&
-                  journeyStageLabels.has(connector.toLabel),
-                )}
-              />
-            ),
-          )}
-        </div>
-
-        <div
-          className="shrink-0 flex flex-col items-start justify-center"
-          style={{
-            width: STAGE_W,
-            height: layoutInfo.contentHeight,
-            gap: STAGE_GAP,
-          }}
-        >
-          <div className="min-h-0 w-full">
-            <TeamListCard
-              title="Đi tiếp"
-              teams={teamProgress.advanced}
-              tone="advanced"
-              hoveredTeamId={hoveredTeamId}
-              onHoverTeam={setHoveredTeamId}
-            />
+                />
+              ) : (
+                <StageConnectorMerge
+                  key={connector.key}
+                  x1={connector.x1}
+                  x2={connector.x2}
+                  yTop={connector.yTop}
+                  yBottom={connector.yBottom}
+                  yOut={connector.yOut}
+                  hasHover={hoveredTeamId !== null}
+                  activeInputIndexes={
+                    journeyStageLabels
+                      ? connector.sourceLabels
+                          .map((label, index) =>
+                            journeyStageLabels.has(label) ? index : -1,
+                          )
+                          .filter((index) => index !== -1)
+                      : []
+                  }
+                  activeOutput={Boolean(
+                    journeyStageLabels &&
+                    connector.sourceLabels.some((label) =>
+                      journeyStageLabels.has(label),
+                    ) &&
+                    journeyStageLabels.has(connector.toLabel),
+                  )}
+                />
+              ),
+            )}
           </div>
-          <div className="min-h-0 w-full">
-            <TeamListCard
-              title="Bị loại"
-              teams={teamProgress.eliminated}
-              tone="eliminated"
-              hoveredTeamId={hoveredTeamId}
-              onHoverTeam={setHoveredTeamId}
-            />
+
+          <div
+            className="shrink-0 flex flex-col items-start justify-center"
+            style={{
+              width: STAGE_W,
+              gap: STAGE_GAP,
+            }}
+          >
+            <div className="w-full">
+              <TeamListCard
+                title="Lọt vào"
+                teams={teamProgress.advanced}
+                tone="advanced"
+                hoveredTeamId={hoveredTeamId}
+                onHoverTeam={setHoveredTeamId}
+              />
+            </div>
+            <div className="w-full">
+              <TeamListCard
+                title="Bị loại"
+                teams={teamProgress.eliminated}
+                tone="eliminated"
+                hoveredTeamId={hoveredTeamId}
+                onHoverTeam={setHoveredTeamId}
+              />
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </PickemContext.Provider>
   );
 };
 

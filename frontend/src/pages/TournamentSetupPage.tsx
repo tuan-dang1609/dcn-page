@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Eye, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import {
@@ -6,11 +6,15 @@ import {
   createRequirements,
   createRules,
   createTournament,
+  getAllTournaments,
+  getGames,
   getRankGames,
+  getTournamentBySlug,
   syncMilestones,
   syncRules,
   updateRequirements,
   updateTournament,
+  type GameOption,
   type MilestonePayload,
   type RankGame,
   type RulePayload,
@@ -41,6 +45,43 @@ interface RuleDraft {
   content: string;
 }
 
+type TournamentListItem = {
+  id: number;
+  name: string;
+  slug?: string | null;
+  game_id?: number | null;
+  season?: string | null;
+  date_start?: string | null;
+  date_end?: string | null;
+  register_start?: string | null;
+  register_end?: string | null;
+  check_in_start?: string | null;
+  check_in_end?: string | null;
+  max_player_per_team?: number | null;
+  max_participate?: number | null;
+  banner_url?: string | null;
+};
+
+type TournamentRequirementApi = {
+  rank_min?: string;
+  rank_max?: string;
+  device?: string[] | string | null;
+  discord?: boolean | null;
+} | null;
+
+type TournamentMilestoneApi = {
+  id?: number | string;
+  title?: string | null;
+  context?: string | null;
+  milestone_time?: string | null;
+};
+
+type TournamentRuleApi = {
+  id?: number | string;
+  title?: string | null;
+  content?: string | null;
+};
+
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined) return null;
   if (typeof value === "string" && value.trim() === "") return null;
@@ -67,6 +108,31 @@ const openDateTimePicker = (event: { currentTarget: HTMLInputElement }) => {
   }
 };
 
+const toInputValue = (value: unknown) =>
+  value === null || value === undefined ? "" : String(value);
+
+const toGmt7InputDateTime = (value?: string | null) => {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+
+  const hasTimeZone = /[zZ]$|[+-]\d{2}:\d{2}$/.test(trimmed);
+  if (!hasTimeZone) {
+    return trimmed.replace(" ", "T").slice(0, 16);
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const gmt7 = new Date(parsed.getTime() + 7 * 60 * 60 * 1000);
+  const year = gmt7.getUTCFullYear();
+  const month = String(gmt7.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(gmt7.getUTCDate()).padStart(2, "0");
+  const hour = String(gmt7.getUTCHours()).padStart(2, "0");
+  const minute = String(gmt7.getUTCMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+};
+
 const toGmt7OffsetDateTime = (value: string) => {
   const trimmed = String(value || "").trim();
   if (!trimmed) return undefined;
@@ -81,6 +147,11 @@ const toGmt7OffsetDateTime = (value: string) => {
 
   return `${normalized}+07:00`;
 };
+
+const normalizeRankKey = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
 
 const TournamentSetupPage = () => {
   const navigate = useNavigate();
@@ -136,7 +207,14 @@ const TournamentSetupPage = () => {
     devices_csv: "",
     discord_required: "false",
   });
+  const [gameOptions, setGameOptions] = useState<GameOption[]>([]);
+  const [tournamentOptions, setTournamentOptions] = useState<
+    TournamentListItem[]
+  >([]);
   const [rankOptions, setRankOptions] = useState<RankGame[]>([]);
+  const [pendingRequirement, setPendingRequirement] =
+    useState<TournamentRequirementApi>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -181,6 +259,32 @@ const TournamentSetupPage = () => {
   }, [bannerFile]);
 
   useEffect(() => {
+    const loadTournaments = async () => {
+      try {
+        const response = await getAllTournaments();
+        setTournamentOptions((response.data ?? []) as TournamentListItem[]);
+      } catch {
+        setTournamentOptions([]);
+      }
+    };
+
+    void loadTournaments();
+  }, []);
+
+  useEffect(() => {
+    const loadGameOptions = async () => {
+      try {
+        const response = await getGames();
+        setGameOptions(response.data?.data ?? []);
+      } catch {
+        setGameOptions([]);
+      }
+    };
+
+    void loadGameOptions();
+  }, []);
+
+  useEffect(() => {
     const loadRankOptions = async () => {
       try {
         const response = await getRankGames();
@@ -200,6 +304,39 @@ const TournamentSetupPage = () => {
     () => slugify(tournamentForm.name),
     [tournamentForm.name],
   );
+  const rankIdByName = useMemo(() => {
+    const entries = rankOptions.map((rank) => [
+      normalizeRankKey(rank.name),
+      String(rank.id),
+    ]);
+    return new Map(entries);
+  }, [rankOptions]);
+  const gameById = useMemo(() => {
+    const entries = gameOptions.map((game) => [String(game.id), game]);
+    return new Map(entries);
+  }, [gameOptions]);
+  const tournamentById = useMemo(() => {
+    const entries = tournamentOptions.map((item) => [String(item.id), item]);
+    return new Map(entries);
+  }, [tournamentOptions]);
+  const tournamentOptionsSorted = useMemo(
+    () =>
+      [...tournamentOptions].sort(
+        (a, b) => Number(b.id ?? 0) - Number(a.id ?? 0),
+      ),
+    [tournamentOptions],
+  );
+  const selectedGameId = tournamentForm.game_id;
+  const hasGameIdOption = gameOptions.some(
+    (game) => String(game.id) === selectedGameId,
+  );
+  const selectedPreviewSlug = tournamentForm.preview_game_slug.trim();
+  const hasPreviewOption = gameOptions.some(
+    (game) => String(game.short_name) === selectedPreviewSlug,
+  );
+  const hasTournamentIdOption = tournamentOptions.some(
+    (item) => String(item.id) === tournamentIdInput,
+  );
 
   const bannerPreview = bannerPreviewFromFile || undefined;
 
@@ -215,6 +352,149 @@ const TournamentSetupPage = () => {
   const markStepCompleted = (stepIndex: StepIndex) => {
     setCompletedSteps((prev) => ({ ...prev, [stepIndex]: true }));
   };
+
+  const applyRequirementFromApi = (requirement: TournamentRequirementApi) => {
+    if (!requirement) {
+      setRequirements({
+        rank_min: "",
+        rank_max: "",
+        devices_csv: "",
+        discord_required: "false",
+      });
+      setPendingRequirement(null);
+      return;
+    }
+
+    const rankMinId = rankIdByName.get(normalizeRankKey(requirement.rank_min));
+    const rankMaxId = rankIdByName.get(normalizeRankKey(requirement.rank_max));
+    const devices = Array.isArray(requirement.device)
+      ? requirement.device
+      : requirement.device
+        ? [String(requirement.device)]
+        : [];
+    const devicesCsv = devices.map((item) => String(item).trim()).join(", ");
+
+    setRequirements({
+      rank_min: rankMinId ?? "",
+      rank_max: rankMaxId ?? "",
+      devices_csv: devicesCsv,
+      discord_required: requirement.discord ? "true" : "false",
+    });
+    setPendingRequirement(null);
+  };
+
+  const applyTournamentDetails = (
+    details: NonNullable<
+      Awaited<ReturnType<typeof getTournamentBySlug>>["data"]["info"]
+    >,
+  ) => {
+    const nextMilestones = Array.isArray(details.milestones)
+      ? (details.milestones as TournamentMilestoneApi[]).map((item) => ({
+          id: item?.id !== undefined && item?.id !== null ? String(item.id) : "",
+          title: String(item?.title ?? ""),
+          context: String(item?.context ?? ""),
+          milestone_time: toGmt7InputDateTime(item?.milestone_time),
+        }))
+      : [];
+    const nextRules = Array.isArray(details.rule)
+      ? (details.rule as TournamentRuleApi[]).map((item) => ({
+          id: item?.id !== undefined && item?.id !== null ? String(item.id) : "",
+          title: String(item?.title ?? ""),
+          content: String(item?.content ?? ""),
+        }))
+      : [];
+
+    setMilestones(
+      nextMilestones.length
+        ? nextMilestones
+        : [{ title: "", context: "", milestone_time: "" }],
+    );
+    setRules(
+      nextRules.length ? nextRules : [{ title: "", content: "" }],
+    );
+    setMilestoneMode("patch");
+    setRuleMode("patch");
+    setRequirementMode("patch");
+    setPendingRequirement(
+      (details.requirement ?? null) as TournamentRequirementApi,
+    );
+  };
+
+  const applyTournamentToForm = (selected: TournamentListItem) => {
+    const selectedGame = gameById.get(String(selected.game_id ?? ""));
+    const fallbackCheckInStart =
+      selected.check_in_start ?? selected.register_start ?? null;
+    const fallbackCheckInEnd =
+      selected.check_in_end ?? selected.register_end ?? null;
+
+    setTournamentForm((prev) => ({
+      ...prev,
+      name: selected.name ?? "",
+      game_id: toInputValue(selected.game_id),
+      season: toInputValue(selected.season),
+      date_start: toGmt7InputDateTime(selected.date_start),
+      date_end: toGmt7InputDateTime(selected.date_end),
+      register_start: toGmt7InputDateTime(selected.register_start),
+      register_end: toGmt7InputDateTime(selected.register_end),
+      check_in_start: toGmt7InputDateTime(fallbackCheckInStart),
+      check_in_end: toGmt7InputDateTime(fallbackCheckInEnd),
+      max_player_per_team: toInputValue(selected.max_player_per_team),
+      max_participate: toInputValue(selected.max_participate),
+      preview_game_slug: selectedGame?.short_name ?? prev.preview_game_slug,
+    }));
+
+    if (selected.id !== undefined && selected.id !== null) {
+      setTournamentIdInput(String(selected.id));
+      setWorkflowTournamentId(String(selected.id));
+    }
+
+    setBannerFile(null);
+  };
+
+  const handleTournamentSelect = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextId = event.target.value;
+    setTournamentIdInput(nextId);
+
+    if (!nextId) {
+      setMilestones([{ title: "", context: "", milestone_time: "" }]);
+      setRules([{ title: "", content: "" }]);
+      applyRequirementFromApi(null);
+      return;
+    }
+    const selected = tournamentById.get(nextId);
+    if (!selected) return;
+
+    applyTournamentToForm(selected);
+
+    const selectedGame = gameById.get(String(selected.game_id ?? ""));
+    if (!selectedGame?.short_name || !selected.slug) return;
+
+    setDetailsLoading(true);
+    void getTournamentBySlug(selectedGame.short_name, selected.slug)
+      .then((response) => {
+        const info = response.data?.info;
+        if (info) applyTournamentDetails(info);
+      })
+      .catch((error: any) => {
+        toast({
+          title: "Không tải được chi tiết giải đấu",
+          description:
+            error?.response?.data?.error ||
+            error?.message ||
+            "Vui lòng thử lại.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setDetailsLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    if (!pendingRequirement) return;
+    if (!rankOptions.length) return;
+    applyRequirementFromApi(pendingRequirement);
+  }, [pendingRequirement, rankOptions]);
 
   const canEnterStep = (targetStep: StepIndex) => {
     if (targetStep === 1) return true;
@@ -600,12 +880,41 @@ const TournamentSetupPage = () => {
             </div>
 
             <div className="grid gap-3 md:grid-cols-3">
-              <Input
-                value={tournamentIdInput}
-                onChange={(event) => setTournamentIdInput(event.target.value)}
-                placeholder="tournament_id (khi update)"
-                inputMode="numeric"
-              />
+              {tournamentMode === "update" ? (
+                <div className="space-y-1">
+                  <label className="text-xstext-[#EEEEEE]">
+                    Chọn giải đấu
+                  </label>
+                  <select
+                    value={tournamentIdInput}
+                    onChange={handleTournamentSelect}
+                    disabled={detailsLoading}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="">
+                      {detailsLoading ? "Đang tải..." : "Chọn tournament_id"}
+                    </option>
+                    {tournamentIdInput && !hasTournamentIdOption ? (
+                      <option value={tournamentIdInput}>
+                        ID {tournamentIdInput}
+                      </option>
+                    ) : null}
+                    {tournamentOptionsSorted.map((item) => {
+                      const game = gameById.get(String(item.game_id ?? ""));
+                      const gameLabel = game
+                        ? ` - ${game.name} (${game.short_name})`
+                        : "";
+
+                      return (
+                        <option key={item.id} value={String(item.id)}>
+                          #{item.id} - {item.name}
+                          {gameLabel}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              ) : null}
               <Input
                 value={workflowTournamentId}
                 onChange={(event) =>
@@ -614,17 +923,31 @@ const TournamentSetupPage = () => {
                 placeholder="ID dùng cho các bước sau"
                 inputMode="numeric"
               />
-              <Input
-                value={tournamentForm.game_id}
-                onChange={(event) =>
-                  setTournamentForm((prev) => ({
-                    ...prev,
-                    game_id: event.target.value,
-                  }))
-                }
-                placeholder="game_id"
-                inputMode="numeric"
-              />
+              <div className="space-y-1">
+                <label className="text-xstext-[#EEEEEE]">Game</label>
+                <select
+                  value={tournamentForm.game_id}
+                  onChange={(event) =>
+                    setTournamentForm((prev) => ({
+                      ...prev,
+                      game_id: event.target.value,
+                    }))
+                  }
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Chọn game (game_id)</option>
+                  {selectedGameId && !hasGameIdOption ? (
+                    <option value={selectedGameId}>
+                      ID {selectedGameId}
+                    </option>
+                  ) : null}
+                  {gameOptions.map((game) => (
+                    <option key={game.id} value={String(game.id)}>
+                      {game.name} ({game.short_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
               <Input
                 value={tournamentForm.name}
                 onChange={(event) =>
@@ -645,16 +968,36 @@ const TournamentSetupPage = () => {
                 }
                 placeholder="season (vd: 2026-S1)"
               />
-              <Input
-                value={tournamentForm.preview_game_slug}
-                onChange={(event) =>
-                  setTournamentForm((prev) => ({
-                    ...prev,
-                    preview_game_slug: event.target.value,
-                  }))
-                }
-                placeholder="game slug preview (valorant/tft...)"
-              />
+              <div className="space-y-1">
+                <label className="text-xstext-[#EEEEEE]">
+                  Game slug preview
+                </label>
+                <select
+                  value={tournamentForm.preview_game_slug}
+                  onChange={(event) =>
+                    setTournamentForm((prev) => ({
+                      ...prev,
+                      preview_game_slug: event.target.value,
+                    }))
+                  }
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Chọn game slug</option>
+                  {selectedPreviewSlug && !hasPreviewOption ? (
+                    <option value={selectedPreviewSlug}>
+                      {selectedPreviewSlug}
+                    </option>
+                  ) : null}
+                  {gameOptions.map((game) => (
+                    <option
+                      key={`${game.id}-${game.short_name}`}
+                      value={game.short_name}
+                    >
+                      {game.name} ({game.short_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="space-y-1">
                 <label className="text-xstext-[#EEEEEE]">
                   Date start (GMT+7)

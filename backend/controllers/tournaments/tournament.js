@@ -67,6 +67,22 @@ function slugify(s) {
 }
 
 tournamentRouter.get(
+  "/games",
+  async ({ set }) => {
+    const { rows } = await pool.query(
+      "SELECT id, name, short_name, icon_game_url FROM games ORDER BY id ASC",
+    );
+
+    set.status = 200;
+    return { data: rows };
+  },
+  {
+    tags: [TAG],
+    summary: "List games",
+  },
+);
+
+tournamentRouter.get(
   "/by-slug/:game/:slug",
   async ({ params, set }) => {
     const { game, slug } = params;

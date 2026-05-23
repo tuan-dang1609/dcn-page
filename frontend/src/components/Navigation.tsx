@@ -17,7 +17,6 @@ const Navigation = () => {
     { to: `${basePath}/bracket`, label: "Nhánh đấu" },
     { to: `${basePath}/participants`, label: "Danh sách" },
     { to: `${basePath}/leaderboard`, label: "BXH" },
-    { to: `${basePath}/pickem`, label: "Pick'em" },
     { to: `${basePath}/rule`, label: "Luật" },
   ];
   const navigate = useNavigate();

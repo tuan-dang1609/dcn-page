@@ -77,9 +77,18 @@ export interface Match {
   bracket_id: number;
   round_number?: number;
   match_no?: number;
+  room_id?: string | null;
+  tournament_slug?: string | null;
+  tournament_game_short_name?: string | null;
+  ban_pick_id?: number | null;
+  ban_pick_countdown_seconds?: number | null;
+  next_match_id?: number | null;
+  next_slot?: "A" | "B" | string | null;
   date_scheduled?: string | null;
   team_a_id?: number | null;
   team_b_id?: number | null;
+  seed_a?: number | null;
+  seed_b?: number | null;
   score_a?: number | null;
   score_b?: number | null;
   winner_team_id?: number | null;

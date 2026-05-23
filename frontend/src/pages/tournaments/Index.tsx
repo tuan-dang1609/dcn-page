@@ -12,6 +12,7 @@ const Layout = () => {
   const isMatchDetailPage = Boolean(
     useMatch("/tournament/:game/:slug/match/:id"),
   );
+  const isLobbyPage = Boolean(useMatch("/tournament/:game/:slug/lobby/:id"));
   const { game, slug } = useParams();
   const { tournament, isLoading, refetch } = useTournamentBySlug(game, slug);
   const location = useLocation();
@@ -21,7 +22,7 @@ const Layout = () => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
-  if (isMatchDetailPage) {
+  if (isMatchDetailPage || isLobbyPage) {
     return (
       <div className="min-h-screen bg-background">
         <Outlet context={{ tournament, isLoading, refetch }} />

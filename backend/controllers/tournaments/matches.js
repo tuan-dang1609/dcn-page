@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
 import logger from "../../utils/logger.js";
+import { deleteBanPickSession } from "../../utils/banPick.js";
 import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
 
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
@@ -28,6 +29,7 @@ const gameProviderRouteTemplates = {
 
 let matchGamesInfoIdColumnCache = null;
 let matchGamesHasGameIdColumnCache = null;
+let ensureMatchRoomIdColumnPromise = null;
 
 const toNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -35,6 +37,30 @@ const toNumber = (value) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 };
+
+const ensureMatchRoomIdColumn = async () => {
+  if (ensureMatchRoomIdColumnPromise) {
+    return ensureMatchRoomIdColumnPromise;
+  }
+
+  ensureMatchRoomIdColumnPromise = pool
+    .query(
+      `
+      ALTER TABLE matches
+      ADD COLUMN IF NOT EXISTS room_id TEXT NULL
+      `,
+    )
+    .catch((error) => {
+      ensureMatchRoomIdColumnPromise = null;
+      throw error;
+    });
+
+  return ensureMatchRoomIdColumnPromise;
+};
+
+matchRouter.onBeforeHandle(async () => {
+  await ensureMatchRoomIdColumn();
+});
 
 const normalizePayloadArray = (body, key) => {
   if (Array.isArray(body)) return body;
@@ -513,9 +539,17 @@ matchRouter.get(
              m.bracket_id,
              m.round_number,
              m.match_no,
+              m.room_id,
               m.date_scheduled,
+              (to_jsonb(m)->>'room_id') AS room_id,
+              t.slug AS tournament_slug,
+              g.short_name AS tournament_game_short_name,
+              m.ban_pick_id,
+              bp.turn_time_limit_seconds AS ban_pick_countdown_seconds,
              m.team_a_id,
              m.team_b_id,
+              m.next_match_id,
+              m.next_slot,
              m.seed_a,
              m.seed_b,
              m.score_a,
@@ -537,6 +571,10 @@ matchRouter.get(
                'team_color_hex', t2.team_color_hex
              ) AS team_b
       FROM matches m
+      LEFT JOIN brackets b ON b.id = m.bracket_id
+      LEFT JOIN tournaments t ON t.id = b.tournament_id
+      LEFT JOIN games g ON g.id = t.game_id
+      LEFT JOIN ban_picks bp ON bp.match_id = m.id
       LEFT JOIN teams t1 ON t1.id = m.team_a_id
       LEFT JOIN teams t2 ON t2.id = m.team_b_id
       WHERE m.bracket_id = $1
@@ -662,6 +700,11 @@ matchRouter.post(
       infoGameIdRaw === null || infoGameIdRaw === undefined
         ? null
         : String(infoGameIdRaw).trim();
+    const roomIdRaw = body?.room_id ?? body?.roomId ?? body?.lobby_id;
+    const roomIdFromPayload =
+      roomIdRaw === null || roomIdRaw === undefined
+        ? null
+        : String(roomIdRaw).trim();
 
     if (!infoGameId) {
       set.status = 400;
@@ -730,10 +773,37 @@ matchRouter.post(
       return { error: "Không thể đọc dữ liệu game vừa tạo" };
     }
 
+    const existingRoomId = String(match.room_id ?? "").trim();
+    const shouldAutofillRoomId = !existingRoomId && gameNo === 1;
+    const roomIdToPersist =
+      roomIdFromPayload || (shouldAutofillRoomId ? infoGameId : null);
+
+    let effectiveRoomId = existingRoomId || null;
+
+    if (roomIdToPersist) {
+      const normalizedRoomId = String(roomIdToPersist).trim();
+
+      if (normalizedRoomId) {
+        await pool.query(
+          `
+          UPDATE matches
+          SET room_id = $1
+          WHERE id = $2
+          `,
+          [normalizedRoomId, matchId],
+        );
+
+        effectiveRoomId = normalizedRoomId;
+      }
+    }
+
     set.status = 201;
     return {
       message: "Thêm info_game_id thành công",
-      data: formatGameIdRowResponse(item, fallbackProvider),
+      data: {
+        ...formatGameIdRowResponse(item, fallbackProvider),
+        room_id: effectiveRoomId,
+      },
     };
   },
   {
@@ -783,6 +853,27 @@ matchRouter.patch(
 
     const updates = [];
     const values = [];
+    const shouldUpdateRoomId =
+      body?.room_id !== undefined ||
+      body?.roomId !== undefined ||
+      body?.lobby_id !== undefined;
+
+    if (shouldUpdateRoomId) {
+      const nextRoomIdRaw = body?.room_id ?? body?.roomId ?? body?.lobby_id;
+      const nextRoomId =
+        nextRoomIdRaw === null || nextRoomIdRaw === undefined
+          ? null
+          : String(nextRoomIdRaw).trim() || null;
+
+      await pool.query(
+        `
+        UPDATE matches
+        SET room_id = $1
+        WHERE id = $2
+        `,
+        [nextRoomId, matchId],
+      );
+    }
 
     if (
       body?.match_id_info !== undefined ||
@@ -831,24 +922,29 @@ matchRouter.patch(
       updates.push(`game_id = $${values.length}`);
     }
 
-    if (!updates.length) {
+    if (!updates.length && !shouldUpdateRoomId) {
       set.status = 400;
       return { error: "Không có dữ liệu để cập nhật" };
     }
 
-    values.push(gameRowId);
+    let updatedId = gameRowId;
 
-    const { rows } = await pool.query(
-      `
-      UPDATE match_games
-      SET ${updates.join(", ")}
-      WHERE id = $${values.length}
-      RETURNING id
-      `,
-      values,
-    );
+    if (updates.length) {
+      values.push(gameRowId);
 
-    const updatedId = rows[0]?.id;
+      const { rows } = await pool.query(
+        `
+        UPDATE match_games
+        SET ${updates.join(", ")}
+        WHERE id = $${values.length}
+        RETURNING id
+        `,
+        values,
+      );
+
+      updatedId = rows[0]?.id;
+    }
+
     const item = await getMatchGameRowById({
       gameRowId: updatedId,
       infoGameIdColumn,
@@ -861,10 +957,19 @@ matchRouter.patch(
     }
     const fallbackProvider = normalizeProvider(match.game_short_name);
 
+    const { rows: roomRows } = await pool.query(
+      "SELECT room_id FROM matches WHERE id = $1 LIMIT 1",
+      [matchId],
+    );
+    const currentRoomId = roomRows[0]?.room_id ?? null;
+
     set.status = 200;
     return {
       message: "Cập nhật info_game_id thành công",
-      data: formatGameIdRowResponse(item, fallbackProvider),
+      data: {
+        ...formatGameIdRowResponse(item, fallbackProvider),
+        room_id: currentRoomId,
+      },
     };
   },
   {
@@ -920,6 +1025,70 @@ matchRouter.delete(
   {
     tags: [TAG],
     summary: "Delete info_game_id entry",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.patch(
+  "/matches/:match_id/room-id",
+  async ({ params, body, set, user }) => {
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchById(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const hasRoomIdValue =
+      body?.room_id !== undefined ||
+      body?.roomId !== undefined ||
+      body?.lobby_id !== undefined;
+
+    if (!hasRoomIdValue) {
+      set.status = 400;
+      return { error: "room_id là bắt buộc" };
+    }
+
+    const nextRoomIdRaw = body?.room_id ?? body?.roomId ?? body?.lobby_id;
+    const nextRoomId =
+      nextRoomIdRaw === null || nextRoomIdRaw === undefined
+        ? null
+        : String(nextRoomIdRaw).trim() || null;
+
+    const { rows } = await pool.query(
+      `
+      UPDATE matches
+      SET room_id = $1
+      WHERE id = $2
+      RETURNING *
+      `,
+      [nextRoomId, matchId],
+    );
+
+    set.status = 200;
+    return {
+      message: "Cập nhật room_id thành công",
+      data: {
+        match: rows[0] ?? null,
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Update match room_id",
     security: [{ bearerAuth: [] }],
   },
 );
@@ -992,6 +1161,118 @@ matchRouter.patch(
 );
 
 matchRouter.patch(
+  "/matches/:match_id/room-id",
+  async ({ params, body, set, user }) => {
+    await ensureMatchRoomIdColumn();
+
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchById(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    if (body?.room_id === undefined) {
+      set.status = 400;
+      return { error: "room_id là bắt buộc" };
+    }
+
+    const normalizedRoomIdRaw =
+      body?.room_id === null ? "" : String(body.room_id).trim();
+    const nextRoomId = normalizedRoomIdRaw || null;
+
+    if (nextRoomId && nextRoomId.length > 255) {
+      set.status = 400;
+      return { error: "room_id không được vượt quá 255 ký tự" };
+    }
+
+    const { rows } = await pool.query(
+      `
+      UPDATE matches
+      SET room_id = $1
+      WHERE id = $2
+      RETURNING *
+      `,
+      [nextRoomId, matchId],
+    );
+
+    set.status = 200;
+    return {
+      message: "Cập nhật room_id thành công",
+      data: {
+        match: rows[0] ?? null,
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Update match room_id",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.delete(
+  "/matches/:match_id/ban-pick",
+  async ({ params, set, user }) => {
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const match = await getMatchById(matchId);
+    if (!match) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(match.tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const result = await deleteBanPickSession({
+      matchId,
+    });
+
+    if (!result.deleted) {
+      set.status = 200;
+      return {
+        message: "Không có phiên ban/pick để xóa",
+        data: null,
+      };
+    }
+
+    set.status = 200;
+    return {
+      message: "Đã xóa phiên ban/pick",
+      data: result.session,
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Delete ban/pick by match_id",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+matchRouter.patch(
   "/matches/:match_id/score",
   async ({ params, body, set, user }) => {
     const matchId = toNumber(params.match_id);
@@ -1030,16 +1311,31 @@ matchRouter.patch(
       else winnerTeamId = null;
     }
 
+    const hasRoomIdValue =
+      body?.room_id !== undefined ||
+      body?.roomId !== undefined ||
+      body?.lobby_id !== undefined;
+    const nextRoomIdRaw = body?.room_id ?? body?.roomId ?? body?.lobby_id;
+    const nextRoomId = hasRoomIdValue
+      ? nextRoomIdRaw === null || nextRoomIdRaw === undefined
+        ? null
+        : String(nextRoomIdRaw).trim() || null
+      : String(match.room_id ?? "").trim() || null;
+
     const status = body?.status ?? "completed";
 
     const { rows: updatedRows } = await pool.query(
       `
       UPDATE matches
-      SET score_a = $1, score_b = $2, winner_team_id = $3, status = $4
-      WHERE id = $5
+      SET score_a = $1,
+          score_b = $2,
+          winner_team_id = $3,
+          status = $4,
+          room_id = $5
+      WHERE id = $6
       RETURNING *
       `,
-      [scoreA, scoreB, winnerTeamId, status, matchId],
+      [scoreA, scoreB, winnerTeamId, status, nextRoomId, matchId],
     );
 
     const updatedMatch = updatedRows[0] ?? null;
@@ -1140,6 +1436,11 @@ matchRouter.patch(
                   example: 11,
                 },
                 status: { type: "string", example: "completed" },
+                room_id: {
+                  type: "string",
+                  nullable: true,
+                  example: "FACEIT-ROOM-123456",
+                },
                 propagate_winner: { type: "boolean", example: true },
                 propagate_loser: { type: "boolean", example: true },
               },

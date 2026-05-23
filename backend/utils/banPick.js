@@ -1,6 +1,9 @@
 import { pool } from "./db.js";
 
 const VALID_FORMATS = new Set(["BO1", "BO3", "BO5"]);
+const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
+const MIN_TURN_TIME_LIMIT_SECONDS = 5;
+const MAX_TURN_TIME_LIMIT_SECONDS = 3600;
 
 const ACTION_SEQUENCES = {
   BO1: [
@@ -85,6 +88,22 @@ const toNumber = (value) => {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeTurnTimeLimitSeconds = (
+  value,
+  fallback = DEFAULT_TURN_TIME_LIMIT_SECONDS,
+) => {
+  const parsed = toNumber(value);
+  if (!parsed) {
+    return fallback;
+  }
+
+  const rounded = Math.round(parsed);
+  return Math.min(
+    MAX_TURN_TIME_LIMIT_SECONDS,
+    Math.max(MIN_TURN_TIME_LIMIT_SECONDS, rounded),
+  );
 };
 
 const normalizeFormat = (value, fallback = "BO3") => {
@@ -398,6 +417,8 @@ export const ensureBanPickTables = async () => {
       team_a_id BIGINT NULL,
       team_b_id BIGINT NULL,
       format TEXT NOT NULL DEFAULT 'BO3',
+      turn_time_limit_seconds INT NOT NULL DEFAULT 30,
+      turn_started_at TIMESTAMPTZ NULL,
       phase TEXT NOT NULL DEFAULT 'ban_pick',
       current_step INT NOT NULL DEFAULT 0,
       selected_map_code TEXT NULL,
@@ -431,6 +452,27 @@ export const ensureBanPickTables = async () => {
       `
     ALTER TABLE matches
     ADD COLUMN IF NOT EXISTS ban_pick_id BIGINT NULL
+    `,
+    );
+
+    await pool.query(
+      `
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS room_id TEXT NULL
+    `,
+    );
+
+    await pool.query(
+      `
+    ALTER TABLE ban_picks
+    ADD COLUMN IF NOT EXISTS turn_time_limit_seconds INT NOT NULL DEFAULT 30
+    `,
+    );
+
+    await pool.query(
+      `
+    ALTER TABLE ban_picks
+    ADD COLUMN IF NOT EXISTS turn_started_at TIMESTAMPTZ NULL
     `,
     );
 
@@ -524,6 +566,7 @@ const getMatchContext = async (matchId) => {
            m.team_b_id,
            m.round_number,
            m.match_no,
+          m.room_id,
            m.ban_pick_id,
            COALESCE((to_jsonb(m)->>'best_of')::int, 3) AS best_of,
            t.slug AS tournament_slug,
@@ -549,6 +592,8 @@ const getBanPickRowBySlug = async (roundSlug) => {
            m.round_number,
            m.match_no,
            m.date_scheduled,
+          m.status AS match_status,
+          m.room_id AS match_room_id,
            m.team_a_id AS match_team_a_id,
            m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
@@ -575,6 +620,8 @@ const getBanPickRowByMatchId = async (matchId) => {
            m.round_number,
            m.match_no,
            m.date_scheduled,
+          m.status AS match_status,
+          m.room_id AS match_room_id,
            m.team_a_id AS match_team_a_id,
            m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
@@ -644,70 +691,110 @@ export const getBanPickSessionByRoundSlug = async (roundSlug) => {
   return hydrateSessionFromRow(row);
 };
 
-const reinitializeSessionWithFormatIfNeeded = async ({ session, format }) => {
-  const hasRequestedFormat =
-    format !== null && format !== undefined && String(format).trim() !== "";
-
-  if (!hasRequestedFormat || !session) {
+const reinitializeSessionWithConfigIfNeeded = async ({
+  session,
+  format,
+  countdownSeconds,
+}) => {
+  if (!session) {
     return session;
   }
 
-  const nextFormat = normalizeFormat(format, "BO3");
+  const hasRequestedFormat =
+    format !== null && format !== undefined && String(format).trim() !== "";
+  const hasRequestedCountdown =
+    countdownSeconds !== null &&
+    countdownSeconds !== undefined &&
+    String(countdownSeconds).trim() !== "";
+
   const currentFormat = normalizeFormat(
     session.state?.format ?? session.format,
     "BO3",
   );
+  const currentTurnTime = normalizeTurnTimeLimitSeconds(
+    session.turn_time_limit_seconds,
+    DEFAULT_TURN_TIME_LIMIT_SECONDS,
+  );
 
-  if (nextFormat === currentFormat) {
+  const nextFormat = hasRequestedFormat
+    ? normalizeFormat(format, currentFormat)
+    : currentFormat;
+  const nextTurnTime = hasRequestedCountdown
+    ? normalizeTurnTimeLimitSeconds(countdownSeconds, currentTurnTime)
+    : currentTurnTime;
+
+  if (nextFormat === currentFormat && nextTurnTime === currentTurnTime) {
     return session;
   }
 
-  const mapPool =
-    Array.isArray(session.map_pool) && session.map_pool.length > 0
-      ? session.map_pool
-      : await getMapPool("valorant");
+  if (nextFormat !== currentFormat) {
+    const mapPool =
+      Array.isArray(session.map_pool) && session.map_pool.length > 0
+        ? session.map_pool
+        : await getMapPool("valorant");
 
-  const resetState = createInitialState({
-    mapPool,
-    format: nextFormat,
-    teamNames: toTeamNames(session),
-  });
+    const resetState = createInitialState({
+      mapPool,
+      format: nextFormat,
+      teamNames: toTeamNames(session),
+    });
+
+    await pool.query(
+      `
+      UPDATE ban_picks
+      SET format = $1,
+          turn_time_limit_seconds = $2,
+          turn_started_at = NOW(),
+          phase = $3,
+          current_step = $4,
+          selected_map_code = NULL,
+          side_select_map_code = NULL,
+          side_select_team = NULL,
+          status = 'active',
+          state = $5::jsonb,
+          updated_at = NOW()
+      WHERE id = $6
+      `,
+      [
+        nextFormat,
+        nextTurnTime,
+        resetState.phase,
+        toNumber(resetState.currentStep) ?? 0,
+        JSON.stringify(resetState),
+        session.id,
+      ],
+    );
+
+    await pool.query(
+      `
+      DELETE FROM ban_pick_actions
+      WHERE ban_pick_id = $1
+      `,
+      [session.id],
+    );
+
+    return getBanPickSessionByRoundSlug(session.round_slug);
+  }
 
   await pool.query(
     `
     UPDATE ban_picks
-    SET format = $1,
-        phase = $2,
-        current_step = $3,
-        selected_map_code = NULL,
-        side_select_map_code = NULL,
-        side_select_team = NULL,
-        status = 'active',
-        state = $4::jsonb,
+    SET turn_time_limit_seconds = $1,
         updated_at = NOW()
-    WHERE id = $5
+    WHERE id = $2
     `,
-    [
-      nextFormat,
-      resetState.phase,
-      toNumber(resetState.currentStep) ?? 0,
-      JSON.stringify(resetState),
-      session.id,
-    ],
-  );
-
-  await pool.query(
-    `
-    DELETE FROM ban_pick_actions
-    WHERE ban_pick_id = $1
-    `,
-    [session.id],
+    [nextTurnTime, session.id],
   );
 
   return getBanPickSessionByRoundSlug(session.round_slug);
 };
 
-export const createBanPickSession = async ({ matchId, roundSlug, format }) => {
+export const createBanPickSession = async ({
+  matchId,
+  roundSlug,
+  format,
+  countdownSeconds,
+}) => {
   const match = await getMatchContext(matchId);
   if (!match) return null;
 
@@ -717,13 +804,18 @@ export const createBanPickSession = async ({ matchId, roundSlug, format }) => {
       existingByMatch.round_slug,
     );
 
-    return reinitializeSessionWithFormatIfNeeded({
+    return reinitializeSessionWithConfigIfNeeded({
       session: existingSession,
       format,
+      countdownSeconds,
     });
   }
 
   const normalizedFormat = normalizeFormat(format ?? match.best_of ?? 3, "BO3");
+  const normalizedTurnTime = normalizeTurnTimeLimitSeconds(
+    countdownSeconds,
+    DEFAULT_TURN_TIME_LIMIT_SECONDS,
+  );
   const mapPool = await getMapPool("valorant");
   const teamNames = {
     team1: String(match.team_a_name ?? "TEAM A"),
@@ -754,6 +846,8 @@ export const createBanPickSession = async ({ matchId, roundSlug, format }) => {
       team_a_id,
       team_b_id,
       format,
+      turn_time_limit_seconds,
+      turn_started_at,
       phase,
       current_step,
       selected_map_code,
@@ -762,7 +856,7 @@ export const createBanPickSession = async ({ matchId, roundSlug, format }) => {
       status,
       state
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL, 'active', $9::jsonb)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, NULL, NULL, NULL, 'active', $10::jsonb)
     RETURNING id, round_slug
     `,
     [
@@ -772,6 +866,7 @@ export const createBanPickSession = async ({ matchId, roundSlug, format }) => {
       match.team_a_id ?? null,
       match.team_b_id ?? null,
       normalizedFormat,
+      normalizedTurnTime,
       sessionState.phase,
       sessionState.currentStep,
       JSON.stringify(sessionState),
@@ -797,12 +892,14 @@ export const ensureSessionByRoundSlug = async ({
   roundSlug,
   matchId,
   format,
+  countdownSeconds,
 }) => {
   const existing = await getBanPickSessionByRoundSlug(roundSlug);
   if (existing) {
-    return reinitializeSessionWithFormatIfNeeded({
+    return reinitializeSessionWithConfigIfNeeded({
       session: existing,
       format,
+      countdownSeconds,
     });
   }
 
@@ -813,7 +910,92 @@ export const ensureSessionByRoundSlug = async ({
     matchId: matchIdAsNumber,
     roundSlug,
     format,
+    countdownSeconds,
   });
+};
+
+export const deleteBanPickSession = async ({ roundSlug, matchId }) => {
+  const normalizedRoundSlug = String(roundSlug ?? "")
+    .trim()
+    .toLowerCase();
+  const matchIdAsNumber = toNumber(matchId);
+
+  const { rows: candidateRows } = await pool.query(
+    `
+    SELECT bp.id::text AS id,
+           bp.round_slug,
+           bp.match_id::text AS match_id
+    FROM ban_picks bp
+    WHERE ($1 <> '' AND bp.round_slug = $1)
+       OR ($2::bigint IS NOT NULL AND bp.match_id = $2::bigint)
+       OR (
+         $2::bigint IS NOT NULL
+         AND bp.id = (
+           SELECT m.ban_pick_id
+           FROM matches m
+           WHERE m.id = $2::bigint
+           LIMIT 1
+         )
+       )
+    ORDER BY bp.updated_at DESC NULLS LAST, bp.id DESC
+    LIMIT 1
+    `,
+    [normalizedRoundSlug, matchIdAsNumber],
+  );
+
+  const target = candidateRows[0] ?? null;
+
+  if (!target) {
+    if (matchIdAsNumber) {
+      await pool.query(
+        `
+        UPDATE matches
+        SET ban_pick_id = NULL
+        WHERE id = $1
+        `,
+        [matchIdAsNumber],
+      );
+    }
+
+    return { deleted: false, session: null };
+  }
+
+  const targetId = String(target.id ?? "").trim();
+  const targetMatchId =
+    toNumber(target.match_id) ?? toNumber(matchId) ?? matchIdAsNumber;
+
+  await pool.query(
+    `
+    UPDATE matches
+    SET ban_pick_id = NULL
+    WHERE ban_pick_id = $1::bigint
+       OR ($2::bigint IS NOT NULL AND id = $2::bigint)
+    `,
+    [targetId, targetMatchId],
+  );
+
+  const { rows: deletedRows } = await pool.query(
+    `
+    DELETE FROM ban_picks
+    WHERE id = $1::bigint
+       OR ($2::bigint IS NOT NULL AND match_id = $2::bigint)
+    RETURNING id::text AS id,
+              round_slug,
+              match_id::text AS match_id
+    `,
+    [targetId, targetMatchId],
+  );
+
+  const firstDeleted = deletedRows[0] ?? target;
+
+  return {
+    deleted: (deletedRows?.length ?? 0) > 0,
+    session: {
+      id: String(firstDeleted.id ?? "").trim() || null,
+      round_slug: String(firstDeleted.round_slug ?? ""),
+      match_id: toNumber(firstDeleted.match_id),
+    },
+  };
 };
 
 export const resolveUserTeamSlot = (user, session) => {
@@ -849,17 +1031,53 @@ export const getCurrentAction = (state) => {
 export const toBanPickPayload = (session, userTeamSlot = null) => {
   const state = session.state;
   const currentAction = getCurrentAction(state);
+  const turnTimeLimitSeconds = normalizeTurnTimeLimitSeconds(
+    session.turn_time_limit_seconds,
+    DEFAULT_TURN_TIME_LIMIT_SECONDS,
+  );
+
+  const turnStartedAt = session.turn_started_at
+    ? new Date(session.turn_started_at)
+    : null;
+  const turnStartedAtIso =
+    turnStartedAt && !Number.isNaN(turnStartedAt.getTime())
+      ? turnStartedAt.toISOString()
+      : null;
+
+  const turnDeadlineAt = turnStartedAtIso
+    ? new Date(
+        new Date(turnStartedAtIso).getTime() + turnTimeLimitSeconds * 1000,
+      )
+    : null;
+  const turnDeadlineAtIso =
+    turnDeadlineAt && !Number.isNaN(turnDeadlineAt.getTime())
+      ? turnDeadlineAt.toISOString()
+      : null;
+
+  const turnRemainingSeconds =
+    turnDeadlineAtIso && state.phase !== "complete"
+      ? Math.max(
+          0,
+          Math.ceil((new Date(turnDeadlineAtIso).getTime() - Date.now()) / 1000),
+        )
+      : null;
 
   return {
     id: toNumber(session.id),
     round_slug: String(session.round_slug),
     match_id: toNumber(session.match_id),
     tournament_id: toNumber(session.tournament_id),
+    room_id: String(session.match_room_id ?? session.room_id ?? "").trim() || null,
+    match_status: String(session.match_status ?? "").trim() || null,
     round_number: toNumber(session.round_number),
     match_no: toNumber(session.match_no),
     status: String(session.status ?? "active"),
     phase: state.phase,
     format: state.format,
+    turn_time_limit_seconds: turnTimeLimitSeconds,
+    turn_started_at: turnStartedAtIso,
+    turn_deadline_at: turnDeadlineAtIso,
+    turn_remaining_seconds: turnRemainingSeconds,
     current_step: state.currentStep,
     selected_map_id: state.selectedMapId,
     side_select_map_id: state.sideSelectMapId,
@@ -884,6 +1102,7 @@ const persistSessionState = async ({
   nextState,
   actionRecord,
   actedByUserId,
+  turnStartedAt,
 }) => {
   await pool.query(
     `
@@ -895,8 +1114,9 @@ const persistSessionState = async ({
         side_select_map_code = $5,
         side_select_team = $6,
         state = $7::jsonb,
+        turn_started_at = $8,
         updated_at = NOW()
-    WHERE id = $8
+    WHERE id = $9
     `,
     [
       normalizeFormat(nextState.format, "BO3"),
@@ -906,6 +1126,7 @@ const persistSessionState = async ({
       nextState.sideSelectMapId ?? null,
       nextState.sideSelectTeam ?? null,
       JSON.stringify(nextState),
+      turnStartedAt ?? null,
       session.id,
     ],
   );
@@ -1016,6 +1237,7 @@ export const mutateBanPickSession = async ({
       nextState,
       actionRecord: null,
       actedByUserId: toNumber(user?.id),
+      turnStartedAt: session.turn_started_at ?? new Date().toISOString(),
     });
   }
 
@@ -1052,6 +1274,8 @@ export const mutateBanPickSession = async ({
       nextState,
       actionRecord,
       actedByUserId: toNumber(user?.id),
+      turnStartedAt:
+        nextState.phase === "complete" ? null : new Date().toISOString(),
     });
   }
 
@@ -1088,6 +1312,8 @@ export const mutateBanPickSession = async ({
       nextState,
       actionRecord,
       actedByUserId: toNumber(user?.id),
+      turnStartedAt:
+        nextState.phase === "complete" ? null : new Date().toISOString(),
     });
   }
 
@@ -1109,6 +1335,7 @@ export const mutateBanPickSession = async ({
         team: actorTeamSlot,
       },
       actedByUserId: toNumber(user?.id),
+      turnStartedAt: new Date().toISOString(),
     });
   }
 
