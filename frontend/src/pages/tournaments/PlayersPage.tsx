@@ -5,15 +5,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { API_BASE } from "@/lib/apiBase";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TOURNAMENT_LOGO } from "@/data/tournament";
+import TeamRosterDialog from "@/components/TeamRosterDialog";
 
 type RegisteredTeam = {
   id?: number | string;
@@ -85,9 +78,6 @@ const PlayersPage = () => {
     number | null
   >(null);
   const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
-  const [teamDetail, setTeamDetail] = useState<TeamDetailResponse | null>(null);
-  const [loadingTeamDetail, setLoadingTeamDetail] = useState(false);
-  const [teamDetailError, setTeamDetailError] = useState<string | null>(null);
 
   const apiPlayersRaw = tournament?.registered ?? [];
 
@@ -137,42 +127,6 @@ const PlayersPage = () => {
       ) ?? null
     );
   }, [apiPlayersRaw, selectedTournamentTeamId]);
-
-  useEffect(() => {
-    if (!isTeamModalOpen || selectedTournamentTeamId === null) {
-      setTeamDetail(null);
-      setTeamDetailError(null);
-      return;
-    }
-
-    let mounted = true;
-
-    const loadTeamDetail = async () => {
-      setLoadingTeamDetail(true);
-      setTeamDetailError(null);
-      setTeamDetail(null);
-      try {
-        const response = await axios.get<TeamDetailResponse>(
-          `${API_BASE}/api/tournaments/team/players/${selectedTournamentTeamId}`,
-        );
-
-        if (!mounted) return;
-        setTeamDetail(response.data ?? null);
-      } catch {
-        if (!mounted) return;
-        setTeamDetail(null);
-        setTeamDetailError("Không tải được thông tin đội.");
-      } finally {
-        if (mounted) setLoadingTeamDetail(false);
-      }
-    };
-
-    void loadTeamDetail();
-
-    return () => {
-      mounted = false;
-    };
-  }, [selectedTournamentTeamId, isTeamModalOpen]);
 
   const openTeamModal = (tournamentTeamId: number | null) => {
     if (tournamentTeamId === null) return;
@@ -248,15 +202,16 @@ const PlayersPage = () => {
             type="button"
             key={`${participant.id ?? participant.team_id}-${participant.name ?? "team"}`}
             onClick={() => openTeamModal(toNumber(participant.id))}
-            className={`neo-box-sm bg-card p-3 flex items-center gap-3 hover:bg-muted/30 transition-colors border text-left text-foreground ${
-              participant.isCheckedIn
-                ? "border-emerald-500/70"
-                : "border-red-500/70"
-            } ${
+            style={
               toNumber(participant.id) === selectedTournamentTeamId
-                ? "ring-2 ring-primary/60"
-                : ""
-            }`}
+                ? { backgroundColor: "#0b0b0d" }
+                : undefined
+            }
+            className={`neo-box-sm p-3 flex items-center gap-3 transition-colors text-left text-foreground ${
+              toNumber(participant.id) === selectedTournamentTeamId
+                ? ""
+                : "bg-card hover:bg-muted/30"
+            } ${participant.isCheckedIn ? "border-emerald-500/70" : "border-red-500/70"}`}
           >
             <div className="flex items-center gap-2">
               <img
@@ -281,105 +236,14 @@ const PlayersPage = () => {
         ))}
       </div>
 
-      <Dialog open={isTeamModalOpen} onOpenChange={setIsTeamModalOpen}>
-        <DialogContent className="sm:max-w-2xl bg-slate-950 border-slate-700 text-slate-100">
-          <DialogHeader>
-            <DialogTitle className="text-slate-50">Thông tin đội</DialogTitle>
-            <DialogDescription className="text-slate-300">
-              Xem đội và danh sách người chơi đã đăng ký tham gia giải.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedTeam ? (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-900/80 p-3">
-                <img
-                  src={
-                    teamDetail?.logo_url ||
-                    selectedTeam.logo_url ||
-                    TOURNAMENT_LOGO
-                  }
-                  alt={teamDetail?.name || selectedTeam.name || "Team logo"}
-                  className="w-12 h-12 rounded-md"
-                />
-                <div>
-                  <h3 className="text-lg font-bold text-slate-100">
-                    {teamDetail?.name || selectedTeam.name || "Đội chưa có tên"}
-                  </h3>
-                  <p className="text-sm text-slate-300">
-                    {teamDetail?.short_name || selectedTeam.short_name || "N/A"}
-                  </p>
-                </div>
-              </div>
-
-              {loadingTeamDetail ? (
-                <p className="text-sm text-slate-300">
-                  Đang tải danh sách người chơi...
-                </p>
-              ) : null}
-
-              {teamDetailError ? (
-                <p className="text-sm text-red-300">{teamDetailError}</p>
-              ) : null}
-
-              {!loadingTeamDetail && !teamDetailError ? (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-slate-100">
-                    Người chơi tham gia ({teamDetail?.players?.length ?? 0})
-                  </p>
-
-                  {(teamDetail?.players?.length ?? 0) > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {(teamDetail?.players ?? []).map((player) => (
-                        <div
-                          key={`${player.user_id}-${player.nickname}`}
-                          className="rounded-md border border-slate-700 bg-slate-900/70 px-3 py-2"
-                        >
-                          <div className="flex items-start gap-3">
-                            <Avatar className="h-9 w-9 border border-slate-600">
-                              <AvatarImage
-                                src={player.profile_picture || undefined}
-                                alt={player.nickname || "Player avatar"}
-                              />
-                              <AvatarFallback className="bg-slate-700 text-slate-100 text-xs font-semibold">
-                                {getPlayerInitials(
-                                  player.nickname,
-                                  player.user_id,
-                                )}
-                              </AvatarFallback>
-                            </Avatar>
-
-                            <div className="min-w-0">
-                              <p className="font-medium text-slate-100 truncate">
-                                {player.nickname ||
-                                  `Player #${player.user_id ?? "?"}`}
-                              </p>
-                              <p className="text-xs text-slate-300">
-                                {player.role_in_team || "Thành viên"}
-                              </p>
-                              {player.riot_account ? (
-                                <p className="text-xs text-sky-300 mt-1 truncate">
-                                  Riot: {player.riot_account}
-                                </p>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-300">
-                      Đội này chưa có người chơi đăng ký vào giải.
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-300">Chưa chọn đội.</p>
-          )}
-        </DialogContent>
-      </Dialog>
+      <TeamRosterDialog
+        open={isTeamModalOpen}
+        onOpenChange={setIsTeamModalOpen}
+        teamId={selectedTournamentTeamId}
+        teamName={selectedTeam?.name || null}
+        teamShortName={selectedTeam?.short_name || null}
+        teamLogoUrl={selectedTeam?.logo_url || null}
+      />
     </div>
   );
 };

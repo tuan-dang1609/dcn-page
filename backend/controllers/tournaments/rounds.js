@@ -12,7 +12,6 @@ import {
   toBanPickPayload,
 } from "../../utils/banPick.js";
 import { pool } from "../../utils/db.js";
-import { emitBanPickRoomState } from "../../realtime/banPickHub.js";
 
 const roundRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Round";
@@ -224,11 +223,6 @@ roundRouter.post(
       set.status = result.status;
       return { error: result.error };
     }
-
-    emitBanPickRoomState({
-      roundSlug: result.session?.round_slug ?? params.round_slug,
-      session: result.session,
-    });
 
     const viewerTeamSlot = resolveUserTeamSlot(user, result.session);
 

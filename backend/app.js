@@ -8,6 +8,7 @@ import userRouter from "./controllers/users.js";
 import loginRouter from "./controllers/login.js";
 import milestoneRouter from "./controllers/tournaments/milestones.js";
 import teamRouter from "./controllers/teams.js";
+import teamInvitesRouter from "./controllers/team_invites.js";
 import tournamentRouter from "./controllers/tournaments/tournament.js";
 import ruleRouter from "./controllers/tournaments/rules.js";
 import requirementRouter from "./controllers/tournaments/requirements.js";
@@ -179,6 +180,7 @@ const app = new Elysia()
   .group("/api/users", (app) => app.use(userRouter))
   .group("/api/login", (app) => app.use(loginRouter))
   .group("/api/teams", (app) => app.use(teamRouter))
+  .group("/api/team-invites", (app) => app.use(teamInvitesRouter))
   .group("/api/series", (app) => app.use(seriesRouter))
   .group("/api/pickem", (app) => app.use(pickemRouter))
   .group("/api/tournaments", (app) => app.use(tournamentRouter))

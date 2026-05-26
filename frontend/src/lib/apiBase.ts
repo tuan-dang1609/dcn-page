@@ -30,11 +30,18 @@ const fallbackFromWindow =
     ? sanitizeApiBase(window.location.origin)
     : null;
 
+const localhostFallback =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
+    ? "http://localhost:3000"
+    : null;
+
 // Fallback to the deployed backend if env vars are missing.
 export const API_BASE =
   apiBaseFromVite ??
   apiBaseFromBun ??
   apiBaseFromProcess ??
+  localhostFallback ??
   fallbackFromWindow ??
   "http://localhost:8080";
 
