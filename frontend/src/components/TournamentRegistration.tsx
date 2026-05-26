@@ -19,13 +19,25 @@ import {
   Shield,
   AlertCircle,
   Upload,
+  Search,
+  Send,
+  Clock3,
+  UserCheck,
+  X,
 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "@/hooks/use-toast";
 import {
   deleteImageFromSupabase,
   uploadImageToSupabase,
 } from "@/lib/supabaseUpload";
 import { API_BASE } from "@/lib/apiBase";
+import {
+  getTeamInvites,
+  revokeTeamInvite,
+  sendTeamInvite,
+  type TeamInviteRecord,
+} from "@/api/teamInvites";
 
 interface TeamMember {
   id: number;
@@ -86,6 +98,7 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   tournamentId?: number | string;
   requiredPlayerCount?: number | string;
+  viewMode?: "manage" | "roster";
 }
 
 const TournamentRegistration = ({
@@ -93,15 +106,24 @@ const TournamentRegistration = ({
   onOpenChange,
   tournamentId,
   requiredPlayerCount,
+  viewMode = "manage",
 }: Props) => {
   const { user, token, setIsRegistered, refreshUser } = useAuth();
+  const isRosterView = viewMode === "roster";
   const [step, setStep] = useState<
     "team" | "members" | "create-team" | "edit-team" | "team-members"
-  >("team");
+  >(isRosterView ? "members" : "team");
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [allUsers, setAllUsers] = useState<AvailableUser[] | null>(null);
+  const [inviteQuery, setInviteQuery] = useState("");
+  const [invitePanel, setInvitePanel] = useState<"search" | "pending">(
+    "search",
+  );
+  const [pendingInvites, setPendingInvites] = useState<TeamInviteRecord[]>([]);
+  const [sendingInviteId, setSendingInviteId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [tournamentTeamId, setTournamentTeamId] = useState<number | null>(null);
@@ -122,7 +144,6 @@ const TournamentRegistration = ({
   const [teamLogoFile, setTeamLogoFile] = useState<File | null>(null);
   const [editTeamLogoFile, setEditTeamLogoFile] = useState<File | null>(null);
   const [createMemberIds, setCreateMemberIds] = useState<number[]>([]);
-  const [teamMemberIds, setTeamMemberIds] = useState<number[]>([]);
 
   const currentTeamId = user?.team_id ?? null;
   const hasTeam = currentTeamId !== null && currentTeamId !== undefined;
@@ -147,12 +168,6 @@ const TournamentRegistration = ({
       ? true
       : [1, 2, 3].includes(roleId);
 
-  const authHeaders = token
-    ? {
-        Authorization: `Bearer ${token}`,
-      }
-    : undefined;
-
   const toggleMember = (id: number) => {
     setSelectedMembers((prev) =>
       prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
@@ -161,12 +176,6 @@ const TournamentRegistration = ({
 
   const toggleCreateMember = (id: number) => {
     setCreateMemberIds((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
-    );
-  };
-
-  const toggleTeamMember = (id: number) => {
-    setTeamMemberIds((prev) =>
       prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
     );
   };
@@ -201,20 +210,22 @@ const TournamentRegistration = ({
         : [];
 
       setTeamMembers(members);
-      setTeamMemberIds(members.map((member) => member.id));
     } catch {
       setTeamMembers([]);
-      setTeamMemberIds([]);
     } finally {
       setLoadingMembers(false);
     }
   };
 
-  const loadAvailableUsers = async () => {
+  const loadAvailableUsers = async (query = "") => {
     setLoadingUsers(true);
     try {
+      const normalizedQuery = String(query || "").trim();
       const response = await axios.get<UsersListResponse>(
         `${API_BASE}/api/users`,
+        {
+          params: normalizedQuery ? { q: normalizedQuery } : undefined,
+        },
       );
       const users = Array.isArray(response.data?.users)
         ? response.data.users.map((u) => ({
@@ -234,6 +245,51 @@ const TournamentRegistration = ({
       setAvailableUsers([]);
     } finally {
       setLoadingUsers(false);
+    }
+  };
+
+  const fetchAllUsers = async () => {
+    if (allUsers !== null) return allUsers;
+    setLoadingUsers(true);
+    try {
+      const response = await axios.get<UsersListResponse>(
+        `${API_BASE}/api/users`,
+      );
+      const users = Array.isArray(response.data?.users)
+        ? response.data.users.map((u) => ({
+            id: Number(u.id),
+            username: u.username,
+            nickname: u.nickname ?? null,
+            profile_picture: u.profile_picture ?? null,
+            team_id:
+              u.team_id === null || u.team_id === undefined
+                ? null
+                : Number(u.team_id),
+          }))
+        : [];
+
+      const filtered = users.filter((u) => Number.isFinite(u.id));
+      setAllUsers(filtered);
+      return filtered;
+    } catch {
+      setAllUsers([]);
+      return [] as AvailableUser[];
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const loadTeamInvites = async () => {
+    if (!hasTeam || !currentTeamId) {
+      setPendingInvites([]);
+      return;
+    }
+
+    try {
+      const response = await getTeamInvites(currentTeamId, token);
+      setPendingInvites(response.data?.invites ?? []);
+    } catch {
+      setPendingInvites([]);
     }
   };
 
@@ -275,10 +331,48 @@ const TournamentRegistration = ({
   }, [open, hasTeam, currentTeamId]);
 
   useEffect(() => {
-    if (!open || !user) return;
+    if (!open || !user || step !== "team-members") return;
 
-    void loadAvailableUsers();
-  }, [open, userId]);
+    // Only filter locally for invite search to avoid spamming API.
+    const timer = window.setTimeout(async () => {
+      if (invitePanel !== "search") return;
+
+      const q = String(inviteQuery || "")
+        .trim()
+        .toLowerCase();
+
+      if (!q) {
+        setAvailableUsers([]);
+        return;
+      }
+
+      // Ensure we have the full user list cached, then filter client-side.
+      const users = allUsers ?? (await fetchAllUsers());
+      const filtered = users.filter((u) => {
+        return (
+          (u.username || "").toLowerCase().includes(q) ||
+          (u.nickname || "").toLowerCase().includes(q)
+        );
+      });
+
+      setAvailableUsers(filtered);
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [open, user, step, inviteQuery, invitePanel, allUsers]);
+
+  useEffect(() => {
+    // Preload full user list when user opens invite panel to search.
+    if (!open || !user || step !== "team-members" || invitePanel !== "search")
+      return;
+    void fetchAllUsers();
+  }, [open, user, step, invitePanel]);
+
+  useEffect(() => {
+    if (!open || !hasTeam || step !== "team-members") return;
+
+    void loadTeamInvites();
+  }, [open, hasTeam, currentTeamId, step]);
 
   useEffect(() => {
     if (!open || !hasTeam || !user?.team) return;
@@ -325,21 +419,81 @@ const TournamentRegistration = ({
     void resolveRegisteredStatus();
   }, [open, hasTeam, tournamentId, currentTeamId, setIsRegistered]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    setStep(isRosterView ? "members" : "team");
+  }, [open, isRosterView]);
+
+  const canInviteCandidate = (candidate: AvailableUser) => {
+    if (!hasTeam || !currentTeamId) return false;
+    if (candidate.id === userId) return false;
+    if (Number(candidate.team_id) === Number(currentTeamId)) return false;
+    if (candidate.team_id !== null) return false;
+    if (
+      pendingInvites.some(
+        (invite) => Number(invite.invitee_id) === Number(candidate.id),
+      )
+    ) {
+      return false;
+    }
+
+    return true;
+  };
+
+  const getCandidateStatusLabel = (candidate: AvailableUser) => {
+    const isCurrentTeammate =
+      Number(candidate.team_id) === Number(currentTeamId);
+    if (isCurrentTeammate) return "Đồng đội";
+    if (candidate.team_id !== null) return "Đã có đội";
+    return "Không thể mời";
+  };
+
+  const handleSendTeamInvite = async (candidate: AvailableUser) => {
+    if (!currentTeamId) return;
+
+    setSendingInviteId(candidate.id);
+    try {
+      await sendTeamInvite(currentTeamId, candidate.id, token);
+      await Promise.all([loadTeamMembers(), loadTeamInvites()]);
+      toast({
+        title: "Đã gửi lời mời",
+        description: `${candidate.username} sẽ nhận được lời mời tham gia team.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Gửi lời mời thất bại",
+        description: getApiErrorMessage(error, "Không thể gửi lời mời."),
+        variant: "destructive",
+      });
+    } finally {
+      setSendingInviteId(null);
+    }
+  };
+
+  const handleRevokeTeamInvite = async (inviteId: number) => {
+    try {
+      await revokeTeamInvite(inviteId, token);
+      await loadTeamInvites();
+      toast({
+        title: "Đã hủy lời mời",
+        description: "Lời mời chờ đã được hủy.",
+      });
+    } catch (error) {
+      toast({
+        title: "Không thể hủy lời mời",
+        description: getApiErrorMessage(error, "Vui lòng thử lại."),
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleConfirmTeam = async () => {
     setStep("members");
   };
 
   const handleCreateTeam = async () => {
     if (!newTeam.name.trim() || !newTeam.short_name.trim()) return;
-
-    if (!authHeaders) {
-      toast({
-        title: "Bạn chưa đăng nhập",
-        description: "Vui lòng đăng nhập để tạo đội.",
-        variant: "destructive",
-      });
-      return;
-    }
 
     setSubmitting(true);
     try {
@@ -355,9 +509,7 @@ const TournamentRegistration = ({
           ...newTeam,
           logo_url: nextLogoUrl || null,
         },
-        {
-          headers: authHeaders,
-        },
+        { withCredentials: true },
       );
 
       const createdTeamId = Number(
@@ -370,9 +522,7 @@ const TournamentRegistration = ({
           {
             user_ids: createMemberIds,
           },
-          {
-            headers: authHeaders,
-          },
+          { withCredentials: true },
         );
       }
 
@@ -415,12 +565,7 @@ const TournamentRegistration = ({
       return;
     }
 
-    if (
-      !authHeaders ||
-      !hasTeam ||
-      currentTeamId === null ||
-      currentTeamId === undefined
-    ) {
+    if (!hasTeam || currentTeamId === null || currentTeamId === undefined) {
       toast({
         title: "Thiếu thông tin",
         description: "Không xác định được đội để cập nhật.",
@@ -448,7 +593,7 @@ const TournamentRegistration = ({
           ...editTeam,
           logo_url: nextLogoUrl || null,
         },
-        { headers: authHeaders },
+        { withCredentials: true },
       );
 
       if (previousLogoUrl && nextLogoUrl && previousLogoUrl !== nextLogoUrl) {
@@ -490,63 +635,6 @@ const TournamentRegistration = ({
     }
   };
 
-  const handleUpdateTeamMembers = async () => {
-    if (!canManageTeam) {
-      toast({
-        title: "Không có quyền",
-        description: "Bạn không có quyền chỉnh sửa thành viên đội.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (
-      !authHeaders ||
-      !hasTeam ||
-      currentTeamId === null ||
-      currentTeamId === undefined
-    ) {
-      toast({
-        title: "Thiếu thông tin",
-        description: "Không xác định được đội để cập nhật thành viên.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await axios.patch(
-        `${API_BASE}/api/teams/${currentTeamId}`,
-        {
-          user_ids: teamMemberIds,
-        },
-        { headers: authHeaders },
-      );
-
-      await refreshUser();
-      await loadTeamMembers();
-
-      toast({
-        title: "Cập nhật thành viên thành công",
-        description: "Danh sách thành viên đội đã được cập nhật.",
-      });
-
-      setStep("team");
-    } catch (error) {
-      toast({
-        title: "Cập nhật thành viên thất bại",
-        description: getApiErrorMessage(
-          error,
-          "Không thể cập nhật thành viên đội.",
-        ),
-        variant: "destructive",
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleSubmitRegistration = async () => {
     if (selectedMembers.length === 0) return;
 
@@ -577,15 +665,6 @@ const TournamentRegistration = ({
       return;
     }
 
-    if (!authHeaders) {
-      toast({
-        title: "Bạn chưa đăng nhập",
-        description: "Vui lòng đăng nhập để đăng ký.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setSubmitting(true);
     try {
       let finalTournamentTeamId = tournamentTeamId;
@@ -594,9 +673,7 @@ const TournamentRegistration = ({
           await axios.post(
             `${API_BASE}/api/tournaments/teams/${tournamentId}`,
             {},
-            {
-              headers: authHeaders,
-            },
+            { withCredentials: true },
           );
         } catch (error) {
           const isAlreadyRegistered =
@@ -625,9 +702,7 @@ const TournamentRegistration = ({
         {
           user_ids: selectedMembers,
         },
-        {
-          headers: authHeaders,
-        },
+        { withCredentials: true },
       );
 
       toast({
@@ -665,22 +740,11 @@ const TournamentRegistration = ({
       return;
     }
 
-    if (!authHeaders) {
-      toast({
-        title: "Bạn chưa đăng nhập",
-        description: "Vui lòng đăng nhập để thao tác.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setSubmitting(true);
     try {
       await axios.delete(
         `${API_BASE}/api/tournaments/teams/${tournamentId}/${currentTeamId}`,
-        {
-          headers: authHeaders,
-        },
+        { withCredentials: true },
       );
 
       toast({
@@ -710,13 +774,16 @@ const TournamentRegistration = ({
 
   const resetAndClose = (v: boolean) => {
     if (!v) {
-      setStep("team");
+      setStep(isRosterView ? "members" : "team");
       setSelectedMembers([]);
       setTournamentTeamId(null);
       setCreateMemberIds([]);
-      setTeamMemberIds([]);
       setTeamLogoFile(null);
       setEditTeamLogoFile(null);
+      setInviteQuery("");
+      setInvitePanel("search");
+      setPendingInvites([]);
+      setSendingInviteId(null);
     }
     onOpenChange(v);
   };
@@ -725,7 +792,7 @@ const TournamentRegistration = ({
   if (!user) return null;
 
   // Not allowed when user already has a team but lacks permission by rule
-  if (hasTeam && !canRegister) {
+  if (!isRosterView && hasTeam && !canRegister) {
     return (
       <Dialog open={open} onOpenChange={resetAndClose}>
         <DialogContent className="sm:max-w-md bg-card border-border">
@@ -749,7 +816,7 @@ const TournamentRegistration = ({
 
   return (
     <Dialog open={open} onOpenChange={resetAndClose}>
-      <DialogContent className="sm:max-w-lg bg-card border-border">
+      <DialogContent className="sm:max-w-lg bg-card border-border shadow-lg rounded-2xl p-6">
         {/* Step indicator */}
         <div className="flex items-center gap-2 mb-2">
           <div
@@ -789,15 +856,19 @@ const TournamentRegistration = ({
 
             {hasTeam && user.team ? (
               <div className="space-y-4">
-                <div className="flex items-center gap-4 bg-muted/50 border border-border rounded-lg p-4">
-                  <img
-                    src={
-                      user.team.logo_url ||
-                      "https://via.placeholder.com/96?text=Team"
-                    }
-                    alt={user.team.name}
-                    className="w-12 h-12 rounded-lg object-cover bg-muted"
-                  />
+                <div className="flex items-center gap-4 bg-linear-to-r from-slate-800/50 to-slate-700/30 border border-border rounded-lg p-4">
+                  <Avatar className="w-12 h-12">
+                    {user.team.logo_url ? (
+                      <AvatarImage
+                        src={user.team.logo_url}
+                        alt={user.team.name}
+                      />
+                    ) : (
+                      <AvatarFallback className="font-bold">
+                        {String(user.team.short_name ?? user.team.name)[0]}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
                   <div className="flex-1">
                     <p className="font-bold">{user.team.name}</p>
                     <p className="text-muted-foreground text-xs">
@@ -926,6 +997,15 @@ const TournamentRegistration = ({
                     availableUsers.map((candidate) => {
                       const disabled = !canAssignUserToCurrentTeam(candidate);
                       const checked = createMemberIds.includes(candidate.id);
+                      const statusLabel =
+                        candidate.id === userId
+                          ? "Bạn"
+                          : candidate.team_id === null
+                            ? "Có thể thêm"
+                            : Number(candidate.team_id) ===
+                                Number(currentTeamId)
+                              ? "Đồng đội"
+                              : "Đã có đội";
 
                       return (
                         <label
@@ -940,6 +1020,9 @@ const TournamentRegistration = ({
                             }
                           />
                           <span className="text-sm">{candidate.username}</span>
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {statusLabel}
+                          </span>
                         </label>
                       );
                     })
@@ -1112,65 +1195,221 @@ const TournamentRegistration = ({
             <DialogHeader>
               <DialogTitle>Quản lý thành viên đội</DialogTitle>
               <DialogDescription>
-                Thêm hoặc xóa thành viên đội riêng tại Bước 1
+                Mời người chơi vào team và xem các lời mời đang chờ chấp nhận
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-              {loadingUsers ? (
-                <div className="text-smtext-[#EEEEEE] py-4 text-center">
-                  Đang tải danh sách người dùng...
+            <div className="space-y-4">
+              <div className="grid gap-3 rounded-2xl border border-border bg-muted/20 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      Thành viên hiện tại
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {loadingMembers
+                        ? "Đang tải..."
+                        : `${teamMembers.length} người chơi trong team`}
+                    </p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
+                    <UserCheck className="w-3.5 h-3.5" />
+                    Đồng bộ theo team
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {teamMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2"
+                    >
+                      <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-[10px] font-bold uppercase">
+                        {member.username[0]}
+                      </div>
+                      <span className="text-sm font-medium">
+                        {member.username}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 rounded-2xl border border-border bg-background p-1">
+                <button
+                  type="button"
+                  onClick={() => setInvitePanel("search")}
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${invitePanel === "search" ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Tìm & mời
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInvitePanel("pending")}
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${invitePanel === "pending" ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Lời mời chờ ({pendingInvites.length})
+                </button>
+              </div>
+
+              {invitePanel === "search" ? (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      value={inviteQuery}
+                      onChange={(event) => setInviteQuery(event.target.value)}
+                      placeholder="Tìm theo username hoặc nickname"
+                      className="pl-9 bg-muted/30 border-border"
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-muted/10 max-h-75 overflow-y-auto p-2 space-y-2">
+                    {!inviteQuery.trim() ? (
+                      <div className="py-10 text-center text-sm text-muted-foreground">
+                        Nhập tên người chơi để tìm và gửi lời mời.
+                      </div>
+                    ) : loadingUsers ? (
+                      <div className="py-10 text-center text-sm text-muted-foreground">
+                        Đang tìm người chơi...
+                      </div>
+                    ) : availableUsers.length === 0 ? (
+                      <div className="py-10 text-center text-sm text-muted-foreground">
+                        Không tìm thấy người chơi phù hợp.
+                      </div>
+                    ) : (
+                      availableUsers.map((candidate) => {
+                        const canInvite = canInviteCandidate(candidate);
+                        const alreadyInTeam =
+                          Number(candidate.team_id) === Number(currentTeamId);
+                        const alreadyHasTeam =
+                          candidate.team_id !== null && !alreadyInTeam;
+
+                        return (
+                          <div
+                            key={`invite-user-${candidate.id}`}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-border bg-linear-to-r from-slate-800/60 to-slate-700/40 p-3 shadow-sm"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Avatar className="w-10 h-10">
+                                {candidate.profile_picture ? (
+                                  <AvatarImage
+                                    src={candidate.profile_picture}
+                                  />
+                                ) : (
+                                  <AvatarFallback className="font-bold">
+                                    {candidate.username[0]}
+                                  </AvatarFallback>
+                                )}
+                              </Avatar>
+                              <div className="min-w-0">
+                                <p className="font-medium text-sm truncate">
+                                  {candidate.username}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {candidate.nickname || "Chưa có nickname"}
+                                </p>
+                              </div>
+                            </div>
+
+                            {alreadyInTeam ? (
+                              <span className="text-xs text-primary whitespace-nowrap">
+                                Đồng đội
+                              </span>
+                            ) : alreadyHasTeam ? (
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                Đã có đội
+                              </span>
+                            ) : canInvite ? (
+                              <Button
+                                size="sm"
+                                onClick={() => handleSendTeamInvite(candidate)}
+                                disabled={sendingInviteId === candidate.id}
+                                className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white"
+                              >
+                                <Send className="w-4 h-4 mr-1" />
+                                {sendingInviteId === candidate.id
+                                  ? "Đang gửi..."
+                                  : "Mời"}
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                Không thể mời
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               ) : (
-                availableUsers.map((candidate) => {
-                  const disabled = !canAssignUserToCurrentTeam(candidate);
-                  const checked = teamMemberIds.includes(candidate.id);
+                <div className="space-y-2 rounded-2xl border border-border bg-muted/10 p-2 max-h-75 overflow-y-auto">
+                  {pendingInvites.length === 0 ? (
+                    <div className="py-10 text-center text-sm text-muted-foreground">
+                      Chưa có lời mời nào đang chờ.
+                    </div>
+                  ) : (
+                    pendingInvites.map((invite) => (
+                      <div
+                        key={invite.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background p-3 shadow-sm"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-warning/10 border border-warning/20 flex items-center justify-center text-xs font-bold uppercase shrink-0">
+                            {String(invite.invitee_username ?? "U")[0]}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm truncate">
+                              {invite.invitee_username}
+                            </p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {invite.invitee_nickname || "Đang chờ phản hồi"}
+                            </p>
+                          </div>
+                        </div>
 
-                  return (
-                    <label
-                      key={`team-member-${candidate.id}`}
-                      className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
-                        disabled
-                          ? "opacity-50 cursor-not-allowed"
-                          : "cursor-pointer"
-                      } ${
-                        checked
-                          ? "border-primary bg-primary/5"
-                          : "border-border bg-muted/30 hover:bg-muted/50"
-                      }`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        disabled={disabled}
-                        onCheckedChange={() =>
-                          !disabled && toggleTeamMember(candidate.id)
-                        }
-                      />
-                      <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold uppercase">
-                        {candidate.username[0]}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
+                            <Clock3 className="w-3.5 h-3.5" />
+                            Pending
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRevokeTeamInvite(invite.id)}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
-                      <span className="font-medium text-sm">
-                        {candidate.username}
-                      </span>
-                    </label>
-                  );
-                })
+                    ))
+                  )}
+                </div>
               )}
-            </div>
-            <div className="flex gap-2 pt-2">
-              <Button
-                variant="outline"
-                onClick={() => setStep("team")}
-                className="flex-1"
-              >
-                Quay lại
-              </Button>
-              <Button
-                onClick={handleUpdateTeamMembers}
-                disabled={submitting}
-                className="flex-1"
-              >
-                {submitting ? "Đang lưu..." : "Lưu thành viên"}
-              </Button>
+
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  onClick={() => setStep("team")}
+                  className="flex-1"
+                >
+                  Quay lại
+                </Button>
+                <Button
+                  onClick={async () => {
+                    await Promise.all([loadTeamMembers(), loadTeamInvites()]);
+                    toast({
+                      title: "Đã làm mới",
+                      description:
+                        "Danh sách thành viên và lời mời đã được cập nhật.",
+                    });
+                  }}
+                  className="flex-1"
+                >
+                  Làm mới
+                </Button>
+              </div>
             </div>
           </>
         )}
@@ -1178,79 +1417,124 @@ const TournamentRegistration = ({
         {step === "members" && (
           <>
             <DialogHeader>
-              <DialogTitle>Chọn người chơi</DialogTitle>
+              <DialogTitle>
+                {isRosterView ? "Danh sách đồng đội" : "Chọn người chơi"}
+              </DialogTitle>
               <DialogDescription>
-                Chọn thành viên trong team để tham gia giải đấu
+                {isRosterView
+                  ? "Các đồng đội đã đăng ký trong giải đấu này."
+                  : "Chọn thành viên trong team để tham gia giải đấu"}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-              <p className="text-xstext-[#EEEEEE]">
-                Điều kiện: chọn từ {minPlayersRequired} đến {maxPlayersAllowed}
-                người.
-              </p>
+            <div className="space-y-2 max-h-75 overflow-y-auto pr-1">
               {loadingMembers ? (
                 <div className="text-smtext-[#EEEEEE] py-4 text-center">
                   Đang tải danh sách thành viên...
                 </div>
-              ) : teamMembers.length === 0 ? (
-                <div className="text-smtext-[#EEEEEE] py-4 text-center">
-                  Team chưa có thành viên để đăng ký.
-                </div>
+              ) : isRosterView ? (
+                teamMembers.filter((member) =>
+                  selectedMembers.includes(member.id),
+                ).length === 0 ? (
+                  <div className="text-smtext-[#EEEEEE] py-4 text-center">
+                    Team chưa đăng ký hoặc chưa có đồng đội nào trong giải này.
+                  </div>
+                ) : (
+                  teamMembers
+                    .filter((member) => selectedMembers.includes(member.id))
+                    .map((member) => (
+                      <div
+                        key={member.id}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold uppercase">
+                          {member.username[0]}
+                        </div>
+                        <span className="font-medium text-sm">
+                          {member.username}
+                        </span>
+                      </div>
+                    ))
+                )
               ) : (
-                teamMembers.map((member) => (
-                  <label
-                    key={member.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                      selectedMembers.includes(member.id)
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-muted/30 hover:bg-muted/50"
-                    }`}
-                  >
-                    <Checkbox
-                      checked={selectedMembers.includes(member.id)}
-                      onCheckedChange={() => toggleMember(member.id)}
-                    />
-                    <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold uppercase">
-                      {member.username[0]}
+                <>
+                  <p className="text-xstext-[#EEEEEE]">
+                    Điều kiện: chọn từ {minPlayersRequired} đến{" "}
+                    {maxPlayersAllowed}
+                    người.
+                  </p>
+                  {teamMembers.length === 0 ? (
+                    <div className="text-smtext-[#EEEEEE] py-4 text-center">
+                      Team chưa có thành viên để đăng ký.
                     </div>
-                    <span className="font-medium text-sm">
-                      {member.username}
-                    </span>
-                  </label>
-                ))
+                  ) : (
+                    teamMembers.map((member) => (
+                      <label
+                        key={member.id}
+                        className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                          selectedMembers.includes(member.id)
+                            ? "border-primary bg-primary/5"
+                            : "border-border bg-muted/30 hover:bg-muted/50"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={selectedMembers.includes(member.id)}
+                          onCheckedChange={() => toggleMember(member.id)}
+                        />
+                        <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold uppercase">
+                          {member.username[0]}
+                        </div>
+                        <span className="font-medium text-sm">
+                          {member.username}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </>
               )}
             </div>
             <div className="flex gap-2 pt-2">
-              {tournamentTeamId && (
+              {isRosterView ? (
                 <Button
-                  variant="destructive"
-                  onClick={handleWithdrawRegistration}
-                  disabled={submitting}
+                  variant="outline"
+                  onClick={() => resetAndClose(false)}
+                  className="flex-1"
                 >
-                  Xóa khỏi đăng ký
+                  Đóng
                 </Button>
+              ) : (
+                <>
+                  {tournamentTeamId && (
+                    <Button
+                      variant="destructive"
+                      onClick={handleWithdrawRegistration}
+                      disabled={submitting}
+                    >
+                      Xóa khỏi đăng ký
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    onClick={() => setStep("team")}
+                    className="flex-1"
+                  >
+                    Quay lại
+                  </Button>
+                  <Button
+                    onClick={handleSubmitRegistration}
+                    disabled={
+                      submitting ||
+                      selectedMembers.length === 0 ||
+                      !hasValidSelectedCount ||
+                      !hasEnoughPlayersForTournament
+                    }
+                    className="flex-1"
+                  >
+                    {submitting
+                      ? "Đang đăng ký..."
+                      : `${tournamentTeamId ? "Cập nhật" : "Đăng ký"} (${selectedMembers.length})`}
+                  </Button>
+                </>
               )}
-              <Button
-                variant="outline"
-                onClick={() => setStep("team")}
-                className="flex-1"
-              >
-                Quay lại
-              </Button>
-              <Button
-                onClick={handleSubmitRegistration}
-                disabled={
-                  submitting ||
-                  selectedMembers.length === 0 ||
-                  !hasValidSelectedCount ||
-                  !hasEnoughPlayersForTournament
-                }
-                className="flex-1"
-              >
-                {submitting
-                  ? "Đang đăng ký..."
-                  : `${tournamentTeamId ? "Cập nhật" : "Đăng ký"} (${selectedMembers.length})`}
-              </Button>
             </div>
           </>
         )}

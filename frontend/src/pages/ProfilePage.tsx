@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, Link2, Loader2, Save, Upload } from "lucide-react";
@@ -10,6 +16,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "@/hooks/use-toast";
 import { uploadImageToSupabase } from "@/lib/supabaseUpload";
 import { API_BASE } from "@/lib/apiBase";
+import {
+  acceptTeamInvite,
+  declineTeamInvite,
+  getMyTeamInvites,
+  type TeamInviteRecord,
+} from "@/api/teamInvites";
+import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
 
 const ProfilePage = () => {
   const navigate = useNavigate();
@@ -22,6 +35,9 @@ const ProfilePage = () => {
   const [avatarPreviewFromFile, setAvatarPreviewFromFile] = useState("");
   const [saving, setSaving] = useState(false);
   const [connectingRiot, setConnectingRiot] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState<TeamInviteRecord[]>([]);
+  const [inviteActionId, setInviteActionId] = useState<number | null>(null);
+  const hasTeam = Boolean(user?.team_id);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -74,6 +90,33 @@ const ProfilePage = () => {
     navigate("/profile", { replace: true });
   }, [searchParams, navigate, refreshUser]);
 
+  const loadInvites = useCallback(async () => {
+    if (!user || hasTeam) {
+      setPendingInvites([]);
+      return;
+    }
+
+    try {
+      const response = await getMyTeamInvites(token);
+      setPendingInvites(response.data?.invites ?? []);
+    } catch {
+      setPendingInvites([]);
+    }
+  }, [user, hasTeam, token]);
+
+  useEffect(() => {
+    void loadInvites();
+  }, [loadInvites]);
+
+  useTeamInviteStream({
+    enabled: Boolean(user && token),
+    token,
+    userId: Number(user?.id),
+    onEvent: useCallback(() => {
+      void loadInvites();
+    }, [loadInvites]),
+  });
+
   const initials = useMemo(() => {
     const raw = nickname || user?.nickname || "User";
     return raw
@@ -102,15 +145,6 @@ const ProfilePage = () => {
   const handleSaveProfile = async (event: FormEvent) => {
     event.preventDefault();
 
-    if (!token) {
-      toast({
-        title: "Chưa đăng nhập",
-        description: "Vui lòng đăng nhập để cập nhật hồ sơ.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setSaving(true);
 
     try {
@@ -127,11 +161,7 @@ const ProfilePage = () => {
           nickname: nickname.trim() || null,
           profile_picture: nextProfilePicture,
         },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        { withCredentials: true },
       );
 
       await refreshUser();
@@ -156,25 +186,12 @@ const ProfilePage = () => {
   };
 
   const handleConnectRiot = async () => {
-    if (!token) {
-      toast({
-        title: "Chưa đăng nhập",
-        description: "Vui lòng đăng nhập trước khi liên kết Riot.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     setConnectingRiot(true);
 
     try {
       const response = await axios.get<{ url?: string; error?: string }>(
         `${API_BASE}/api/users/riot/connect`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        { withCredentials: true },
       );
 
       const redirectUrl = response.data?.url;
@@ -195,6 +212,51 @@ const ProfilePage = () => {
           "Vui lòng thử lại sau.",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleAcceptInvite = async (inviteId: number) => {
+    setInviteActionId(inviteId);
+    try {
+      await acceptTeamInvite(inviteId, token);
+      await refreshUser();
+      const response = await getMyTeamInvites(token);
+      setPendingInvites(response.data?.invites ?? []);
+      toast({
+        title: "Đã tham gia team",
+        description: "Lời mời đã được chấp nhận.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Không thể chấp nhận lời mời",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setInviteActionId(null);
+    }
+  };
+
+  const handleDeclineInvite = async (inviteId: number) => {
+    setInviteActionId(inviteId);
+    try {
+      await declineTeamInvite(inviteId, token);
+      const response = await getMyTeamInvites(token);
+      setPendingInvites(response.data?.invites ?? []);
+      toast({
+        title: "Đã từ chối lời mời",
+        description: "Lời mời đã được cập nhật.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Không thể từ chối lời mời",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setInviteActionId(null);
     }
   };
 
@@ -242,6 +304,62 @@ const ProfilePage = () => {
             </Badge>
           </div>
         </section>
+
+        {!hasTeam && pendingInvites.length > 0 && (
+          <section className="rounded-2xl border border-border bg-card p-6 shadow-lg space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Lời mời team</h2>
+                <p className="text-sm text-muted-foreground">
+                  Bạn có thể chấp nhận hoặc từ chối các lời mời đang chờ.
+                </p>
+              </div>
+              <Badge variant="secondary">{pendingInvites.length} pending</Badge>
+            </div>
+            <div className="grid gap-3">
+              {pendingInvites.map((invite) => (
+                <div
+                  key={invite.id}
+                  className="rounded-lg border border-border bg-background p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shadow-sm"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xs font-bold uppercase shrink-0">
+                      {(invite.team_short_name ?? invite.team_name ?? "T")[0]}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">
+                        {invite.team_name}
+                      </p>
+                      <p className="text-sm text-muted-foreground truncate">
+                        Mời bởi {invite.inviter_username}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 sm:shrink-0">
+                    <Button
+                      variant="ghost"
+                      onClick={() => handleDeclineInvite(invite.id)}
+                      disabled={inviteActionId === invite.id}
+                      className="border border-border text-muted-foreground"
+                    >
+                      Từ chối
+                    </Button>
+                    <Button
+                      onClick={() => handleAcceptInvite(invite.id)}
+                      disabled={inviteActionId === invite.id}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      {inviteActionId === invite.id
+                        ? "Đang xử lý..."
+                        : "Chấp nhận"}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">Thông tin cơ bản</h2>
