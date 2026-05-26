@@ -553,18 +553,18 @@ const SeriesPage = () => {
             ))}
           </div>
 
-          <div className="bg-card border border-border rounded-2xl overflow-x-auto">
+          <div className="neo-box-square bg-card overflow-x-auto">
             {/* Header */}
             <div
-              className="grid gap-0 min-w-175"
+              <div className="grid gap-0 min-w-175"
               style={{
                 gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
               }}
             >
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
+                <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
                 #
               </div>
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE]">
+                <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
                 Đội tuyển
               </div>
               {completedTournamentIds.map((tid) => {
@@ -572,7 +572,7 @@ const SeriesPage = () => {
                 return (
                   <div
                     key={tid}
-                    className="px-2 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.08em] text-[#EEEEEE] text-center truncate"
+                      className="px-2 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.08em] text-[#EEEEEE] text-center truncate neo-leaderboard-header"
                     title={t?.title}
                   >
                     {t?.gameIcon}
@@ -600,7 +600,7 @@ const SeriesPage = () => {
               return (
                 <div
                   key={entry.team}
-                  className="grid gap-0 min-w-175 items-center transition-colors hover:bg-secondary/50"
+                  className="grid gap-0 min-w-175 items-center neo-leaderboard-row"
                   style={{
                     gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
                   }}
@@ -617,7 +617,7 @@ const SeriesPage = () => {
                       <img
                         src={team.logoUrl}
                         alt={team.shortName}
-                        className="w-7 h-7 rounded-md object-cover border border-border shrink-0"
+                        className="w-7 h-7 rounded-none object-cover border border-border shrink-0"
                       />
                     )}
                     <span className="text-sm font-semibold text-foreground truncate">

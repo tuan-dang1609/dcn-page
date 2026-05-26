@@ -1,6 +1,11 @@
 import { Elysia } from "elysia";
 import { pool } from "../utils/db.js";
 import middleware from "../utils/middleware.js";
+import { broadcastToUsers } from "../realtime/teamInviteStreamHub.js";
+
+const realtimeInstanceId =
+  process.env.REALTIME_INSTANCE_ID ??
+  `instance-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const teamRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Teams";
@@ -266,6 +271,15 @@ teamRouter.patch(
       [id],
     );
 
+    // capture previous member ids before changes so we can notify kicked users
+    const { rows: beforeRows } = await pool.query(
+      "SELECT id FROM users WHERE team_id = $1",
+      [id],
+    );
+    const beforeIds = (beforeRows || [])
+      .map((r) => Number(r.id))
+      .filter(Number.isFinite);
+
     if (teamRows.length === 0) {
       set.status = 404;
       return { error: "Team not found" };
@@ -346,6 +360,56 @@ teamRouter.patch(
     `,
       [id],
     );
+
+    // compute after-members and determine who was removed/added
+    const { rows: afterRows } = await pool.query(
+      "SELECT id FROM users WHERE team_id = $1",
+      [id],
+    );
+    const afterIds = (afterRows || [])
+      .map((r) => Number(r.id))
+      .filter(Number.isFinite);
+
+    const removed = beforeIds.filter((x) => !afterIds.includes(x));
+    const added = afterIds.filter((x) => !beforeIds.includes(x));
+
+    // notify removed users that they no longer belong to the team
+    if (removed.length > 0) {
+      try {
+        broadcastToUsers(
+          {
+            type: "team_membership_changed",
+            event_name: "team:removed",
+            user_ids: removed,
+            team_id: null,
+            origin_instance_id: realtimeInstanceId,
+            ts: new Date().toISOString(),
+          },
+          removed,
+        );
+      } catch (e) {
+        // ignore broadcast errors
+      }
+    }
+
+    // notify newly added users that they've joined
+    if (added.length > 0) {
+      try {
+        broadcastToUsers(
+          {
+            type: "team_membership_changed",
+            event_name: "team:joined",
+            user_ids: added,
+            team_id: id,
+            origin_instance_id: realtimeInstanceId,
+            ts: new Date().toISOString(),
+          },
+          added,
+        );
+      } catch (e) {
+        // ignore
+      }
+    }
 
     set.status = 200;
     return rows[0];

@@ -80,6 +80,28 @@
     border-radius: var(--radius);
   }
 
+  /* Square variant: removes rounded corners for flat leaderboard look */
+  .neo-box-square {
+    border: var(--neo-border);
+    border-radius: 0;
+  }
+
+  /* Leaderboard color styles to match screenshot */
+  .neo-leaderboard-header {
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+
+  .neo-leaderboard-row {
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+  }
+
+  /* no hover change: keep row color identical on hover */
+  .neo-leaderboard-row:hover {
+    background-color: inherit;
+  }
+
   .neo-box-hover {
     transition:
       transform 0.15s ease,

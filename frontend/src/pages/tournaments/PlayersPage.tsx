@@ -91,33 +91,27 @@ const PlayersPage = () => {
     now >= checkInStartMs &&
     now <= checkInEndMs;
 
-  const myTeamId = Number(user?.team_id);
   const userId = Number(user?.id);
   const roleId = Number(user?.role_id);
   const canManageOwnTeam =
     [1, 2, 3, 4].includes(roleId) || Number(user?.team?.created_by) === userId;
 
-  const canUseCheckIn =
-    Number.isFinite(myTeamId) &&
-    myTeamId > 0 &&
-    Boolean(token) &&
-    canManageOwnTeam &&
-    isCheckInOpen;
+  const canUseCheckIn = Boolean(token) && canManageOwnTeam && isCheckInOpen;
 
   const myRegisteredTeamId = useMemo(() => {
     const team = apiPlayersRaw.find(
-      (participant) => toNumber(participant.team_id) === myTeamId,
+      (participant) => toNumber(participant.team_id) === Number(user?.team_id),
     );
-    return team ? toNumber(team.team_id) : null;
-  }, [apiPlayersRaw, myTeamId]);
+    return team ? toNumber(team.id) : null;
+  }, [apiPlayersRaw, user?.team_id]);
 
   const myTeamCheckedIn = useMemo(() => {
     const team = apiPlayersRaw.find(
-      (participant) => toNumber(participant.team_id) === myTeamId,
+      (participant) => toNumber(participant.team_id) === Number(user?.team_id),
     );
 
     return Boolean(team?.isCheckedIn);
-  }, [apiPlayersRaw, myTeamId]);
+  }, [apiPlayersRaw, user?.team_id]);
 
   const selectedTeam = useMemo(() => {
     if (selectedTournamentTeamId === null) return null;
@@ -140,7 +134,7 @@ const PlayersPage = () => {
     setCheckingInTeamId(myRegisteredTeamId);
     try {
       await axios.patch(
-        `${API_BASE}/api/tournaments/teams/${tournament.id}/${myRegisteredTeamId}/check-in`,
+        `${API_BASE}/api/tournaments/teams/${myRegisteredTeamId}/check-in`,
         {
           checked_in: true,
         },
@@ -156,9 +150,7 @@ const PlayersPage = () => {
         description: "Đội của bạn đã check-in vào giải đấu.",
       });
 
-      if (refetch) {
-        await refetch();
-      }
+      window.location.reload();
     } catch (error) {
       const message = axios.isAxiosError(error)
         ? (error.response?.data?.message ?? error.response?.data?.error)
@@ -178,20 +170,7 @@ const PlayersPage = () => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-2xl font-heading">Người chơi</h2>
-        {canUseCheckIn && myRegisteredTeamId ? (
-          <Button
-            onClick={handleCheckIn}
-            disabled={
-              checkingInTeamId === myRegisteredTeamId || myTeamCheckedIn
-            }
-          >
-            {checkingInTeamId === myRegisteredTeamId
-              ? "Đang check-in..."
-              : myTeamCheckedIn
-                ? "Đã check-in"
-                : "Check-in đội của tôi"}
-          </Button>
-        ) : null}
+        {/* Check-in button moved to header for team owners */}
       </div>
       {isLoading ? (
         <p className="text-smtext-[#EEEEEE]">Đang tải người chơi...</p>

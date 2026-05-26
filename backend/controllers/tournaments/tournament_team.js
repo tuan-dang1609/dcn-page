@@ -87,10 +87,9 @@ teamTourRoute.get(
 );
 
 teamTourRoute.patch(
-  "/:tournament_id/:team_id/check-in",
+  "/:registration_id/check-in",
   async ({ params, body, set, user }) => {
-    const tournamentId = Number(params.tournament_id);
-    const targetTeamId = Number(params.team_id);
+    const registrationId = Number(params.registration_id);
     const checkedIn =
       body?.checked_in === undefined ? true : Boolean(body?.checked_in);
 
@@ -99,24 +98,41 @@ teamTourRoute.patch(
       return { message: "Bạn cần đăng nhập để check-in đội" };
     }
 
-    if (!Number.isFinite(tournamentId) || !Number.isFinite(targetTeamId)) {
+    if (!Number.isFinite(registrationId)) {
       set.status = 400;
-      return { message: "tournament_id hoặc team_id không hợp lệ" };
+      return { message: "registration_id không hợp lệ" };
     }
 
     const roleId = Number(user.role_id);
-    const myTeamId = Number(user.team_id);
 
     const isStaff = new Set([1, 2, 3]).has(roleId);
-    const isCaptainOfTeam = roleId === 4 && myTeamId === targetTeamId;
-
-    const { rows: teamRows } = await pool.query(
-      "SELECT created_by FROM teams WHERE id = $1",
-      [targetTeamId],
+    const { rows: registrationRows } = await pool.query(
+      `SELECT
+         tt.id,
+         tt.team_id,
+         tt.tournament_id,
+         t.register_start,
+         t.register_end,
+         COALESCE(t.check_in_start, t.register_start) AS check_in_start,
+         COALESCE(t.check_in_end, t.register_end) AS check_in_end,
+         tm.created_by
+       FROM tournament_teams tt
+       JOIN tournaments t ON t.id = tt.tournament_id
+       JOIN teams tm ON tm.id = tt.team_id
+       WHERE tt.id = $1
+       FOR UPDATE`,
+      [registrationId],
     );
 
-    const isTeamOwner =
-      teamRows.length > 0 && Number(teamRows[0].created_by) === Number(user.id);
+    if (registrationRows.length === 0) {
+      set.status = 404;
+      return { message: "Không tìm thấy bản ghi đăng ký đội" };
+    }
+
+    const registration = registrationRows[0];
+    const isCaptainOfTeam =
+      roleId === 4 && Number(user.team_id) === Number(registration.team_id);
+    const isTeamOwner = Number(registration.created_by) === Number(user.id);
 
     if (!isStaff && !isCaptainOfTeam && !isTeamOwner) {
       set.status = 401;
@@ -125,27 +141,6 @@ teamTourRoute.patch(
       };
     }
 
-    const { rows: registrationRows } = await pool.query(
-      `SELECT
-         tt.id,
-         tt.team_id,
-         t.register_start,
-         t.register_end,
-         COALESCE(t.check_in_start, t.register_start) AS check_in_start,
-         COALESCE(t.check_in_end, t.register_end) AS check_in_end
-       FROM tournament_teams tt
-       JOIN tournaments t ON t.id = tt.tournament_id
-       WHERE tt.tournament_id = $1 AND tt.team_id = $2
-       FOR UPDATE`,
-      [tournamentId, targetTeamId],
-    );
-
-    if (registrationRows.length === 0) {
-      set.status = 404;
-      return { message: "Đội chưa đăng ký giải đấu này" };
-    }
-
-    const registration = registrationRows[0];
     const now = Date.now();
     const canCheckInNow = isWithinRange(
       now,
@@ -171,16 +166,17 @@ teamTourRoute.patch(
     await pool.query(
       `UPDATE tournament_teams
        SET "${checkInColumn}" = $1
-       WHERE tournament_id = $2 AND team_id = $3`,
-      [checkedIn, tournamentId, targetTeamId],
+       WHERE id = $2`,
+      [checkedIn, registrationId],
     );
 
     set.status = 200;
     return {
       message: checkedIn ? "Check-in thành công" : "Đã bỏ check-in",
       data: {
-        team_id: targetTeamId,
-        tournament_id: tournamentId,
+        id: registrationId,
+        team_id: registration.team_id,
+        tournament_id: registration.tournament_id,
         isCheckedIn: checkedIn,
       },
     };

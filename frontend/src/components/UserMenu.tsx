@@ -31,7 +31,7 @@ import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
 
 const UserMenu = () => {
   const navigate = useNavigate();
-  const { user, token, logout } = useAuth();
+  const { user, token, logout, refreshUser } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [pendingInvites, setPendingInvites] = useState<TeamInviteRecord[]>([]);
@@ -63,9 +63,41 @@ const UserMenu = () => {
     enabled: Boolean(user && token),
     token,
     userId: Number(user?.id),
-    onEvent: useCallback(() => {
-      void loadInvites();
-    }, [loadInvites]),
+    onEvent: useCallback(
+      (payload) => {
+        // membership change -> refresh profile + invites
+        if (payload.type === "team_membership_changed") {
+          const eventName = String(payload.event_name ?? "");
+          if (eventName.includes("removed")) {
+            void (async () => {
+              try {
+                await refreshUser();
+              } catch {
+                // ignore
+              }
+              void loadInvites();
+            })();
+            toast.error("Bạn đã bị gỡ khỏi team");
+            return;
+          }
+          if (eventName.includes("joined")) {
+            void (async () => {
+              try {
+                await refreshUser();
+              } catch {
+                // ignore
+              }
+              void loadInvites();
+            })();
+            toast.success("Bạn đã được thêm vào team");
+            return;
+          }
+        }
+
+        void loadInvites();
+      },
+      [loadInvites],
+    ),
   });
 
   const handleOpenInviteModal = async () => {

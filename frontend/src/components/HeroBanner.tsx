@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import axios from "axios";
+import { API_BASE } from "@/lib/apiBase";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -36,6 +38,8 @@ interface HeroBannerProps {
     banner_url?: string;
     id?: number | string;
     max_player_per_team?: number | string;
+    check_in_start?: string;
+    check_in_end?: string;
     register_start?: string;
     register_end?: string;
     name?: string;
@@ -43,7 +47,7 @@ interface HeroBannerProps {
 }
 
 const HeroBanner = ({ tournament }: HeroBannerProps) => {
-  const { user, logout, isRegistered, token } = useAuth();
+  const { user, logout, isRegistered, token, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [regOpen, setRegOpen] = useState(false);
@@ -95,6 +99,75 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     setRosterOpen(true);
   };
 
+  const [checkingInTeamId, setCheckingInTeamId] = useState<number | null>(null);
+  const [myRegisteredTeamId, setMyRegisteredTeamId] = useState<number | null>(
+    null,
+  );
+  const [myTeamCheckedIn, setMyTeamCheckedIn] = useState<boolean>(false);
+
+  const fetchRegisteredTeams = useCallback(async () => {
+    if (!tournament?.id || !user) return;
+
+    try {
+      const res = await axios.get(
+        `${API_BASE}/api/tournaments/teams/${tournament.id}`,
+      );
+      const teams = Array.isArray(res.data?.teams) ? res.data.teams : [];
+      const myTeam = teams.find(
+        (t: any) => Number(t.team_id) === Number(user?.team_id),
+      );
+      setMyRegisteredTeamId(
+        myTeam ? Number(myTeam.id ?? myTeam.team_id) : null,
+      );
+      setMyTeamCheckedIn(Boolean(myTeam?.isCheckedIn));
+    } catch {
+      setMyRegisteredTeamId(null);
+      setMyTeamCheckedIn(false);
+    }
+  }, [tournament?.id, user]);
+
+  useEffect(() => {
+    void fetchRegisteredTeams();
+  }, [fetchRegisteredTeams]);
+
+  const checkInTournament = tournament as
+    | { check_in_start?: string; check_in_end?: string }
+    | null
+    | undefined;
+  const checkInStartMs = Number(
+    new Date(checkInTournament?.check_in_start ?? ""),
+  );
+  const checkInEndMs = Number(new Date(checkInTournament?.check_in_end ?? ""));
+  const nowMs = Date.now();
+  const isCheckInOpen =
+    Number.isFinite(checkInStartMs) &&
+    Number.isFinite(checkInEndMs) &&
+    nowMs >= checkInStartMs &&
+    nowMs <= checkInEndMs;
+
+  const canShowHeaderCheckIn = Boolean(
+    isTeamCaptain && user?.team_id && myRegisteredTeamId,
+  );
+
+  const handleHeaderCheckIn = async () => {
+    if (!token || !tournament?.id || !myRegisteredTeamId) return;
+    setCheckingInTeamId(myRegisteredTeamId);
+    try {
+      await axios.patch(
+        `${API_BASE}/api/tournaments/teams/${myRegisteredTeamId}/check-in`,
+        { checked_in: true },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      toast.success("Check-in thành công");
+      window.location.reload();
+    } catch (err) {
+      toast.error("Check-in thất bại");
+    } finally {
+      setCheckingInTeamId(null);
+    }
+  };
+
   const syncInvites = useCallback(
     async ({ notify = false }: { notify?: boolean } = {}) => {
       if (!user) return [] as TeamInviteRecord[];
@@ -142,7 +215,31 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     userId: Number(user?.id),
     onEvent: useCallback(
       (payload) => {
-        void syncInvites({ notify: payload.type === "invite_created" });
+        // Treat invite_created as notify; treat invite_updated with accepted status or event_name containing 'accept' as notify
+        const isCreated = payload.type === "invite_created";
+        const isUpdated = payload.type === "invite_updated";
+        const isAcceptedEventName =
+          typeof payload.event_name === "string" &&
+          payload.event_name.includes("accept");
+        const isInviteAccepted =
+          isUpdated &&
+          (isAcceptedEventName || payload.invite?.status === "accepted");
+
+        const shouldNotify = isCreated || isInviteAccepted;
+        void syncInvites({ notify: shouldNotify });
+
+        // handle membership changes pushed by server (kicked or joined)
+        if (payload.type === "team_membership_changed") {
+          const eventName = String(payload.event_name ?? "");
+          if (eventName.includes("removed")) {
+            // we were removed -> refresh user profile and show toast
+            void refreshUser().catch(() => {});
+            toast.error("Bạn đã bị gỡ khỏi team");
+          } else if (eventName.includes("joined")) {
+            void refreshUser().catch(() => {});
+            toast.success("Bạn đã được thêm vào team");
+          }
+        }
       },
       [syncInvites],
     ),
@@ -263,7 +360,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                         alt={user.nickname}
                       />
                       <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
-                        {(user.nickname || user.username || "U")[0]}
+                        {(user.nickname || "U")[0]}
                       </AvatarFallback>
                     </Avatar>
                   </div>
@@ -309,6 +406,39 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                       </>
                     )}
                   </Button>
+                ) : null}
+
+                {canShowHeaderCheckIn ? isCheckInOpen ? (
+                  <Button
+                    size="sm"
+                    onClick={handleHeaderCheckIn}
+                    disabled={
+                      checkingInTeamId === myRegisteredTeamId ||
+                      myTeamCheckedIn
+                    }
+                    className="gap-1.5"
+                  >
+                    {checkingInTeamId === myRegisteredTeamId
+                      ? "Đang check-in..."
+                      : myTeamCheckedIn
+                        ? "Đã check-in"
+                        : "Check-in đội của tôi"}
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
+                    <Avatar className="h-6 w-6">
+                      <AvatarImage
+                        src={user?.team?.logo_url ?? undefined}
+                        alt={user?.team?.name ?? "Team"}
+                      />
+                      <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
+                        {(user?.team?.short_name || user?.team?.name || "T")[0]}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="max-w-32 truncate text-sm font-semibold">
+                      {user?.team?.name}
+                    </span>
+                  </div>
                 ) : null}
                 <Button
                   size="sm"
