@@ -561,10 +561,10 @@ const SeriesPage = () => {
                 gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
               }}
             >
-                <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
                 #
               </div>
-                <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
                 Đội tuyển
               </div>
               {completedTournamentIds.map((tid) => {
@@ -572,7 +572,7 @@ const SeriesPage = () => {
                 return (
                   <div
                     key={tid}
-                      className="px-2 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.08em] text-[#EEEEEE] text-center truncate neo-leaderboard-header"
+                    className="px-2 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.08em] text-[#EEEEEE] text-center truncate neo-leaderboard-header"
                     title={t?.title}
                   >
                     {t?.gameIcon}

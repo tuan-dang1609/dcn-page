@@ -826,7 +826,8 @@ const TournamentRegistration = ({
       setTournamentTeamId(null);
       setSelectedMembers([]);
       setStep("team");
-      // keep modal open and reflect updated state without forcing a full reload
+      onOpenChange(false);
+      window.location.reload();
     } catch (error) {
       toast({
         title: "Hủy đăng ký thất bại",

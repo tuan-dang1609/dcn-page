@@ -47,7 +47,7 @@ interface HeroBannerProps {
 }
 
 const HeroBanner = ({ tournament }: HeroBannerProps) => {
-  const { user, logout, isRegistered, token, refreshUser } = useAuth();
+  const { user, logout, isRegistered, setIsRegistered, token, refreshUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [regOpen, setRegOpen] = useState(false);
@@ -116,15 +116,19 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
       const myTeam = teams.find(
         (t: any) => Number(t.team_id) === Number(user?.team_id),
       );
-      setMyRegisteredTeamId(
-        myTeam ? Number(myTeam.id ?? myTeam.team_id) : null,
-      );
+      const nextRegisteredTeamId = myTeam
+        ? Number(myTeam.id ?? myTeam.team_id)
+        : null;
+
+      setMyRegisteredTeamId(nextRegisteredTeamId);
       setMyTeamCheckedIn(Boolean(myTeam?.isCheckedIn));
+      setIsRegistered(Boolean(nextRegisteredTeamId));
     } catch {
       setMyRegisteredTeamId(null);
       setMyTeamCheckedIn(false);
+      setIsRegistered(false);
     }
-  }, [tournament?.id, user]);
+  }, [tournament?.id, user, setIsRegistered]);
 
   useEffect(() => {
     void fetchRegisteredTeams();
@@ -148,6 +152,8 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   const canShowHeaderCheckIn = Boolean(
     isTeamCaptain && user?.team_id && myRegisteredTeamId,
   );
+
+  const showUpdateRegistration = Boolean(myRegisteredTeamId || isRegistered);
 
   const handleHeaderCheckIn = async () => {
     if (!token || !tournament?.id || !myRegisteredTeamId) return;
@@ -387,58 +393,66 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                       {user?.team?.name}
                     </span>
                   </Button>
-                ) : isRegistrationOpen ? (
+                ) : isRegistrationOpen || isRegistered ? (
                   <Button
                     size="sm"
                     onClick={handleOpenRegistration}
-                    className="gap-1.5"
-                    variant={isRegistered ? "outline" : "default"}
+                    className="h-11 px-4 sm:px-5 gap-2 text-sm sm:text-base font-semibold"
+                    variant={showUpdateRegistration ? "outline" : "default"}
                   >
-                    {isRegistered ? (
+                    {showUpdateRegistration ? (
                       <>
                         <RefreshCw className="w-4 h-4" />
                         <span className="hidden sm:inline">Cập nhật</span>
+                        <span className="sm:hidden">Cập nhật</span>
                       </>
                     ) : (
                       <>
                         <Trophy className="w-4 h-4" />
                         <span className="hidden sm:inline">Đăng ký giải</span>
+                        <span className="sm:hidden">Đăng ký</span>
                       </>
                     )}
                   </Button>
                 ) : null}
 
-                {canShowHeaderCheckIn ? isCheckInOpen ? (
-                  <Button
-                    size="sm"
-                    onClick={handleHeaderCheckIn}
-                    disabled={
-                      checkingInTeamId === myRegisteredTeamId ||
-                      myTeamCheckedIn
-                    }
-                    className="gap-1.5"
-                  >
-                    {checkingInTeamId === myRegisteredTeamId
-                      ? "Đang check-in..."
-                      : myTeamCheckedIn
-                        ? "Đã check-in"
-                        : "Check-in đội của tôi"}
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
-                    <Avatar className="h-6 w-6">
-                      <AvatarImage
-                        src={user?.team?.logo_url ?? undefined}
-                        alt={user?.team?.name ?? "Team"}
-                      />
-                      <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
-                        {(user?.team?.short_name || user?.team?.name || "T")[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="max-w-32 truncate text-sm font-semibold">
-                      {user?.team?.name}
-                    </span>
-                  </div>
+                {canShowHeaderCheckIn ? (
+                  isCheckInOpen ? (
+                    <Button
+                      size="sm"
+                      onClick={handleHeaderCheckIn}
+                      disabled={
+                        checkingInTeamId === myRegisteredTeamId ||
+                        myTeamCheckedIn
+                      }
+                      className="gap-1.5"
+                    >
+                      {checkingInTeamId === myRegisteredTeamId
+                        ? "Đang check-in..."
+                        : myTeamCheckedIn
+                          ? "Đã check-in"
+                          : "Check-in đội của tôi"}
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
+                      <Avatar className="h-6 w-6">
+                        <AvatarImage
+                          src={user?.team?.logo_url ?? undefined}
+                          alt={user?.team?.name ?? "Team"}
+                        />
+                        <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
+                          {
+                            (user?.team?.short_name ||
+                              user?.team?.name ||
+                              "T")[0]
+                          }
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="max-w-32 truncate text-sm font-semibold">
+                        {user?.team?.name}
+                      </span>
+                    </div>
+                  )
                 ) : null}
                 <Button
                   size="sm"
