@@ -556,7 +556,7 @@ const SeriesPage = () => {
           <div className="neo-box-square bg-card overflow-x-auto">
             {/* Header */}
             <div
-              <div className="grid gap-0 min-w-175"
+              className="grid gap-0 min-w-175"
               style={{
                 gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
               }}
