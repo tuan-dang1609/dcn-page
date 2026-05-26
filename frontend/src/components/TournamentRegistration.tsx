@@ -24,8 +24,10 @@ import {
   Clock3,
   UserCheck,
   X,
+  Trash2,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
 import { toast } from "@/hooks/use-toast";
 import {
   deleteImageFromSupabase,
@@ -115,6 +117,9 @@ const TournamentRegistration = ({
   >(isRosterView ? "members" : "team");
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
+  const [removingMember, setRemovingMember] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<AvailableUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [allUsers, setAllUsers] = useState<AvailableUser[] | null>(null);
@@ -247,6 +252,36 @@ const TournamentRegistration = ({
       setLoadingUsers(false);
     }
   };
+
+  // listen for external member updates (kicks/accepts) and refresh lists
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const custom = e as CustomEvent<{ teamId?: number | string }>;
+        if (!custom?.detail) return;
+        if (String(custom.detail.teamId) !== String(currentTeamId)) {
+          // if event for different team, still refresh available users
+          void loadAvailableUsers(inviteQuery);
+          return;
+        }
+
+        void Promise.all([
+          loadTeamMembers(),
+          loadTeamInvites(),
+          loadAvailableUsers(inviteQuery),
+        ]);
+      } catch {
+        void loadAvailableUsers(inviteQuery);
+      }
+    };
+
+    window.addEventListener("team:members-updated", handler as EventListener);
+    return () =>
+      window.removeEventListener(
+        "team:members-updated",
+        handler as EventListener,
+      );
+  }, [currentTeamId, inviteQuery]);
 
   const fetchAllUsers = async () => {
     if (allUsers !== null) return allUsers;
@@ -424,6 +459,43 @@ const TournamentRegistration = ({
 
     setStep(isRosterView ? "members" : "team");
   }, [open, isRosterView]);
+
+  useTeamInviteStream({
+    enabled: Boolean(open && user),
+    token,
+    userId: userId ?? null,
+    onEvent: async (payload) => {
+      // Normalize events: controller emits 'invite_created' and 'invite_updated'.
+      const isCreated = payload.type === "invite_created";
+      const isRevoked = payload.type === "invite_revoked";
+      const isUpdated = payload.type === "invite_updated";
+      const isAcceptedEventName =
+        typeof payload.event_name === "string" &&
+        payload.event_name.includes("accept");
+      const isInviteAccepted =
+        isUpdated &&
+        (isAcceptedEventName || payload.invite?.status === "accepted");
+
+      if (isInviteAccepted) {
+        await Promise.all([loadTeamMembers(), loadTeamInvites()]);
+        toast({
+          title: "Đã có thành viên mới",
+          description: "Lời mời đã được chấp nhận.",
+        });
+        try {
+          window.dispatchEvent(
+            new CustomEvent("team:members-updated", {
+              detail: { teamId: currentTeamId },
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+      } else if (isCreated || isRevoked) {
+        void loadTeamInvites();
+      }
+    },
+  });
 
   const canInviteCandidate = (candidate: AvailableUser) => {
     if (!hasTeam || !currentTeamId) return false;
@@ -713,8 +785,6 @@ const TournamentRegistration = ({
       setIsRegistered(true);
       setTournamentTeamId(finalTournamentTeamId);
       onOpenChange(false);
-      setStep("team");
-      setSelectedMembers([]);
       window.location.reload();
     } catch (error) {
       toast({
@@ -756,8 +826,7 @@ const TournamentRegistration = ({
       setTournamentTeamId(null);
       setSelectedMembers([]);
       setStep("team");
-      onOpenChange(false);
-      window.location.reload();
+      // keep modal open and reflect updated state without forcing a full reload
     } catch (error) {
       toast({
         title: "Hủy đăng ký thất bại",
@@ -795,7 +864,7 @@ const TournamentRegistration = ({
   if (!isRosterView && hasTeam && !canRegister) {
     return (
       <Dialog open={open} onOpenChange={resetAndClose}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-md bg-card border-border px-4 py-5 sm:w-full sm:max-w-md sm:px-6 sm:py-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-destructive" />
@@ -816,7 +885,7 @@ const TournamentRegistration = ({
 
   return (
     <Dialog open={open} onOpenChange={resetAndClose}>
-      <DialogContent className="sm:max-w-lg bg-card border-border shadow-lg rounded-2xl p-6">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-lg bg-card border-border shadow-lg rounded-2xl px-4 py-5 sm:w-full sm:max-w-lg sm:px-6 sm:py-6">
         {/* Step indicator */}
         <div className="flex items-center gap-2 mb-2">
           <div
@@ -1223,12 +1292,30 @@ const TournamentRegistration = ({
                       key={member.id}
                       className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2"
                     >
-                      <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-[10px] font-bold uppercase">
-                        {member.username[0]}
-                      </div>
+                      <Avatar className="w-7 h-7">
+                        {member.profile_picture ? (
+                          <AvatarImage src={member.profile_picture} />
+                        ) : (
+                          <AvatarFallback className="text-[10px] font-bold uppercase">
+                            {member.username[0]}
+                          </AvatarFallback>
+                        )}
+                      </Avatar>
                       <span className="text-sm font-medium">
                         {member.username}
                       </span>
+                      {canManageTeam && (
+                        <button
+                          aria-label={`Xóa ${member.username}`}
+                          onClick={() => {
+                            setMemberToRemove(member);
+                            setConfirmOpen(true);
+                          }}
+                          className="ml-2 p-1 rounded-md hover:bg-slate-800"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-400" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1284,6 +1371,11 @@ const TournamentRegistration = ({
                         const alreadyHasTeam =
                           candidate.team_id !== null && !alreadyInTeam;
 
+                        const isAlreadyInvited = pendingInvites.some(
+                          (inv) =>
+                            Number(inv.invitee_id) === Number(candidate.id),
+                        );
+
                         return (
                           <div
                             key={`invite-user-${candidate.id}`}
@@ -1318,6 +1410,10 @@ const TournamentRegistration = ({
                             ) : alreadyHasTeam ? (
                               <span className="text-xs text-muted-foreground whitespace-nowrap">
                                 Đã có đội
+                              </span>
+                            ) : isAlreadyInvited ? (
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                Đã mời
                               </span>
                             ) : canInvite ? (
                               <Button
@@ -1355,9 +1451,17 @@ const TournamentRegistration = ({
                         className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background p-3 shadow-sm"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-full bg-warning/10 border border-warning/20 flex items-center justify-center text-xs font-bold uppercase shrink-0">
-                            {String(invite.invitee_username ?? "U")[0]}
-                          </div>
+                          <Avatar className="w-10 h-10">
+                            {invite.invitee_profile_picture ? (
+                              <AvatarImage
+                                src={invite.invitee_profile_picture}
+                              />
+                            ) : (
+                              <AvatarFallback className="font-bold text-xs uppercase">
+                                {String(invite.invitee_username ?? "U")[0]}
+                              </AvatarFallback>
+                            )}
+                          </Avatar>
                           <div className="min-w-0">
                             <p className="font-medium text-sm truncate">
                               {invite.invitee_username}
@@ -1371,7 +1475,7 @@ const TournamentRegistration = ({
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
                             <Clock3 className="w-3.5 h-3.5" />
-                            Pending
+                            Đã mời
                           </span>
                           <Button
                             variant="ghost"
@@ -1527,10 +1631,12 @@ const TournamentRegistration = ({
                       !hasValidSelectedCount ||
                       !hasEnoughPlayersForTournament
                     }
-                    className="flex-1"
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
                   >
                     {submitting
-                      ? "Đang đăng ký..."
+                      ? tournamentTeamId
+                        ? "Đang cập nhật..."
+                        : "Đang đăng ký..."
                       : `${tournamentTeamId ? "Cập nhật" : "Đăng ký"} (${selectedMembers.length})`}
                   </Button>
                 </>
@@ -1538,6 +1644,84 @@ const TournamentRegistration = ({
             </div>
           </>
         )}
+        {/* Confirm remove modal */}
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent className="w-[calc(100vw-1rem)] max-w-sm border-slate-700 text-slate-100 px-4 py-5 sm:w-full sm:max-w-sm sm:px-6 sm:py-6">
+            <div>
+              <h3 className="text-lg font-semibold">Xác nhận xóa đồng đội</h3>
+              <p className="text-sm text-slate-300 mt-2">
+                Bạn có chắc muốn xóa <strong>{memberToRemove?.username}</strong>{" "}
+                khỏi team không? Hành động này sẽ gỡ họ khỏi team.
+              </p>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={removingMember}
+                >
+                  Hủy
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!currentTeamId || !memberToRemove) return;
+                    setRemovingMember(true);
+                    try {
+                      const remaining = teamMembers
+                        .map((m) => Number(m.id))
+                        .filter(
+                          (id) =>
+                            Number.isFinite(id) &&
+                            id !== Number(memberToRemove.id),
+                        );
+
+                      await axios.patch(
+                        `${API_BASE}/api/teams/${currentTeamId}`,
+                        { user_ids: remaining },
+                        {
+                          withCredentials: true,
+                          headers: token
+                            ? { Authorization: `Bearer ${token}` }
+                            : undefined,
+                        },
+                      );
+
+                      toast({
+                        title: "Đã xóa đồng đội",
+                        description: `${memberToRemove.username} đã được gỡ khỏi team.`,
+                      });
+                      setConfirmOpen(false);
+                      setMemberToRemove(null);
+                      await loadTeamMembers();
+                      // notify other parts of the app to refresh
+                      try {
+                        window.dispatchEvent(
+                          new CustomEvent("team:members-updated", {
+                            detail: { teamId: currentTeamId },
+                          }),
+                        );
+                      } catch {
+                        /* ignore */
+                      }
+                    } catch (err) {
+                      toast({
+                        title: "Không thể xóa",
+                        description: "Vui lòng thử lại.",
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setRemovingMember(false);
+                    }
+                  }}
+                  className="bg-red-600 text-white"
+                  disabled={removingMember}
+                >
+                  {removingMember ? "Đang xóa..." : "Xác nhận xóa"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

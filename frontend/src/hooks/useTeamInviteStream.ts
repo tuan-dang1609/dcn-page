@@ -48,19 +48,68 @@ export const useTeamInviteStream = ({
 
       nextSocket.onmessage = (event) => {
         try {
-          const payload = JSON.parse(String(event.data)) as TeamInviteStreamPayload;
+          const payload = JSON.parse(
+            String(event.data),
+          ) as TeamInviteStreamPayload;
 
           if (payload.type === "ping") return;
 
-          const targetUserId = Number(
+          const targetInviteeId = Number(
             payload.invitee_id ?? payload.invite?.invitee_id,
           );
+          const targetInviterId = Number(
+            payload.inviter_id ?? payload.invite?.inviter_id,
+          );
 
-          if (!Number.isFinite(targetUserId) || targetUserId !== userId) {
+          const isForInvitee =
+            Number.isFinite(targetInviteeId) && targetInviteeId === userId;
+          const isForInviter =
+            Number.isFinite(targetInviterId) && targetInviterId === userId;
+
+          const targetUserId = Number(
+            payload.user_id ?? payload.user?.id ?? NaN,
+          );
+          const targetUserIds = Array.isArray(payload.user_ids)
+            ? payload.user_ids.map(Number).filter(Number.isFinite)
+            : [];
+
+          const isForUser =
+            Number.isFinite(targetUserId) && targetUserId === userId;
+          const isForUserInList =
+            targetUserIds.length > 0 &&
+            targetUserIds.includes(userId as number);
+
+          if (!isForInvitee && !isForInviter && !isForUser && !isForUserInList)
             return;
-          }
 
-          onEvent(payload);
+          try {
+            // If this payload indicates a membership change or an invite accepted,
+            // also emit a global event so components that don't use the hook
+            // directly can react (e.g., TournamentRegistration, ProfilePage).
+            const isMembershipChange =
+              payload.type === "team_membership_changed";
+            const isInviteUpdated = payload.type === "invite_updated";
+            const inviteAccepted = Boolean(
+              isInviteUpdated &&
+              (payload.invite?.status === "accepted" ||
+                (typeof payload.event_name === "string" &&
+                  payload.event_name.includes("accept"))),
+            );
+
+            if (isMembershipChange || inviteAccepted) {
+              try {
+                window.dispatchEvent(
+                  new CustomEvent("team:members-updated", { detail: payload }),
+                );
+              } catch {
+                // ignore dispatch errors in older browsers
+              }
+            }
+
+            onEvent(payload);
+          } catch {
+            // Ignore errors from onEvent handlers.
+          }
         } catch {
           // Ignore malformed frames.
         }

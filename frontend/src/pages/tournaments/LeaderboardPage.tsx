@@ -72,10 +72,10 @@ const LeaderboardPage = () => {
         </p>
       ) : null}
 
-      <div className="neo-box bg-card overflow-x-auto">
+      <div className="neo-box-square bg-card overflow-x-auto">
         <Table className="min-w-[680px]">
           <TableHeader>
-            <TableRow className="border-border">
+            <TableRow className="neo-leaderboard-header">
               <TableHead className="w-24 text-center whitespace-nowrap">
                 Hạng
               </TableHead>
@@ -99,7 +99,7 @@ const LeaderboardPage = () => {
               return (
                 <TableRow
                   key={`${row.tournament_id}-${row.team_id}`}
-                  className="border-border/50 hover:bg-muted/30"
+                  className="neo-leaderboard-row"
                 >
                   <TableCell className="text-center font-bold text-base">
                     {` ${placementText}`}

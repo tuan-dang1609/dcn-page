@@ -116,29 +116,75 @@ export const broadcastTeamInvitePayload = (payload) => {
   const inviteeId = toUserId(
     payload?.invitee_id ?? payload?.invite?.invitee_id ?? null,
   );
+  const inviterId = toUserId(
+    payload?.inviter_id ?? payload?.invite?.inviter_id ?? null,
+  );
 
-  if (!inviteeId) return 0;
-
-  const streamSet = streamsByUserId.get(inviteeId);
-  if (!streamSet || streamSet.size === 0) return 0;
+  if (!inviteeId && !inviterId) return 0;
 
   const frame = encodePayload(payload);
   let delivered = 0;
 
-  for (const socket of [...streamSet]) {
-    try {
-      if (sendToSocket(socket, frame)) {
-        delivered += 1;
-      } else {
-        streamSet.delete(socket);
-      }
-    } catch {
-      streamSet.delete(socket);
-    }
-  }
+  // helper to send to a specific userId
+  const sendToUser = (userId) => {
+    const set = streamsByUserId.get(userId);
+    if (!set || set.size === 0) return 0;
 
-  if (streamSet.size === 0) {
-    streamsByUserId.delete(inviteeId);
+    let localDelivered = 0;
+    for (const socket of [...set]) {
+      try {
+        if (sendToSocket(socket, frame)) {
+          localDelivered += 1;
+        } else {
+          set.delete(socket);
+        }
+      } catch {
+        set.delete(socket);
+      }
+    }
+
+    if (set.size === 0) {
+      streamsByUserId.delete(userId);
+    }
+
+    return localDelivered;
+  };
+
+  // send to invitee first
+  if (inviteeId) delivered += sendToUser(inviteeId);
+
+  // if inviter is different from invitee, also send to inviter
+  if (inviterId && inviterId !== inviteeId) delivered += sendToUser(inviterId);
+
+  return delivered;
+};
+
+export const broadcastToUsers = (payload, userIds = []) => {
+  if (!Array.isArray(userIds) || userIds.length === 0) return 0;
+
+  const frame = encodePayload(payload);
+  let delivered = 0;
+
+  for (const uidRaw of userIds) {
+    const uid = toUserId(uidRaw);
+    if (!uid) continue;
+
+    const set = streamsByUserId.get(uid);
+    if (!set || set.size === 0) continue;
+
+    for (const socket of [...set]) {
+      try {
+        if (sendToSocket(socket, frame)) {
+          delivered += 1;
+        } else {
+          set.delete(socket);
+        }
+      } catch {
+        set.delete(socket);
+      }
+    }
+
+    if (set.size === 0) streamsByUserId.delete(uid);
   }
 
   return delivered;
