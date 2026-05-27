@@ -16,6 +16,14 @@ const SignupPage = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate("/login");
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -78,7 +86,7 @@ const SignupPage = () => {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <button
-          onClick={() => navigate(-1)}
+          onClick={handleBack}
           className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm mb-8 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />

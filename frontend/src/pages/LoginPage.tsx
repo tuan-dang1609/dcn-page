@@ -43,7 +43,7 @@ const LoginPage = () => {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <button
-          onClick={() => navigate("/")}
+          onClick={() => navigate(-1)}
           className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm mb-8 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />

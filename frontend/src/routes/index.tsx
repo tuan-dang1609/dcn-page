@@ -1,5 +1,15 @@
-import { Suspense, lazy, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { createBrowserRouter } from "react-router-dom";
+
+const BRAND_TITLE = "DCN Championship Series";
+
+const DocumentTitle = ({ title }: { title: string }) => {
+  useEffect(() => {
+    document.title = `${title} | ${BRAND_TITLE}`;
+  }, [title]);
+
+  return null;
+};
 
 const Layout = lazy(() => import("@/pages/tournaments/Index"));
 const BracketPage = lazy(() => import("@/pages/tournaments/BracketPage"));
@@ -29,6 +39,13 @@ const withSuspense = (element: ReactNode) => (
   <Suspense fallback={<PageFallback />}>{element}</Suspense>
 );
 
+const withTitle = (element: ReactNode, title: string) => (
+  <>
+    <DocumentTitle title={title} />
+    {element}
+  </>
+);
+
 const routes = [
   {
     path: "/tournament/:game/:slug",
@@ -44,41 +61,41 @@ const routes = [
   },
   {
     path: "/login",
-    element: withSuspense(<LoginPage />),
+    element: withTitle(withSuspense(<LoginPage />), "Đăng nhập"),
   },
   {
     path: "/series/:slug",
-    element: withSuspense(<SeriesPage />),
+    element: withTitle(withSuspense(<SeriesPage />), "Series"),
   },
   {
     path: "/series/:slug/pickem",
-    element: withSuspense(<SeriesPickemPage />),
+    element: withTitle(withSuspense(<SeriesPickemPage />), "Pickem"),
   },
   {
     path: "/round/:slug",
-    element: withSuspense(<BanPickPage />),
+    element: withTitle(withSuspense(<BanPickPage />), "Ban Pick"),
   },
   {
     path: "/register",
-    element: withSuspense(<SignupPage />),
+    element: withTitle(withSuspense(<SignupPage />), "Đăng ký"),
   },
   {
     path: "/profile",
-    element: withSuspense(<ProfilePage />),
+    element: withTitle(withSuspense(<ProfilePage />), "Hồ sơ"),
   },
   {
     path: "/ops/score-control",
-    element: withSuspense(<ScoreControlPage />),
+    element: withTitle(withSuspense(<ScoreControlPage />), "Điều khiển điểm"),
   },
   {
     path: "/ops/tournament-setup",
-    element: withSuspense(<TournamentSetupPage />),
+    element: withTitle(withSuspense(<TournamentSetupPage />), "Thiết lập giải"),
   },
   {
     path: "/ops/bracket-setup",
-    element: withSuspense(<BracketSetupPage />),
+    element: withTitle(withSuspense(<BracketSetupPage />), "Thiết lập bracket"),
   },
-  { path: "*", element: withSuspense(<NotFound />) },
+  { path: "*", element: withTitle(withSuspense(<NotFound />), "404") },
 ];
 
 export const router = createBrowserRouter(routes);
