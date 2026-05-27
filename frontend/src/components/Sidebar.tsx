@@ -108,10 +108,10 @@ const Sidebar = ({ tournament, isLoading }) => {
         <h3 className="text-lg font-bold mb-4">Giải thưởng</h3>
         <div className="space-y-2">
           {[
-            { place: "🥇 1st", prize: "1 Slot GF" },
-            { place: "🥈 2nd", prize: "1 Slot GF" },
-            { place: "🥉 3rd", prize: "1 Slot GF" },
-            { place: "4th", prize: "1 Slot GF" },
+            { place: "🥇 1st", prize: "0 VND" },
+            { place: "🥈 2nd", prize: "0 VND" },
+            { place: "🥉 3rd", prize: "0 VND" },
+            { place: "4th", prize: "0 VND" },
           ].map((item) => (
             <div
               key={item.place}
