@@ -50,10 +50,14 @@ const LoginPage = () => {
           Quay lại
         </button>
 
-        <div className="bg-card border border-border rounded-xl p-8 shadow-lg">
+        <div className="">
           <div className="text-center mb-8">
-            <div className="w-14 h-14 bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-              <LogIn className="w-7 h-7 text-primary" />
+            <div className="w-14 h-14 flex items-center justify-center mx-auto mb-4">
+              <img
+                src="https://dongchuyennghiep.vercel.app/image/waiting.png"
+                alt="Dong Chuyen Nghiep logo"
+                className="w-full h-full "
+              />
             </div>
             <h1 className="text-2xl font-bold mb-1">Đăng nhập</h1>
             <p className="text-muted-foreground text-sm">
