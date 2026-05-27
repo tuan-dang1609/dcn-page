@@ -47,7 +47,8 @@ interface HeroBannerProps {
 }
 
 const HeroBanner = ({ tournament }: HeroBannerProps) => {
-  const { user, logout, isRegistered, setIsRegistered, token, refreshUser } = useAuth();
+  const { user, logout, isRegistered, setIsRegistered, token, refreshUser } =
+    useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [regOpen, setRegOpen] = useState(false);

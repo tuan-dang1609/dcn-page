@@ -43,17 +43,21 @@ const LoginPage = () => {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <button
-          onClick={() => navigate("/")}
+          onClick={() => navigate(-1)}
           className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm mb-8 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           Quay lại
         </button>
 
-        <div className="bg-card border border-border rounded-xl p-8 shadow-lg">
+        <div className="">
           <div className="text-center mb-8">
-            <div className="w-14 h-14 bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-              <LogIn className="w-7 h-7 text-primary" />
+            <div className="w-14 h-14 flex items-center justify-center mx-auto mb-4">
+              <img
+                src="https://dongchuyennghiep.vercel.app/image/waiting.png"
+                alt="Dong Chuyen Nghiep logo"
+                className="w-full h-full "
+              />
             </div>
             <h1 className="text-2xl font-bold mb-1">Đăng nhập</h1>
             <p className="text-muted-foreground text-sm">

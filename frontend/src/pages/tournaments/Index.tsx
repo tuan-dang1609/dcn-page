@@ -13,9 +13,45 @@ const Layout = () => {
     useMatch("/tournament/:game/:slug/match/:id"),
   );
   const isLobbyPage = Boolean(useMatch("/tournament/:game/:slug/lobby/:id"));
+  const isBracketPage = Boolean(useMatch("/tournament/:game/:slug/bracket"));
+  const isParticipantsPage = Boolean(
+    useMatch("/tournament/:game/:slug/participants"),
+  );
+  const isLeaderboardPage = Boolean(
+    useMatch("/tournament/:game/:slug/leaderboard"),
+  );
+  const isRulePage = Boolean(useMatch("/tournament/:game/:slug/rule"));
   const { game, slug } = useParams();
   const { tournament, isLoading, refetch } = useTournamentBySlug(game, slug);
   const location = useLocation();
+
+  const tournamentTitle = tournament?.name?.trim() || "Giải đấu";
+
+  useEffect(() => {
+    const pageTitle = isMatchDetailPage
+      ? "Chi tiết trận đấu"
+      : isLobbyPage
+        ? "Sảnh chờ"
+        : isBracketPage
+          ? "Nhánh đấu"
+          : isParticipantsPage
+            ? "Thành viên"
+            : isLeaderboardPage
+              ? "Bảng xếp hạng"
+              : isRulePage
+                ? "Thể lệ"
+                : "Trang chủ";
+
+    document.title = `${tournamentTitle} | ${pageTitle}`;
+  }, [
+    tournamentTitle,
+    isMatchDetailPage,
+    isLobbyPage,
+    isBracketPage,
+    isParticipantsPage,
+    isLeaderboardPage,
+    isRulePage,
+  ]);
 
   useEffect(() => {
     // Ensure we start at the top when navigating inside tournament pages

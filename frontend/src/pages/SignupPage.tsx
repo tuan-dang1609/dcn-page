@@ -16,6 +16,14 @@ const SignupPage = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate("/login");
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -78,7 +86,7 @@ const SignupPage = () => {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <button
-          onClick={() => navigate(-1)}
+          onClick={handleBack}
           className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm mb-8 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -87,13 +95,14 @@ const SignupPage = () => {
 
         <div className="bg-card border border-border rounded-xl p-8 shadow-lg">
           <div className="text-center mb-8">
-            <div className="w-14 h-14 bg-primary/10 border border-primary/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-              <UserPlus className="w-7 h-7 text-primary" />
+            <div className="w-14 h-14 flex items-center justify-center mx-auto mb-4 ">
+              <img
+                src="https://dongchuyennghiep.vercel.app/image/waiting.png"
+                alt="Dong Chuyen Nghiep logo"
+                className="w-full h-full"
+              />
             </div>
             <h1 className="text-2xl font-bold mb-1">Đăng ký tài khoản</h1>
-            <p className="text-muted-foreground text-sm">
-              Ảnh đại diện sẽ được upload lên Supabase
-            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
