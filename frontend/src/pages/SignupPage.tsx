@@ -95,9 +95,6 @@ const SignupPage = () => {
               />
             </div>
             <h1 className="text-2xl font-bold mb-1">Đăng ký tài khoản</h1>
-            <p className="text-muted-foreground text-sm">
-              Ảnh đại diện sẽ được upload lên Supabase
-            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
