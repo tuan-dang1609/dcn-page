@@ -44,6 +44,7 @@ import {
 interface TeamMember {
   id: number;
   username: string;
+  nickname?: string | null;
   profile_picture: string | null;
 }
 
@@ -210,6 +211,7 @@ const TournamentRegistration = ({
         ? response.data.members.map((member) => ({
             id: Number(member.id),
             username: member.username,
+            nickname: (member as any)?.nickname ?? null,
             profile_picture: member.profile_picture ?? null,
           }))
         : [];
@@ -575,13 +577,17 @@ const TournamentRegistration = ({
         nextLogoUrl = await uploadImageToSupabase(teamLogoFile);
       }
 
+      if (!token) {
+        throw new Error("Unauthorized");
+      }
+
       const createResponse = await axios.post(
         `${API_BASE}/api/teams`,
         {
           ...newTeam,
           logo_url: nextLogoUrl || null,
         },
-        { withCredentials: true },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       const createdTeamId = Number(
@@ -594,7 +600,7 @@ const TournamentRegistration = ({
           {
             user_ids: createMemberIds,
           },
-          { withCredentials: true },
+          { headers: { Authorization: `Bearer ${token}` } },
         );
       }
 
@@ -659,13 +665,17 @@ const TournamentRegistration = ({
         uploadedLogoUrl = nextLogoUrl;
       }
 
+      if (!token) {
+        throw new Error("Unauthorized");
+      }
+
       await axios.put(
         `${API_BASE}/api/teams/${currentTeamId}`,
         {
           ...editTeam,
           logo_url: nextLogoUrl || null,
         },
-        { withCredentials: true },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (previousLogoUrl && nextLogoUrl && previousLogoUrl !== nextLogoUrl) {
@@ -742,10 +752,14 @@ const TournamentRegistration = ({
       let finalTournamentTeamId = tournamentTeamId;
       if (!finalTournamentTeamId) {
         try {
+          if (!token) {
+            throw new Error("Unauthorized");
+          }
+
           await axios.post(
             `${API_BASE}/api/tournaments/teams/${tournamentId}`,
             {},
-            { withCredentials: true },
+            { headers: { Authorization: `Bearer ${token}` } },
           );
         } catch (error) {
           const isAlreadyRegistered =
@@ -769,12 +783,16 @@ const TournamentRegistration = ({
         );
       }
 
+      if (!token) {
+        throw new Error("Unauthorized");
+      }
+
       await axios.patch(
         `${API_BASE}/api/tournaments/team/players/${finalTournamentTeamId}`,
         {
           user_ids: selectedMembers,
         },
-        { withCredentials: true },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       toast({
@@ -812,9 +830,13 @@ const TournamentRegistration = ({
 
     setSubmitting(true);
     try {
+      if (!token) {
+        throw new Error("Unauthorized");
+      }
+
       await axios.delete(
         `${API_BASE}/api/tournaments/teams/${tournamentId}/${currentTeamId}`,
-        { withCredentials: true },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       toast({
@@ -1089,7 +1111,23 @@ const TournamentRegistration = ({
                               !disabled && toggleCreateMember(candidate.id)
                             }
                           />
-                          <span className="text-sm">{candidate.username}</span>
+                          <div className="flex items-center gap-2">
+                            <Avatar className="w-7 h-7">
+                              {candidate.profile_picture ? (
+                                <AvatarImage src={candidate.profile_picture} />
+                              ) : (
+                                <AvatarFallback className="text-[10px] font-bold uppercase">
+                                  {
+                                    (candidate.nickname ??
+                                      candidate.username)[0]
+                                  }
+                                </AvatarFallback>
+                              )}
+                            </Avatar>
+                            <span className="text-sm">
+                              {candidate.nickname ?? candidate.username}
+                            </span>
+                          </div>
                           <span className="ml-auto text-xs text-muted-foreground">
                             {statusLabel}
                           </span>
@@ -1272,19 +1310,12 @@ const TournamentRegistration = ({
               <div className="grid gap-3 rounded-2xl border border-border bg-muted/20 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                      Thành viên hiện tại
-                    </p>
                     <p className="text-sm text-muted-foreground">
                       {loadingMembers
                         ? "Đang tải..."
                         : `${teamMembers.length} người chơi trong team`}
                     </p>
                   </div>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
-                    <UserCheck className="w-3.5 h-3.5" />
-                    Đồng bộ theo team
-                  </span>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -1298,16 +1329,16 @@ const TournamentRegistration = ({
                           <AvatarImage src={member.profile_picture} />
                         ) : (
                           <AvatarFallback className="text-[10px] font-bold uppercase">
-                            {member.username[0]}
+                            {(member.nickname ?? member.username)[0]}
                           </AvatarFallback>
                         )}
                       </Avatar>
                       <span className="text-sm font-medium">
-                        {member.username}
+                        {member.nickname ?? member.username}
                       </span>
                       {canManageTeam && (
                         <button
-                          aria-label={`Xóa ${member.username}`}
+                          aria-label={`Xóa ${member.nickname ?? member.username}`}
                           onClick={() => {
                             setMemberToRemove(member);
                             setConfirmOpen(true);
@@ -1551,11 +1582,17 @@ const TournamentRegistration = ({
                         key={member.id}
                         className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30"
                       >
-                        <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold uppercase">
-                          {member.username[0]}
-                        </div>
+                        <Avatar className="w-8 h-8">
+                          {member.profile_picture ? (
+                            <AvatarImage src={member.profile_picture} />
+                          ) : (
+                            <AvatarFallback className="text-xs font-bold uppercase">
+                              {(member.nickname ?? member.username)[0]}
+                            </AvatarFallback>
+                          )}
+                        </Avatar>
                         <span className="font-medium text-sm">
-                          {member.username}
+                          {member.nickname ?? member.username}
                         </span>
                       </div>
                     ))
@@ -1585,11 +1622,17 @@ const TournamentRegistration = ({
                           checked={selectedMembers.includes(member.id)}
                           onCheckedChange={() => toggleMember(member.id)}
                         />
-                        <div className="w-8 h-8 rounded-full bg-muted border border-border flex items-center justify-center text-xs font-bold uppercase">
-                          {member.username[0]}
-                        </div>
+                        <Avatar className="w-8 h-8">
+                          {member.profile_picture ? (
+                            <AvatarImage src={member.profile_picture} />
+                          ) : (
+                            <AvatarFallback className="text-xs font-bold uppercase">
+                              {(member.nickname ?? member.username)[0]}
+                            </AvatarFallback>
+                          )}
+                        </Avatar>
                         <span className="font-medium text-sm">
-                          {member.username}
+                          {member.nickname ?? member.username}
                         </span>
                       </label>
                     ))

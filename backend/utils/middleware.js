@@ -17,14 +17,12 @@ export const deriveAuthContext = async ({ request }) => {
   const match = auth?.match(/^Bearer\s+(.+)$/i);
   let token = match?.[1]?.trim() ?? null;
 
-  // Use DEFAULT_AUTH_TOKEN if no Authorization header provided.
-  // You can set DEFAULT_AUTH_TOKEN in env, otherwise it falls back to the hardcoded token below.
-  const DEFAULT_AUTH_TOKEN =
-    process.env.DEFAULT_AUTH_TOKEN ??
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6IkJlYWNvbiIsImlkIjoiNiIsImlhdCI6MTc3MzA0MDUwNiwiZXhwIjoxNzgzODQwNTA2fQ.WbMVxhy3lojNkWCmkpXnZLm1qTgI4jZDq1Lo8zpHu6E";
+  // Use DEFAULT_AUTH_TOKEN only if explicitly provided via env.
+  // Do NOT fall back to a hardcoded token; requests without Authorization should be unauthenticated.
+  const DEFAULT_AUTH_TOKEN = process.env.DEFAULT_AUTH_TOKEN ?? null;
 
   if (!token) {
-    token = DEFAULT_AUTH_TOKEN ?? null;
+    token = DEFAULT_AUTH_TOKEN;
   }
 
   if (!token) return { token: null, user: null, authError: "NO_TOKEN" };

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, Upload, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { API_BASE } from "@/lib/apiBase";
 
 const SignupPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [username, setUsername] = useState("");
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
@@ -64,8 +65,14 @@ const SignupPage = () => {
 
       toast({
         title: "Đăng ký thành công",
-        description: "Tài khoản đã được tạo. Bạn có thể đăng nhập ngay.",
+        description: "Tài khoản đã được tạo.",
       });
+
+      const returnTo = searchParams.get("returnTo");
+      if (returnTo) {
+        navigate(returnTo);
+        return;
+      }
 
       navigate(`/login?username=${encodeURIComponent(username.trim())}`);
     } catch (error: any) {
