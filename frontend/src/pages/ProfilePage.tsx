@@ -34,6 +34,8 @@ const ProfilePage = () => {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreviewFromFile, setAvatarPreviewFromFile] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingNickname, setSavingNickname] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState(false);
   const [connectingRiot, setConnectingRiot] = useState(false);
   const [pendingInvites, setPendingInvites] = useState<TeamInviteRecord[]>([]);
   const [inviteActionId, setInviteActionId] = useState<number | null>(null);
@@ -142,34 +144,23 @@ const ProfilePage = () => {
     navigate("/", { replace: true });
   };
 
-  const handleSaveProfile = async (event: FormEvent) => {
-    event.preventDefault();
+  const handleSaveNickname = async (event?: FormEvent) => {
+    if (event) event.preventDefault();
 
-    setSaving(true);
+    setSavingNickname(true);
 
     try {
-      let nextProfilePicture = profilePictureUrl.trim() || null;
-
-      if (avatarFile) {
-        nextProfilePicture = await uploadImageToSupabase(avatarFile);
-        setProfilePictureUrl(nextProfilePicture);
-      }
-
       await axios.patch(
         `${API_BASE}/api/users/me`,
-        {
-          nickname: nickname.trim() || null,
-          profile_picture: nextProfilePicture,
-        },
-        { withCredentials: true },
+        { nickname: nickname.trim() || null },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       await refreshUser();
-      setAvatarFile(null);
 
       toast({
         title: "Cập nhật thành công",
-        description: "Thông tin cá nhân đã được lưu.",
+        description: "Nickname đã được lưu.",
       });
     } catch (error: any) {
       toast({
@@ -177,11 +168,60 @@ const ProfilePage = () => {
         description:
           error?.response?.data?.error ||
           error?.message ||
-          "Không thể cập nhật hồ sơ.",
+          "Không thể cập nhật.",
         variant: "destructive",
       });
     } finally {
-      setSaving(false);
+      setSavingNickname(false);
+    }
+  };
+
+  const handleUploadAvatar = async (event?: FormEvent) => {
+    if (event) event.preventDefault();
+
+    if (!avatarFile) {
+      toast({
+        title: "Không có ảnh",
+        description: "Vui lòng chọn ảnh để upload.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingAvatar(true);
+
+    try {
+      const nextProfilePicture = await uploadImageToSupabase(avatarFile);
+
+      // update local preview immediately and add cache buster so browser refetches
+      const cacheBusted = `${nextProfilePicture}?v=${Date.now()}`;
+      setProfilePictureUrl(cacheBusted);
+
+      await axios.patch(
+        `${API_BASE}/api/users/me`,
+        { profile_picture: nextProfilePicture },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      // refresh user to keep server state in sync
+      await refreshUser();
+      setAvatarFile(null);
+
+      toast({
+        title: "Cập nhật thành công",
+        description: "Ảnh đại diện đã được cập nhật.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Cập nhật thất bại",
+        description:
+          error?.response?.data?.error ||
+          error?.message ||
+          "Không thể cập nhật ảnh.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingAvatar(false);
     }
   };
 
@@ -364,48 +404,66 @@ const ProfilePage = () => {
         <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">Thông tin cơ bản</h2>
 
-          <form onSubmit={handleSaveProfile} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Nickname</label>
-              <Input
-                value={nickname}
-                onChange={(event) => setNickname(event.target.value)}
-                placeholder="Nhập nickname của bạn"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Upload ảnh mới</label>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border py-3 text-sm hover:bg-muted/40 transition-colors">
-                <Upload className="h-4 w-4" />
-                <span>
-                  {avatarFile ? avatarFile.name : "Chọn ảnh để upload"}
-                </span>
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  onChange={(event) =>
-                    setAvatarFile(event.target.files?.[0] ?? null)
-                  }
+          <div className="space-y-4">
+            <form onSubmit={handleSaveNickname} className="space-y-2">
+              <div>
+                <label className="text-sm font-medium">Nickname</label>
+                <Input
+                  value={nickname}
+                  onChange={(event) => setNickname(event.target.value)}
+                  placeholder="Nhập nickname của bạn"
                 />
-              </label>
-            </div>
+              </div>
 
-            <Button type="submit" disabled={saving} className="gap-2">
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Đang lưu...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4" />
-                  Lưu thay đổi
-                </>
-              )}
-            </Button>
-          </form>
+              <Button type="submit" disabled={savingNickname} className="gap-2">
+                {savingNickname ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Đang lưu nickname...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Lưu nickname
+                  </>
+                )}
+              </Button>
+            </form>
+
+            <form onSubmit={handleUploadAvatar} className="space-y-2">
+              <div>
+                <label className="text-sm font-medium">Upload ảnh mới</label>
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border py-3 text-sm hover:bg-muted/40 transition-colors">
+                  <Upload className="h-4 w-4" />
+                  <span>
+                    {avatarFile ? avatarFile.name : "Chọn ảnh để upload"}
+                  </span>
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={(event) =>
+                      setAvatarFile(event.target.files?.[0] ?? null)
+                    }
+                  />
+                </label>
+              </div>
+
+              <Button type="submit" disabled={savingAvatar} className="gap-2">
+                {savingAvatar ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Đang upload ảnh...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Cập nhật ảnh
+                  </>
+                )}
+              </Button>
+            </form>
+          </div>
         </section>
 
         <section className="rounded-xl border border-border bg-card p-6 shadow-sm">

@@ -20,10 +20,10 @@ teamRouter.get(
       t.name,
       t.short_name,
       t.logo_url,
-      creator.username AS created_by_username,
+      creator.username AS created_by_name,
       COALESCE(
         json_agg(
-          json_build_object('id', u.id, 'username', u.username, 'profile_picture', u.profile_picture)
+          json_build_object('id', u.id, 'username', u.username, 'nickname', u.nickname, 'profile_picture', u.profile_picture)
           ORDER BY u.id
         ) FILTER (WHERE u.id IS NOT NULL),
         '[]'
@@ -53,7 +53,8 @@ teamRouter.post(
     UPDATE users
     SET team_id = new_team.id,
         role_id = CASE
-          WHEN users.role_id IS NULL OR users.role_id > 4 THEN 4
+          -- Promote the creator to role 3 (team owner) if they have no role or a lower priority numeric id (>3).
+          WHEN users.role_id IS NULL OR users.role_id > 3 THEN 3
           ELSE users.role_id
         END
     FROM new_team
@@ -128,10 +129,10 @@ teamRouter.get(
       t.name,
       t.short_name,
       t.logo_url,
-      creator.username AS created_by_username,
+      creator.username AS created_by_name,
       COALESCE(
         json_agg(
-          json_build_object('id', u.id, 'username', u.username, 'profile_picture', u.profile_picture)
+          json_build_object('id', u.id, 'username', u.username, 'nickname', u.nickname, 'profile_picture', u.profile_picture)
           ORDER BY u.id
         ) FILTER (WHERE u.id IS NOT NULL),
         '[]'
