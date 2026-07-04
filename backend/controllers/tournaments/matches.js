@@ -27,6 +27,20 @@ const gameProviderRouteTemplates = {
   tft: "https://bigtournament-1.onrender.com/api/tft/match/:matchId",
 };
 
+const COMPACT_SIX_ROUND_SHAPE = "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+
+const getCompactSixLoserTarget = (currentRound, currentMatchNo) => {
+  const compactSixLoserMap = {
+    "1-1": { round: 4, matchNo: 2, slot: "A" },
+    "1-2": { round: 4, matchNo: 1, slot: "A" },
+    "2-1": { round: 4, matchNo: 1, slot: "B" },
+    "2-2": { round: 4, matchNo: 2, slot: "B" },
+    "3-1": { round: 6, matchNo: 1, slot: "A" },
+  };
+
+  return compactSixLoserMap[`${currentRound}-${currentMatchNo}`] ?? null;
+};
+
 let matchGamesInfoIdColumnCache = null;
 let matchGamesHasGameIdColumnCache = null;
 let ensureMatchRoomIdColumnPromise = null;
@@ -377,7 +391,7 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
   );
 
   const roundOneMatchCount = Number(roundOneCountRows[0]?.total ?? 0);
-  const winnerRounds =
+  let winnerRounds =
     roundOneMatchCount > 0 ? Math.max(1, Math.log2(roundOneMatchCount * 2)) : 1;
 
   const { rows: loserBracketRows } = await pool.query(
@@ -411,7 +425,11 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
     .join(",");
 
   const isCompactSixSingleBracket =
-    !loserBracketId && roundShape === "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+    !loserBracketId && roundShape === COMPACT_SIX_ROUND_SHAPE;
+
+  if (isCompactSixSingleBracket) {
+    winnerRounds = 3;
+  }
 
   let targetBracketId = loserBracketId;
   let targetRound = 1;
@@ -421,16 +439,7 @@ const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
   if (isCompactSixSingleBracket) {
     targetBracketId = toNumber(updatedMatch.bracket_id);
 
-    const compactSixLoserMap = {
-      "1-1": { round: 4, matchNo: 2, slot: "A" },
-      "1-2": { round: 4, matchNo: 1, slot: "A" },
-      "2-1": { round: 4, matchNo: 1, slot: "B" },
-      "2-2": { round: 4, matchNo: 2, slot: "B" },
-      "3-1": { round: 6, matchNo: 1, slot: "A" },
-    };
-
-    const key = `${currentRound}-${currentMatchNo}`;
-    const target = compactSixLoserMap[key];
+    const target = getCompactSixLoserTarget(currentRound, currentMatchNo);
 
     if (!target) {
       return null;

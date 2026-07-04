@@ -224,6 +224,16 @@ export interface GameOption {
 export const getGames = () =>
   axios.get<DataEnvelope<GameOption[]>>(`${tournamentsBaseUrl}/games`);
 
+export interface FormatOption {
+  id: number;
+  name: string;
+  type?: string;
+  has_losers_bracket?: boolean;
+}
+
+export const getFormats = () =>
+  axios.get<DataEnvelope<FormatOption[]>>(`${tournamentsBaseUrl}/formats`);
+
 export const getRankGames = () =>
   axios.get<DataEnvelope<RankGame[]>>(
     `${tournamentsBaseUrl}/requirements/ranks`,
@@ -259,6 +269,7 @@ export interface GenerateBracketPayload {
   format_id: number;
   team_ids?: number[];
   best_of?: number;
+  legs?: number;
   name?: string;
   stage?: string;
   status?: string;

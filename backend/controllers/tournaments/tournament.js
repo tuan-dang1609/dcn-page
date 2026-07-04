@@ -83,6 +83,26 @@ tournamentRouter.get(
 );
 
 tournamentRouter.get(
+  "/formats",
+  async ({ set }) => {
+    const { rows } = await pool.query(
+      `
+      SELECT id, name, type, has_losers_bracket
+      FROM formats
+      ORDER BY id ASC
+      `,
+    );
+
+    set.status = 200;
+    return { data: rows };
+  },
+  {
+    tags: [TAG],
+    summary: "List formats",
+  },
+);
+
+tournamentRouter.get(
   "/by-slug/:game/:slug",
   async ({ params, set }) => {
     const { game, slug } = params;

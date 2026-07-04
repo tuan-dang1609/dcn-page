@@ -900,6 +900,7 @@ const generateRoundRobinMatches = async ({
   tournamentId,
   teamIds,
   bestOf,
+  legs = 2,
 }) => {
   const teams = [...teamIds];
   const hasBye = teams.length % 2 === 1;
@@ -909,17 +910,43 @@ const generateRoundRobinMatches = async ({
   }
 
   const teamCount = teams.length;
-  const rounds = teamCount - 1;
+  const roundsPerLeg = teamCount - 1;
   const half = teamCount / 2;
+  const totalLegs = Math.max(1, Math.floor(Number(legs) || 2));
+  const fixturesByRound = [];
   const rotation = [...teams];
 
-  for (let round = 1; round <= rounds; round += 1) {
-    let matchNo = 1;
+  for (let round = 1; round <= roundsPerLeg; round += 1) {
+    const roundPairs = [];
     for (let index = 0; index < half; index += 1) {
       const home = rotation[index];
       const away = rotation[teamCount - 1 - index];
 
       if (home !== null && away !== null) {
+        roundPairs.push({ home, away });
+      }
+    }
+
+    fixturesByRound.push(roundPairs);
+
+    const fixed = rotation[0];
+    const rest = rotation.slice(1);
+    rest.unshift(rest.pop());
+    rotation.splice(0, rotation.length, fixed, ...rest);
+  }
+
+  for (let leg = 1; leg <= totalLegs; leg += 1) {
+    const isReturnLeg = leg % 2 === 0;
+    const roundOffset = (leg - 1) * roundsPerLeg;
+
+    for (let roundIndex = 0; roundIndex < fixturesByRound.length; roundIndex += 1) {
+      const roundMatches = fixturesByRound[roundIndex] ?? [];
+      let matchNo = 1;
+
+      for (const fixture of roundMatches) {
+        const home = isReturnLeg ? fixture.away : fixture.home;
+        const away = isReturnLeg ? fixture.home : fixture.away;
+
         await pool.query(
           `
           INSERT INTO matches (
@@ -937,7 +964,7 @@ const generateRoundRobinMatches = async ({
           [
             bracketId,
             tournamentId,
-            round,
+            roundOffset + roundIndex + 1,
             matchNo,
             home,
             away,
@@ -945,14 +972,10 @@ const generateRoundRobinMatches = async ({
             "scheduled",
           ],
         );
+
         matchNo += 1;
       }
     }
-
-    const fixed = rotation[0];
-    const rest = rotation.slice(1);
-    rest.unshift(rest.pop());
-    rotation.splice(0, rotation.length, fixed, ...rest);
   }
 };
 
@@ -2293,6 +2316,7 @@ bracketRouter.post(
     }
 
     const bestOf = toNumber(body?.best_of) ?? 1;
+    const legs = Math.max(1, Math.floor(toNumber(body?.legs) ?? 2));
     const bracket = await createBracketRecord({
       tournamentId,
       formatId,
@@ -2306,6 +2330,7 @@ bracketRouter.post(
       tournamentId,
       teamIds,
       bestOf,
+      legs,
     });
 
     const { rows: matches } = await pool.query(
@@ -2325,6 +2350,7 @@ bracketRouter.post(
         bracket_id: Number(bracket.id),
         tournament_id: tournamentId,
         participants: teamIds.length,
+        legs,
         matches,
       },
     };
