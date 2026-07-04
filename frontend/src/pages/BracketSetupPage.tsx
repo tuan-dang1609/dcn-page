@@ -10,11 +10,13 @@ import {
 } from "lucide-react";
 import {
   deleteBracket,
+  getFormats,
   generateBracket,
   getBracketsByTournamentId,
   pairSwissNextRound,
   getTournamentTeams,
   type Bracket,
+  type FormatOption,
   type BracketType,
   type TournamentTeamRecord,
 } from "@/api/tournaments";
@@ -67,6 +69,7 @@ const BracketSetupPage = () => {
     type: "single-elimination" as BracketType,
     format_id: "",
     best_of: "1",
+    legs: "2",
     name: "",
     stage: "",
     status: "scheduled",
@@ -77,6 +80,8 @@ const BracketSetupPage = () => {
     TournamentTeamRecord[]
   >([]);
   const [existingBrackets, setExistingBrackets] = useState<Bracket[]>([]);
+  const [formats, setFormats] = useState<FormatOption[]>([]);
+  const [loadingFormats, setLoadingFormats] = useState(false);
   const [loadingBrackets, setLoadingBrackets] = useState(false);
   const [deletingBracketId, setDeletingBracketId] = useState<number | null>(
     null,
@@ -166,9 +171,37 @@ const BracketSetupPage = () => {
     };
   }, [tournamentIdInput]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingFormats(true);
+
+    (async () => {
+      try {
+        const response = await getFormats();
+        if (cancelled) return;
+
+        setFormats(response.data?.data ?? []);
+      } catch {
+        if (cancelled) return;
+        setFormats([]);
+      } finally {
+        if (!cancelled) {
+          setLoadingFormats(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const selectedTeams = tournamentTeams.filter((team) =>
     selectedTeamIds.includes(team.team_id),
   );
+
+  const selectedFormatId = toNumber(form.format_id);
+  const selectedLegs = toNumber(form.legs) ?? 2;
 
   const toggleDraftTeam = (teamId: number) => {
     setDraftTeamIds((prev) => {
@@ -232,6 +265,7 @@ const BracketSetupPage = () => {
       const response = await generateBracket(tournamentId, form.type, {
         format_id: formatId,
         ...(toNumber(form.best_of) ? { best_of: Number(form.best_of) } : {}),
+        ...(form.type === "round-robin" ? { legs: selectedLegs } : {}),
         ...(form.name.trim() ? { name: form.name.trim() } : {}),
         ...(form.stage.trim() ? { stage: form.stage.trim() } : {}),
         ...(form.status.trim() ? { status: form.status.trim() } : {}),
@@ -413,8 +447,8 @@ const BracketSetupPage = () => {
             </div>
 
             <div>
-              <Label>Format ID</Label>
-              <Input
+              <Label>Format</Label>
+              <select
                 value={form.format_id}
                 onChange={(event) =>
                   setForm((prev) => ({
@@ -422,9 +456,23 @@ const BracketSetupPage = () => {
                     format_id: event.target.value,
                   }))
                 }
-                placeholder="format_id"
-                inputMode="numeric"
-              />
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                disabled={loadingFormats}
+              >
+                <option value="">Chọn format</option>
+                {formats.map((format) => (
+                  <option key={format.id} value={String(format.id)}>
+                    #{format.id} - {format.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {loadingFormats
+                  ? "Đang tải danh sách format..."
+                  : selectedFormatId
+                    ? `Đã chọn format #${selectedFormatId}`
+                    : "Danh sách format lấy từ backend."}
+              </p>
             </div>
 
             <div>
@@ -438,6 +486,28 @@ const BracketSetupPage = () => {
                 inputMode="numeric"
               />
             </div>
+
+            {form.type === "round-robin" ? (
+              <div>
+                <Label>Số lượt</Label>
+                <select
+                  value={form.legs}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      legs: event.target.value,
+                    }))
+                  }
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                >
+                  <option value="1">1 lượt</option>
+                  <option value="2">2 lượt</option>
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Chọn 1 lượt nếu chỉ muốn lượt đi, hoặc 2 lượt nếu muốn lượt đi + lượt về.
+                </p>
+              </div>
+            ) : null}
 
             <div>
               <Label>Name</Label>

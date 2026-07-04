@@ -8,6 +8,7 @@ import {
 import SingleElimBracket from "@/components/BracketView";
 import DoubleElimBracket from "@/components/DoubleElimBracket";
 import SwissBracket from "@/components/SwissBracket";
+import RoundRobinBracket from "@/components/RoundRobinBracket";
 
 type BracketOutletContext = {
   tournament?: {
@@ -75,6 +76,8 @@ const BracketPage = () => {
     selectedBracket?.format_type || "",
   ).toLowerCase();
   const isSwissBracket = selectedFormatType === "swiss";
+  const isRoundRobinBracket =
+    selectedFormatType === "round_robin" || selectedFormatId === 3;
 
   const bracketGroups = useMemo(() => {
     const order: string[] = [];
@@ -195,13 +198,19 @@ const BracketPage = () => {
             <SwissBracket bracketId={selectedBracketId} />
           ) : null}
 
+          {isRoundRobinBracket ? (
+            <RoundRobinBracket bracketId={selectedBracketId} />
+          ) : null}
+
           {selectedBracket &&
           selectedFormatId !== 1 &&
           selectedFormatId !== 2 &&
+          !isRoundRobinBracket &&
           !isSwissBracket ? (
             <p className="text-smtext-[#EEEEEE]">
               Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ
-              hỗ trợ hiển thị Single Elimination, Double Elimination và Swiss.
+              hỗ trợ hiển thị Single Elimination, Double Elimination, Round
+              Robin và Swiss.
             </p>
           ) : null}
         </div>

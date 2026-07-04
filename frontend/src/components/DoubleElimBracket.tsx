@@ -163,6 +163,23 @@ const getRoundShape = (matches: DisplayMatch[]) => {
     .join(",");
 };
 
+const COMPACT_SIX_ROUND_SHAPE = "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+
+const getCompactSixLoserTarget = (match: DisplayMatch) => {
+  const compactSixLoserMap: Record<
+    string,
+    { round: number; matchNo: number; slot: "A" | "B" }
+  > = {
+    "1-1": { round: 4, matchNo: 2, slot: "A" },
+    "1-2": { round: 4, matchNo: 1, slot: "A" },
+    "2-1": { round: 4, matchNo: 1, slot: "B" },
+    "2-2": { round: 4, matchNo: 2, slot: "B" },
+    "3-1": { round: 6, matchNo: 1, slot: "A" },
+  };
+
+  return compactSixLoserMap[`${match.round}-${match.matchNo}`] ?? null;
+};
+
 const getCompactSingleLoserTarget = ({
   match,
   winnerRounds,
@@ -179,22 +196,10 @@ const getCompactSingleLoserTarget = ({
 
   if (!currentRound || !currentMatchNo) return null;
 
-  const isCompactSixSingleBracket =
-    roundShape === "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+  const isCompactSixSingleBracket = roundShape === COMPACT_SIX_ROUND_SHAPE;
 
   if (isCompactSixSingleBracket) {
-    const compactSixLoserMap: Record<
-      string,
-      { round: number; matchNo: number; slot: "A" | "B" }
-    > = {
-      "1-1": { round: 4, matchNo: 2, slot: "A" },
-      "1-2": { round: 4, matchNo: 1, slot: "A" },
-      "2-1": { round: 4, matchNo: 1, slot: "B" },
-      "2-2": { round: 4, matchNo: 2, slot: "B" },
-      "3-1": { round: 6, matchNo: 1, slot: "A" },
-    };
-
-    return compactSixLoserMap[`${currentRound}-${currentMatchNo}`] ?? null;
+    return getCompactSixLoserTarget(match);
   }
 
   if (currentRound > winnerRounds) return null;
@@ -273,10 +278,16 @@ const projectDoubleElimMatches = ({
   const roundOneMatchCount = projectedMatches.filter(
     (match) => match.round === 1,
   ).length;
-  const winnerRounds =
-    roundOneMatchCount > 0 ? Math.max(1, Math.log2(roundOneMatchCount * 2)) : 1;
-  const loserMainRounds = Math.max(1, 2 * (winnerRounds - 1));
   const roundShape = getRoundShape(projectedMatches);
+  const isCompactSixSingleBracket = roundShape === COMPACT_SIX_ROUND_SHAPE;
+  const winnerRounds = isCompactSixSingleBracket
+    ? 3
+    : roundOneMatchCount > 0
+      ? Math.max(1, Math.log2(roundOneMatchCount * 2))
+      : 1;
+  const loserMainRounds = isCompactSixSingleBracket
+    ? 4
+    : Math.max(1, 2 * (winnerRounds - 1));
 
   const applyTeamToSlot = (
     target: DisplayMatch,
