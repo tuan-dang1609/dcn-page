@@ -1,18 +1,29 @@
-import { useState } from "react";
+import {
+  TOURNAMENT_NAV_LINK_ACTIVE,
+  TOURNAMENT_NAV_LINK_BASE,
+  TOURNAMENT_NAV_LINK_INACTIVE,
+  TOURNAMENT_NAV_WRAPPER_CLASS,
+} from "@/components/tournamentTheme";
 
 const tabs = ["Tổng quan", "Nhánh đấu", "Người chơi", "BXH", "Luật"];
 
-const TournamentTabs = ({ activeTab, onTabChange }: { activeTab: string; onTabChange: (tab: string) => void }) => {
+const TournamentTabs = ({
+  activeTab,
+  onTabChange,
+}: {
+  activeTab: string;
+  onTabChange: (tab: string) => void;
+}) => {
   return (
-    <div className="flex justify-center gap-1 neo-box bg-card p-2">
+    <div className={`flex justify-center gap-0 ${TOURNAMENT_NAV_WRAPPER_CLASS}`}>
       {tabs.map((tab) => (
         <button
           key={tab}
           onClick={() => onTabChange(tab)}
-          className={`px-5 py-2.5 font-bold text-sm transition-all rounded-md ${
+          className={`${TOURNAMENT_NAV_LINK_BASE} ${
             activeTab === tab
-              ? "bg-primary text-primary-foreground neo-box-sm"
-              : "text-muted-foreground hover:bg-muted"
+              ? TOURNAMENT_NAV_LINK_ACTIVE
+              : TOURNAMENT_NAV_LINK_INACTIVE
           }`}
         >
           {tab}

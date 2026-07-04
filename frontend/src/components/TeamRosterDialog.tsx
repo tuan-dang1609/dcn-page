@@ -187,9 +187,9 @@ const TeamRosterDialog = ({
                   {members.map((member) => (
                     <div
                       key={member.id}
-                      className="flex items-center gap-4 rounded-md bg-black border border-slate-700 px-4 py-3 w-full"
+                      className="flex items-center gap-4 rounded-md  border border-slate-700 px-4 py-3 w-full"
                     >
-                      <div className="w-14 h-14 rounded-full overflow-hidden bg-black flex items-center justify-center shrink-0">
+                      <div className="w-14 h-14 rounded-full overflow-hidden  flex items-center justify-center shrink-0">
                         {member.profile_picture ? (
                           <img
                             src={member.profile_picture}

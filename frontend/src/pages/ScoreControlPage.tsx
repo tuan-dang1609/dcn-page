@@ -950,11 +950,15 @@ const ScoreControlPage = () => {
       score_a: number;
       score_b: number;
       status: string;
+      propagate_winner: boolean;
+      propagate_loser: boolean;
       winner_team_id?: number | null;
     } = {
       score_a: scoreA,
       score_b: scoreB,
       status: "completed",
+      propagate_winner: true,
+      propagate_loser: true,
     };
 
     if (winnerSelection === "none") {

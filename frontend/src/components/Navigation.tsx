@@ -22,7 +22,6 @@ const Navigation = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // pick the most specific matching link for current pathname
   const selectedValue = useMemo(() => {
     const sorted = [...links].sort((a, b) => b.to.length - a.to.length);
     const found = sorted.find((l) => location.pathname.startsWith(l.to));
@@ -31,7 +30,6 @@ const Navigation = () => {
 
   return (
     <nav className="bg-card/50 backdrop-blur-sm border border-border rounded-lg">
-      {/* Desktop / tablet: full nav */}
       <div className="hidden md:flex justify-center gap-1 p-1.5">
         {links.map((link) => (
           <NavLink
@@ -51,7 +49,6 @@ const Navigation = () => {
         ))}
       </div>
 
-      {/* Mobile: compact select for easy navigation */}
       <div className="md:hidden p-2">
         <Select value={selectedValue} onValueChange={(v) => navigate(v)}>
           <SelectTrigger className="w-full">

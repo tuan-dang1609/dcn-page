@@ -202,6 +202,34 @@ export const syncRules = (
     getAuthConfig(),
   );
 
+export interface PrizePayload {
+  id?: number;
+  place_label: string;
+  place_order?: number;
+  prize: string;
+  description?: string | null;
+}
+
+export const createPrizes = (
+  tournamentId: number | string,
+  payload: PrizePayload[] | { prizes: PrizePayload[] },
+) =>
+  axios.post(
+    `${tournamentsBaseUrl}/prizes/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
+export const syncPrizes = (
+  tournamentId: number | string,
+  payload: PrizePayload[] | { prizes: PrizePayload[] },
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/prizes/${tournamentId}`,
+    payload,
+    getAuthConfig(),
+  );
+
 export interface RequirementPayload {
   rank_min: number;
   rank_max: number;

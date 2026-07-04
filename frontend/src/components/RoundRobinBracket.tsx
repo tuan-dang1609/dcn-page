@@ -5,7 +5,13 @@ import {
   getMatchesByBracketId,
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
+import { BracketTeamIcon } from "@/components/BracketTeamIcon";
 import { TOURNAMENT_LOGO } from "@/data/tournament";
+import {
+  BRACKET_CARD_CLASS,
+  BRACKET_HEADER_CLASS,
+  BRACKET_ROW_WINNER_CLASS,
+} from "@/components/bracketTheme";
 
 type RoundRobinBracketProps = {
   bracketId?: number | null;
@@ -56,11 +62,6 @@ type TeamStanding = {
 const CARD_W = 240;
 const ROW_H = 36;
 const CARD_H = ROW_H * 2;
-
-const BRACKET_CARD_CLASS =
-  "block overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 shadow-lg";
-const BRACKET_ROW_BASE_CLASS =
-  "flex items-center justify-between px-3 transition-colors duration-150 border-b border-neutral-800";
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -225,29 +226,22 @@ const MatchRow = ({ match, legSplit }: { match: DisplayMatch; legSplit: number }
     String(match.status).trim().toLowerCase(),
   );
 
-  const rowTone = (isWinner: boolean) =>
-    isWinner
-      ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
-      : "bg-neutral-900 text-neutral-300";
-
   const boLabel = match.bestOf ? `BO${match.bestOf}` : "BO1";
 
   const content = (
     <div className="flex min-h-14 items-center gap-3 px-3 py-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <img
-          src={match.p1Logo || TOURNAMENT_LOGO}
-          alt=""
-          className="h-6 w-6 rounded-sm shrink-0"
-        />
+      <div
+        className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-1 ${match.winner === match.p1 ? BRACKET_ROW_WINNER_CLASS : ""}`}
+      >
+        <BracketTeamIcon teamId={match.teamAId} logoUrl={match.p1Logo} />
         <span
-          className={`min-w-0 truncate text-sm ${match.winner === match.p1 ? "font-semibold text-[#EEEEEE]" : "text-[#EEEEEE]/85"}`}
+          className={`min-w-0 truncate text-sm ${match.winner === match.p1 ? "font-semibold text-emerald-100" : "text-[#EEEEEE]/85"}`}
         >
           {match.p1}
         </span>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1">
+      <div className="flex shrink-0 items-center gap-2 border border-white/10 /30 px-3 py-1">
         <span className="w-8 text-right text-sm font-bold text-[#EEEEEE] tabular-nums">
           {match.s1 !== null ? match.s1 : "-"}
         </span>
@@ -257,21 +251,19 @@ const MatchRow = ({ match, legSplit }: { match: DisplayMatch; legSplit: number }
         </span>
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+      <div
+        className={`flex min-w-0 flex-1 items-center justify-end gap-2 px-2 py-1 ${match.winner === match.p2 ? BRACKET_ROW_WINNER_CLASS : ""}`}
+      >
         <span
-          className={`min-w-0 truncate text-sm text-right ${match.winner === match.p2 ? "font-semibold text-[#EEEEEE]" : "text-[#EEEEEE]/85"}`}
+          className={`min-w-0 truncate text-sm text-right ${match.winner === match.p2 ? "font-semibold text-emerald-100" : "text-[#EEEEEE]/85"}`}
         >
           {match.p2}
         </span>
-        <img
-          src={match.p2Logo || TOURNAMENT_LOGO}
-          alt=""
-          className="h-6 w-6 rounded-sm shrink-0"
-        />
+        <BracketTeamIcon teamId={match.teamBId} logoUrl={match.p2Logo} />
       </div>
 
       <div className="flex w-14 shrink-0 items-center justify-end">
-        <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {boLabel}
         </span>
       </div>
@@ -289,7 +281,7 @@ const MatchRow = ({ match, legSplit }: { match: DisplayMatch; legSplit: number }
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all`}
+      className={`${BRACKET_CARD_CLASS} hover:outline hover:outline-1 hover:outline-white/20 transition-all`}
       style={{ width: "100%" }}
     >
       {content}
@@ -409,10 +401,10 @@ const RoundRobinBracket = ({
         </div>
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-3">
+      <section className="space-y-3 border border-neutral-600 bg-[#141414] p-4">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
-            <h4 className="text-sm font-bold uppercase tracking-wider text-[#EEEEEE]">
+            <h4 className={`inline-block ${BRACKET_HEADER_CLASS}`}>
               Bảng xếp hạng tổng
             </h4>
             <p className="text-xs text-muted-foreground">
@@ -477,12 +469,12 @@ const RoundRobinBracket = ({
         {roundGroups.map((group) => (
           <section
             key={group.round}
-            className="rounded-xl border border-border bg-card p-4 shadow-sm"
+            className="border border-neutral-600 bg-[#141414] p-4"
             onMouseEnter={() => setHoveredRound(group.round)}
             onMouseLeave={() => setHoveredRound(null)}
           >
             <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
-              <h4 className="text-sm font-bold uppercase tracking-wider text-[#EEEEEE]">
+              <h4 className={`inline-block ${BRACKET_HEADER_CLASS}`}>
                 {getRoundLabel(group.round, legSplit, hasReturnLeg)}
               </h4>
               <span className="text-xs text-muted-foreground">

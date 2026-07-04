@@ -184,12 +184,30 @@ tournamentRouter.get(
       );
       const registered_count = regCountRows[0]?.registered_count ?? 0;
 
+      let prizeRows = [];
+
+      try {
+        const { rows } = await pool.query(
+          `
+          SELECT id, place_label, place_order, prize, description
+          FROM tournament_prizes
+          WHERE tournament_id = $1
+          ORDER BY place_order ASC, id ASC
+          `,
+          [tournament.id],
+        );
+        prizeRows = rows;
+      } catch {
+        prizeRows = [];
+      }
+
       set.status = 200;
       return {
         status: "success",
         info: {
           ...tournament,
           registered_count,
+          prizes: prizeRows,
           registered: tourTeam,
           rule: rulesRows,
           requirement: requirementRows[0] || null,

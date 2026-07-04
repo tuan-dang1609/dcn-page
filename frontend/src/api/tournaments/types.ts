@@ -44,6 +44,13 @@ export interface TournamentBySlugResponse {
       isCheckedIn?: boolean;
     }>;
     registered_count?: number;
+    prizes?: Array<{
+      id?: number;
+      place_label?: string;
+      place_order?: number;
+      prize?: string;
+      description?: string | null;
+    }>;
     requirement?: {
       rank_min?: string;
       rank_max?: string;

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Eye, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import {
   createMilestones,
+  createPrizes,
   createRequirements,
   createRules,
   createTournament,
@@ -11,11 +12,13 @@ import {
   getRankGames,
   getTournamentBySlug,
   syncMilestones,
+  syncPrizes,
   syncRules,
   updateRequirements,
   updateTournament,
   type GameOption,
   type MilestonePayload,
+  type PrizePayload,
   type RankGame,
   type RulePayload,
   type TournamentPayload,
@@ -28,9 +31,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
 const allowedRoleIds = new Set([1, 2, 3]);
-const stepLabels = ["Giải đấu", "Milestones", "Rules", "Requirements"] as const;
+const stepLabels = [
+  "Giải đấu",
+  "Milestones",
+  "Rules",
+  "Giải thưởng",
+  "Requirements",
+] as const;
 
-type StepIndex = 1 | 2 | 3 | 4;
+type StepIndex = 1 | 2 | 3 | 4 | 5;
 
 interface MilestoneDraft {
   id?: string;
@@ -44,6 +53,21 @@ interface RuleDraft {
   title: string;
   content: string;
 }
+
+interface PrizeDraft {
+  id?: string;
+  place_label: string;
+  place_order: string;
+  prize: string;
+  description: string;
+}
+
+const defaultPrizeDrafts = (): PrizeDraft[] => [
+  { place_label: "🥇 1st", place_order: "1", prize: "", description: "" },
+  { place_label: "🥈 2nd", place_order: "2", prize: "", description: "" },
+  { place_label: "🥉 3rd", place_order: "3", prize: "", description: "" },
+  { place_label: "4th", place_order: "4", prize: "", description: "" },
+];
 
 type TournamentListItem = {
   id: number;
@@ -80,6 +104,15 @@ type TournamentRuleApi = {
   id?: number | string;
   title?: string | null;
   content?: string | null;
+};
+
+type TournamentPrizeApi = {
+  id?: number | string;
+  place_label?: string | null;
+  place_order?: number | string | null;
+  prize?: string | null;
+  amount?: number | string | null;
+  description?: string | null;
 };
 
 const toNumber = (value: unknown): number | null => {
@@ -165,6 +198,7 @@ const TournamentSetupPage = () => {
     2: false,
     3: false,
     4: false,
+    5: false,
   });
 
   const [tournamentMode, setTournamentMode] = useState<"create" | "update">(
@@ -197,6 +231,9 @@ const TournamentSetupPage = () => {
 
   const [ruleMode, setRuleMode] = useState<"post" | "patch">("patch");
   const [rules, setRules] = useState<RuleDraft[]>([{ title: "", content: "" }]);
+
+  const [prizeMode, setPrizeMode] = useState<"post" | "patch">("patch");
+  const [prizes, setPrizes] = useState<PrizeDraft[]>(defaultPrizeDrafts);
 
   const [requirementMode, setRequirementMode] = useState<"post" | "patch">(
     "patch",
@@ -403,6 +440,15 @@ const TournamentSetupPage = () => {
           content: String(item?.content ?? ""),
         }))
       : [];
+    const nextPrizes = Array.isArray(details.prizes)
+      ? (details.prizes as TournamentPrizeApi[]).map((item, index) => ({
+          id: item?.id !== undefined && item?.id !== null ? String(item.id) : "",
+          place_label: String(item?.place_label ?? ""),
+          place_order: toInputValue(item?.place_order ?? index + 1),
+          prize: toInputValue(item?.prize ?? item?.amount),
+          description: String(item?.description ?? ""),
+        }))
+      : [];
 
     setMilestones(
       nextMilestones.length
@@ -412,8 +458,10 @@ const TournamentSetupPage = () => {
     setRules(
       nextRules.length ? nextRules : [{ title: "", content: "" }],
     );
+    setPrizes(nextPrizes.length ? nextPrizes : defaultPrizeDrafts());
     setMilestoneMode("patch");
     setRuleMode("patch");
+    setPrizeMode("patch");
     setRequirementMode("patch");
     setPendingRequirement(
       (details.requirement ?? null) as TournamentRequirementApi,
@@ -458,6 +506,7 @@ const TournamentSetupPage = () => {
     if (!nextId) {
       setMilestones([{ title: "", context: "", milestone_time: "" }]);
       setRules([{ title: "", content: "" }]);
+      setPrizes(defaultPrizeDrafts());
       applyRequirementFromApi(null);
       return;
     }
@@ -748,6 +797,63 @@ const TournamentSetupPage = () => {
     }
   };
 
+  const handleSubmitPrizes = async () => {
+    const tournamentId = ensureTournamentId();
+    if (!tournamentId) return;
+
+    const payload: PrizePayload[] = prizes
+      .filter((item) => item.place_label.trim() && item.prize.trim())
+      .map((item, index) => {
+        const placeOrder = toNumber(item.place_order) ?? index + 1;
+
+        return {
+          ...(toNumber(item.id) ? { id: Number(item.id) } : {}),
+          place_label: item.place_label.trim(),
+          place_order: placeOrder,
+          prize: item.prize.trim(),
+          ...(item.description.trim()
+            ? { description: item.description.trim() }
+            : {}),
+        };
+      });
+
+    if (!payload.length) {
+      toast({
+        title: "Giải thưởng rỗng",
+        description: "Hãy nhập ít nhất 1 hạng giải với số tiền hợp lệ.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      if (prizeMode === "post") {
+        await createPrizes(tournamentId, payload);
+      } else {
+        await syncPrizes(tournamentId, payload);
+      }
+
+      markStepCompleted(4);
+      setStep(5);
+
+      toast({
+        title: "Lưu giải thưởng thành công",
+        description: `Đã ${prizeMode === "post" ? "tạo" : "đồng bộ"} prizes cho tournament #${tournamentId}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Lưu giải thưởng thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmitRequirements = async () => {
     const tournamentId = ensureTournamentId();
     if (!tournamentId) return;
@@ -785,8 +891,8 @@ const TournamentSetupPage = () => {
         await updateRequirements(tournamentId, payload);
       }
 
-      markStepCompleted(4);
-      setStep(4);
+      markStepCompleted(5);
+      setStep(5);
 
       toast({
         title: "Lưu requirements thành công",
@@ -831,7 +937,7 @@ const TournamentSetupPage = () => {
             <div>
               <h1 className="text-2xl font-bold">Tournament Setup Wizard</h1>
               <p className="text-smtext-[#EEEEEE]">
-                Luồng tuần tự: Tạo giải, Milestones, Rules, Requirements.
+                Luồng tuần tự: Tạo giải, Milestones, Rules, Giải thưởng, Requirements.
               </p>
             </div>
             <Badge variant="outline">
@@ -839,7 +945,7 @@ const TournamentSetupPage = () => {
             </Badge>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-4">
+          <div className="grid gap-2 md:grid-cols-5">
             {stepLabels.map((label, index) => {
               const stepIndex = (index + 1) as StepIndex;
               const canEnter = canEnterStep(stepIndex);
@@ -1454,7 +1560,149 @@ const TournamentSetupPage = () => {
         {step === 4 ? (
           <section className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Bước 4: Requirements</h2>
+              <h2 className="text-lg font-semibold">Bước 4: Giải thưởng</h2>
+              <select
+                value={prizeMode}
+                onChange={(event) =>
+                  setPrizeMode(event.target.value as "post" | "patch")
+                }
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="patch">PATCH /api/tournaments/prizes/:id</option>
+                <option value="post">POST /api/tournaments/prizes/:id</option>
+              </select>
+            </div>
+
+            <div className="space-y-3">
+              {prizes.map((item, index) => (
+                <div
+                  key={index}
+                  className="rounded-md border border-border p-3 space-y-2"
+                >
+                  <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                    <Input
+                      value={item.id ?? ""}
+                      onChange={(event) =>
+                        setPrizes((prev) =>
+                          prev.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? { ...row, id: event.target.value }
+                              : row,
+                          ),
+                        )
+                      }
+                      placeholder="id (để update, tùy chọn)"
+                      inputMode="numeric"
+                    />
+                    <Input
+                      value={item.place_label}
+                      onChange={(event) =>
+                        setPrizes((prev) =>
+                          prev.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? { ...row, place_label: event.target.value }
+                              : row,
+                          ),
+                        )
+                      }
+                      placeholder="Hạng giải (vd: 🥇 1st)"
+                    />
+                    <Input
+                      value={item.place_order}
+                      onChange={(event) =>
+                        setPrizes((prev) =>
+                          prev.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? { ...row, place_order: event.target.value }
+                              : row,
+                          ),
+                        )
+                      }
+                      placeholder="Thứ tự"
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <Input
+                      value={item.prize}
+                      onChange={(event) =>
+                        setPrizes((prev) =>
+                          prev.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? { ...row, prize: event.target.value }
+                              : row,
+                          ),
+                        )
+                      }
+                      placeholder="Giải thưởng (vd: 2.000.000 VND, Skin bundle...)"
+                    />
+                    <Input
+                      value={item.description}
+                      onChange={(event) =>
+                        setPrizes((prev) =>
+                          prev.map((row, rowIndex) =>
+                            rowIndex === index
+                              ? { ...row, description: event.target.value }
+                              : row,
+                          ),
+                        )
+                      }
+                      placeholder="Mô tả (tùy chọn)"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() =>
+                      setPrizes((prev) =>
+                        prev.filter((_, rowIndex) => rowIndex !== index),
+                      )
+                    }
+                    disabled={prizes.length <= 1}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Xóa
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setPrizes((prev) => [
+                    ...prev,
+                    {
+                      place_label: "",
+                      place_order: String(prev.length + 1),
+                      prize: "",
+                      description: "",
+                    },
+                  ])
+                }
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Thêm hạng giải
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSubmitPrizes}
+                disabled={submitting}
+              >
+                Lưu bước 4
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
+        {step === 5 ? (
+          <section className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold">Bước 5: Requirements</h2>
               <select
                 value={requirementMode}
                 onChange={(event) =>
@@ -1557,7 +1805,7 @@ const TournamentSetupPage = () => {
                 className="gap-2"
               >
                 <Save className="h-4 w-4" />
-                Lưu bước 4
+                Lưu bước 5
               </Button>
               <Button
                 type="button"

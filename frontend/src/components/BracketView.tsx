@@ -5,21 +5,40 @@ import {
   getMatchesByBracketId,
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
-import { getPlayerJourney, TOURNAMENT_LOGO } from "@/data/tournament";
+import { BracketTeamIcon } from "@/components/BracketTeamIcon";
+import {
+  BRACKET_CONN_ACTIVE_STROKE,
+  BRACKET_CONN_BASE_STROKE,
+  BRACKET_CONN_DIM_OPACITY,
+  bracketCardHoverClass,
+  bracketRowHoverClass,
+  type BracketHover,
+  buildMatchProgressOrder,
+  getTeamJourneyMatchIds,
+  isHoverableTeamId,
+  isJourneyConnectorActive,
+} from "@/components/bracketHover";
+import {
+  buildBracketColumnLayout,
+  getSegmentRange,
+  RoundConnector,
+} from "@/components/bracketConnectors";
+import {
+  BRACKET_ROW_BASE_CLASS,
+  getBracketMatchCardHeight,
+  getMatchCardConnectorY,
+  getBracketRowStateClass,
+} from "@/components/bracketTheme";
+import { BracketMatchCardShell } from "@/components/BracketMatchCardShell";
 
-const CARD_W = 240;
-const ROW_H = 36;
-const CARD_H = ROW_H * 2;
+const CARD_W = 268;
+const ROW_H = 44;
+const ROW_BLOCK_H = ROW_H * 2;
+const CARD_H = getBracketMatchCardHeight(ROW_H);
 const CONN_W = 48;
 const QF_GAP = 24;
 const QF_PAIR_GAP = 56;
-const ROUND_COL_GAP = 56;
-const BRACKET_CARD_CLASS =
-  "block overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 shadow-lg";
-const BRACKET_ROW_BASE_CLASS =
-  "flex items-center justify-between px-3 transition-colors duration-150 border-b border-neutral-800";
-const BRACKET_HEADER_CLASS =
-  "rounded-md border border-neutral-300 bg-neutral-200 px-4 py-2 text-xs font-extrabold uppercase tracking-widest text-neutral-900 shadow-sm text-center";
+const HEADER_H = 0;
 
 const qfPairH = 2 * CARD_H + QF_GAP;
 const qfTops = [
@@ -36,7 +55,6 @@ const sfTops = [
 
 const finalTop = (sfTops[0] + sfTops[1] + CARD_H) / 2 - CARD_H / 2;
 const totalH = qfTops[3] + CARD_H;
-const HEADER_H = 44;
 
 type BracketOutletContext = {
   tournament?: {
@@ -332,11 +350,13 @@ interface PlayerRowProps {
   isWinner: boolean;
   isSelected?: boolean;
   pickState?: PickVisualState | null;
-  isHoveredPlayer: boolean;
+  isHoveredTeam: boolean;
   hasHover: boolean;
   isTop?: boolean;
   onPick?: (teamId: number) => void;
-  onHover: (p: string | null) => void;
+  onHoverTeam: (hover: BracketHover | null) => void;
+  matchId: number;
+  matchRound: number;
 }
 
 const PlayerRow = ({
@@ -347,49 +367,44 @@ const PlayerRow = ({
   isWinner,
   isSelected,
   pickState,
-  isHoveredPlayer,
+  isHoveredTeam,
   hasHover,
   isTop,
   onPick,
-  onHover,
+  onHoverTeam,
+  matchId,
+  matchRound,
 }: PlayerRowProps) => {
   const canPick =
     typeof onPick === "function" && Number.isFinite(Number(teamId));
 
-  const stateToneCls =
-    pickState === "correct"
-      ? "bg-emerald-900/30 text-emerald-100 font-semibold border-l-4 border-l-emerald-400"
-      : pickState === "wrong"
-        ? "bg-rose-900/30 text-rose-100 font-semibold border-l-4 border-l-rose-400"
-        : pickState === "selected"
-          ? "bg-amber-900/30 text-amber-100 font-semibold border-l-4 border-l-amber-300"
-          : isWinner
-            ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
-            : "bg-neutral-900 text-neutral-300";
+  const stateToneCls = getBracketRowStateClass({
+    isHoveredTeam,
+    pickState,
+    isWinner,
+  });
 
-  const hoverCls = hasHover
-    ? isHoveredPlayer
-      ? "brightness-110"
-      : "text-muted-foreground"
-    : "";
+  const hoverCls = bracketRowHoverClass(hasHover, isHoveredTeam);
 
   return (
     <div
-      className={`${BRACKET_ROW_BASE_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-neutral-800" : ""}`}
+      className={`${BRACKET_ROW_BASE_CLASS} ${canPick || isHoverableTeamId(teamId) ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls}`}
       style={{ height: ROW_H }}
-      onMouseEnter={() => onHover(name)}
-      onMouseLeave={() => onHover(null)}
+      onMouseEnter={() =>
+        onHoverTeam(
+          isHoverableTeamId(teamId)
+            ? { teamId, matchId, round: matchRound }
+            : null,
+        )
+      }
+      onMouseLeave={() => onHoverTeam(null)}
       onClick={() => {
         if (!canPick || !teamId) return;
         onPick(teamId);
       }}
     >
       <span className="flex items-center gap-2 text-sm truncate flex-1">
-        <img
-          src={logo_url || TOURNAMENT_LOGO}
-          alt=""
-          className="w-5 h-5 rounded-sm"
-        />
+        <BracketTeamIcon teamId={teamId} logoUrl={logo_url} />
         {name}
       </span>
       <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
@@ -401,13 +416,15 @@ const PlayerRow = ({
 
 const MatchCard = ({
   match,
-  hoveredPlayer,
-  onHover,
+  roundTitle,
+  hoveredTeamId,
+  onHoverTeam,
   isInJourney = true,
 }: {
   match: DisplayMatch;
-  hoveredPlayer: string | null;
-  onHover: (p: string | null) => void;
+  roundTitle: string;
+  hoveredTeamId: number | null;
+  onHoverTeam: (hover: BracketHover | null) => void;
   isInJourney?: boolean;
 }) => {
   const {
@@ -428,8 +445,8 @@ const MatchCard = ({
     teamAId,
     teamBId,
   } = match;
-  const hasHover = hoveredPlayer !== null;
-  const faded = hasHover && !isInJourney;
+  const hasHover = hoveredTeamId !== null;
+  const cardHoverCls = bracketCardHoverClass(hasHover, isInJourney);
   const { game, slug } = useParams();
   const matchParam = routeMatchId ? String(routeMatchId) : null;
   const realMatchId = toNumber(routeMatchId);
@@ -486,11 +503,13 @@ const MatchCard = ({
         isWinner={winner === p1}
         isSelected={selectedTeamId === teamAId}
         pickState={resolvePickState(teamAId)}
-        isHoveredPlayer={hoveredPlayer === p1}
+        isHoveredTeam={hoveredTeamId === teamAId}
         hasHover={hasHover}
         isTop
         onPick={canPick ? handlePick : undefined}
-        onHover={onHover}
+        onHoverTeam={onHoverTeam}
+        matchId={match.id}
+        matchRound={match.round}
       />
       <PlayerRow
         teamId={teamBId}
@@ -500,32 +519,40 @@ const MatchCard = ({
         isWinner={winner === p2}
         isSelected={selectedTeamId === teamBId}
         pickState={resolvePickState(teamBId)}
-        isHoveredPlayer={hoveredPlayer === p2}
+        isHoveredTeam={hoveredTeamId === teamBId}
         hasHover={hasHover}
         onPick={canPick ? handlePick : undefined}
-        onHover={onHover}
+        onHoverTeam={onHoverTeam}
+        matchId={match.id}
+        matchRound={match.round}
       />
     </>
   );
 
   if (!routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
-      <div
-        className={`${BRACKET_CARD_CLASS} transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
-        style={{ width: CARD_W }}
+      <BracketMatchCardShell
+        title={roundTitle}
+        className={`transition-opacity duration-150 ${cardHoverCls}`}
+        style={{ width: CARD_W, height: CARD_H }}
       >
         {content}
-      </div>
+      </BracketMatchCardShell>
     );
   }
 
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      className={`block transition-all hover:outline hover:outline-1 hover:outline-white/20 ${cardHoverCls}`}
       style={{ width: CARD_W }}
     >
-      {content}
+      <BracketMatchCardShell
+        title={roundTitle}
+        style={{ width: CARD_W, height: CARD_H }}
+      >
+        {content}
+      </BracketMatchCardShell>
     </Link>
   );
 };
@@ -555,9 +582,9 @@ const Connector = ({
   const lY2 = y2 - svgTop + 1;
   const lOut = outY - svgTop + 1;
   const midX = CONN_W / 2;
-  const baseOpacity = hasHover ? 0.35 : 1;
-  const baseStroke = "rgba(255,255,255,0.82)";
-  const hiStroke = "rgba(255,255,255,0.96)";
+  const baseOpacity = hasHover ? BRACKET_CONN_DIM_OPACITY : 1;
+  const baseStroke = BRACKET_CONN_BASE_STROKE;
+  const hiStroke = BRACKET_CONN_ACTIVE_STROKE;
 
   const fromY =
     activeFrom === "top" ? lY1 : activeFrom === "bottom" ? lY2 : null;
@@ -566,7 +593,7 @@ const Connector = ({
     <svg
       width={CONN_W}
       height={svgH}
-      className="absolute transition-opacity duration-150"
+      className="pointer-events-none absolute transition-opacity duration-150"
       style={{ top: svgTop + HEADER_H, left: 0 }}
     >
       <line
@@ -589,9 +616,9 @@ const Connector = ({
       />
       <line
         x1={midX}
-        y1={lY1}
+        y1={Math.min(lY1, lY2, lOut)}
         x2={midX}
-        y2={lY2}
+        y2={Math.max(lY1, lY2, lOut)}
         stroke={baseStroke}
         strokeWidth={2}
         opacity={baseOpacity}
@@ -606,7 +633,7 @@ const Connector = ({
         opacity={baseOpacity}
       />
 
-      {fromY !== null && hasOutput ? (
+      {fromY !== null ? (
         <>
           <line
             x1={0}
@@ -616,22 +643,26 @@ const Connector = ({
             stroke={hiStroke}
             strokeWidth={3}
           />
-          <line
-            x1={midX}
-            y1={fromY}
-            x2={midX}
-            y2={lOut}
-            stroke={hiStroke}
-            strokeWidth={3}
-          />
-          <line
-            x1={midX}
-            y1={lOut}
-            x2={CONN_W}
-            y2={lOut}
-            stroke={hiStroke}
-            strokeWidth={3}
-          />
+          {hasOutput ? (
+            <>
+              <line
+                x1={midX}
+                y1={fromY}
+                x2={midX}
+                y2={lOut}
+                stroke={hiStroke}
+                strokeWidth={3}
+              />
+              <line
+                x1={midX}
+                y1={lOut}
+                x2={CONN_W}
+                y2={lOut}
+                stroke={hiStroke}
+                strokeWidth={3}
+              />
+            </>
+          ) : null}
         </>
       ) : null}
     </svg>
@@ -648,7 +679,8 @@ const SingleElimBracket = ({
 }: SingleElimBracketProps) => {
   const outletContext = useOutletContext<BracketOutletContext | undefined>();
   const tournament = outletContext?.tournament;
-  const [hoveredPlayer, setHoveredPlayer] = useState<string | null>(null);
+  const [hover, setHover] = useState<BracketHover | null>(null);
+  const hoveredTeamId = hover?.teamId ?? null;
   const registeredTeams = tournamentRegistered ?? tournament?.registered ?? [];
 
   const teamNameById = useMemo(() => {
@@ -743,9 +775,26 @@ const SingleElimBracket = ({
   }, [projectedMatches]);
 
   const journeySet = useMemo(
+    () => getTeamJourneyMatchIds(projectedMatches, hoveredTeamId),
+    [hoveredTeamId, projectedMatches],
+  );
+
+  const matchProgressOrder = useMemo(
+    () => buildMatchProgressOrder(projectedMatches),
+    [projectedMatches],
+  );
+
+  const genericLayout = useMemo(
     () =>
-      hoveredPlayer ? getPlayerJourney(hoveredPlayer, projectedMatches) : null,
-    [hoveredPlayer, projectedMatches],
+      buildBracketColumnLayout({
+        columns: roundGroups.map((group) => group.matches),
+        cardH: CARD_H,
+        roundGap: QF_GAP,
+        cardW: CARD_W,
+        connW: CONN_W,
+        headerH: HEADER_H,
+      }),
+    [roundGroups],
   );
 
   const getMatchOrPlaceholder = (
@@ -794,6 +843,12 @@ const SingleElimBracket = ({
   }
 
   if (!useClassicLayout) {
+    if (!genericLayout) {
+      return (
+        <p className="text-sm text-[#EEEEEE]">Không thể dựng layout bracket.</p>
+      );
+    }
+
     return (
       <PickemContext.Provider
         value={{
@@ -803,34 +858,117 @@ const SingleElimBracket = ({
           disableMatchLink,
         }}
       >
-        <div className="w-full">
-          <div
-            className="flex items-start min-w-max"
-            style={{ gap: ROUND_COL_GAP }}
-          >
-            {roundGroups.map((group, index) => (
-              <div key={`round-${group.round}`} className="space-y-1">
-                <div className={BRACKET_HEADER_CLASS}>
-                  {getSingleElimRoundTitle(
-                    index + 1,
-                    roundGroups.length,
-                    group.round,
-                  )}
-                </div>
-                <div className="space-y-3" style={{ width: CARD_W }}>
-                  {group.matches.map((match) => (
+        <div
+          className="relative"
+          style={{
+            width: genericLayout.totalW,
+            height: genericLayout.totalH,
+          }}
+        >
+          {genericLayout.columns.map((matches, colIndex) => {
+            const colLeft = colIndex * (CARD_W + CONN_W);
+
+            return (
+              <div key={`round-col-${colIndex}`}>
+                {matches.map((match, matchIndex) => (
+                  <div
+                    key={match.id}
+                    className="absolute"
+                    style={{
+                      left: colLeft,
+                      top: genericLayout.tops[colIndex][matchIndex],
+                    }}
+                  >
                     <MatchCard
-                      key={match.id}
                       match={match}
-                      hoveredPlayer={hoveredPlayer}
-                      onHover={setHoveredPlayer}
+                      roundTitle={getSingleElimRoundTitle(
+                        colIndex + 1,
+                        roundGroups.length,
+                        match.round,
+                      )}
+                      hoveredTeamId={hoveredTeamId}
+                      onHoverTeam={setHover}
                       isInJourney={!journeySet || journeySet.has(match.id)}
                     />
-                  ))}
-                </div>
+                  </div>
+                ))}
+
+                {colIndex < genericLayout.columns.length - 1 ? (
+                  <div
+                    className="absolute"
+                    style={{
+                      left: colLeft + CARD_W,
+                      width: CONN_W,
+                      top: 0,
+                      height: genericLayout.totalH,
+                    }}
+                  >
+                    {genericLayout.columns[colIndex + 1].map((_, nextIndex) => {
+                      const prevCount = genericLayout.columns[colIndex].length;
+                      const currCount =
+                        genericLayout.columns[colIndex + 1].length;
+                      const { start, end } = getSegmentRange(
+                        prevCount,
+                        currCount,
+                        nextIndex,
+                      );
+
+                      const inYs = genericLayout.tops[colIndex]
+                        .slice(start, end + 1)
+                        .map((top) => getMatchCardConnectorY(top, ROW_H));
+                      const outY = getMatchCardConnectorY(
+                        genericLayout.tops[colIndex + 1][nextIndex],
+                        ROW_H,
+                      );
+
+                      return (
+                        <RoundConnector
+                          key={`conn-${colIndex}-${nextIndex}`}
+                          connW={CONN_W}
+                          headerH={HEADER_H}
+                          inYs={inYs}
+                          outY={outY}
+                          hasHover={hoveredTeamId !== null}
+                          activeInputIndexes={inYs
+                            .map((_, localIndex) => {
+                              const sourceMatch =
+                                genericLayout.columns[colIndex][
+                                  start + localIndex
+                                ];
+                              const destMatch =
+                                genericLayout.columns[colIndex + 1][nextIndex];
+                              return isJourneyConnectorActive(
+                                journeySet,
+                                sourceMatch,
+                                destMatch,
+                                matchProgressOrder,
+                              )
+                                ? localIndex
+                                : -1;
+                            })
+                            .filter((index) => index >= 0)}
+                          activeOutput={inYs.some((_, localIndex) => {
+                            const sourceMatch =
+                              genericLayout.columns[colIndex][
+                                start + localIndex
+                              ];
+                            const destMatch =
+                              genericLayout.columns[colIndex + 1][nextIndex];
+                            return isJourneyConnectorActive(
+                              journeySet,
+                              sourceMatch,
+                              destMatch,
+                              matchProgressOrder,
+                            );
+                          })}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
       </PickemContext.Provider>
     );
@@ -870,23 +1008,34 @@ const SingleElimBracket = ({
   const getConnState = (
     i: number,
   ): { activeFrom: "top" | "bottom" | null; hasOutput: boolean } => {
-    if (!journeySet) return { activeFrom: null, hasOutput: false };
+    if (!journeySet) {
+      return { activeFrom: null, hasOutput: false };
+    }
 
     const pair = classicConnectors[i];
     if (!pair) return { activeFrom: null, hasOutput: false };
 
-    const topInPath =
-      pair.fromTop.routeMatchId > 0 && journeySet.has(pair.fromTop.id);
-    const bottomInPath =
-      pair.fromBottom.routeMatchId > 0 && journeySet.has(pair.fromBottom.id);
-    const activeFrom = topInPath ? "top" : bottomInPath ? "bottom" : null;
+    const topActive = isJourneyConnectorActive(
+      journeySet,
+      pair.fromTop,
+      pair.to,
+      matchProgressOrder,
+    );
+    const bottomActive = isJourneyConnectorActive(
+      journeySet,
+      pair.fromBottom,
+      pair.to,
+      matchProgressOrder,
+    );
+    const activeFrom = topActive
+      ? "top"
+      : bottomActive
+        ? "bottom"
+        : null;
 
     return {
       activeFrom,
-      hasOutput:
-        activeFrom !== null &&
-        pair.to.routeMatchId > 0 &&
-        journeySet.has(pair.to.id),
+      hasOutput: topActive || bottomActive,
     };
   };
 
@@ -903,11 +1052,20 @@ const SingleElimBracket = ({
   const totalH4 = sfTops4[1] + CARD_H;
 
   // Connector exits from midpoint between two player rows = center of card
-  const qfMids = qfTops.map((t) => t + CARD_H / 2);
-  const sfMids = sfTops.map((t) => t + CARD_H / 2);
-  const finalMid = finalTop + CARD_H / 2;
-  const sfMids4 = sfTops4.map((t) => t + CARD_H / 2);
-  const finalMid4 = finalTop4 + CARD_H / 2;
+  const qfMids = qfTops.map((t) => getMatchCardConnectorY(t, ROW_H));
+  const sfMids = sfTops.map((t) => getMatchCardConnectorY(t, ROW_H));
+  const finalMid = getMatchCardConnectorY(finalTop, ROW_H);
+  const sfMids4 = sfTops4.map((t) => getMatchCardConnectorY(t, ROW_H));
+  const finalMid4 = getMatchCardConnectorY(finalTop4, ROW_H);
+
+  const roundTitleForMatch = (match: DisplayMatch) => {
+    const roundIndex = classicRounds.indexOf(match.round) + 1;
+    return getSingleElimRoundTitle(
+      roundIndex > 0 ? roundIndex : 1,
+      classicRounds.length,
+      match.round,
+    );
+  };
 
   if (isClassicFourTeam) {
     return (
@@ -921,31 +1079,21 @@ const SingleElimBracket = ({
       >
         <div
           className="relative"
-          style={{ width: totalW, height: totalH4 + HEADER_H }}
+          style={{ width: totalW, height: totalH4 }}
         >
-          <div
-            className={`absolute ${BRACKET_HEADER_CLASS}`}
-            style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            Bán kết
-          </div>
-          <div
-            className={`absolute ${BRACKET_HEADER_CLASS}`}
-            style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            Chung kết
-          </div>
-
           {[1, 2].map((_, i) => (
             <div
               key={`semi-${i + 1}`}
               className="absolute"
-              style={{ left: 0, top: sfTops4[i] + HEADER_H }}
+              style={{ left: 0, top: sfTops4[i] }}
             >
               <MatchCard
                 match={getMatchOrPlaceholder(firstRound, i + 1)}
-                hoveredPlayer={hoveredPlayer}
-                onHover={setHoveredPlayer}
+                roundTitle={roundTitleForMatch(
+                  getMatchOrPlaceholder(firstRound, i + 1),
+                )}
+                hoveredTeamId={hoveredTeamId}
+                onHoverTeam={setHover}
                 isInJourney={
                   !journeySet ||
                   journeySet.has(getMatchOrPlaceholder(firstRound, i + 1).id)
@@ -960,14 +1108,14 @@ const SingleElimBracket = ({
               left: col1,
               width: CONN_W,
               top: 0,
-              height: totalH4 + HEADER_H,
+              height: totalH4,
             }}
           >
             <Connector
               y1={sfMids4[0]}
               y2={sfMids4[1]}
               outY={finalMid4}
-              hasHover={hoveredPlayer !== null}
+              hasHover={hoveredTeamId !== null}
               activeFrom={getConnState(0).activeFrom}
               hasOutput={getConnState(0).hasOutput}
             />
@@ -975,12 +1123,15 @@ const SingleElimBracket = ({
 
           <div
             className="absolute"
-            style={{ left: col2, top: finalTop4 + HEADER_H }}
+            style={{ left: col2, top: finalTop4 }}
           >
             <MatchCard
               match={getMatchOrPlaceholder(secondRound, 1)}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={roundTitleForMatch(
+                getMatchOrPlaceholder(secondRound, 1),
+              )}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet ||
                 journeySet.has(getMatchOrPlaceholder(secondRound, 1).id)
@@ -1003,37 +1154,21 @@ const SingleElimBracket = ({
     >
       <div
         className="relative"
-        style={{ width: totalW, height: totalH + HEADER_H }}
+        style={{ width: totalW, height: totalH }}
       >
-        <div
-          className={`absolute ${BRACKET_HEADER_CLASS}`}
-          style={{ left: 0, width: CARD_W, textAlign: "center", top: 0 }}
-        >
-          Tứ kết
-        </div>
-        <div
-          className={`absolute ${BRACKET_HEADER_CLASS}`}
-          style={{ left: col2, width: CARD_W, textAlign: "center", top: 0 }}
-        >
-          Bán kết
-        </div>
-        <div
-          className={`absolute ${BRACKET_HEADER_CLASS}`}
-          style={{ left: col4, width: CARD_W, textAlign: "center", top: 0 }}
-        >
-          Chung kết
-        </div>
-
         {[1, 2, 3, 4].map((_, i) => (
           <div
             key={`qf-${i + 1}`}
             className="absolute"
-            style={{ left: 0, top: qfTops[i] + HEADER_H }}
+            style={{ left: 0, top: qfTops[i] }}
           >
             <MatchCard
               match={getMatchOrPlaceholder(firstRound, i + 1)}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={roundTitleForMatch(
+                getMatchOrPlaceholder(firstRound, i + 1),
+              )}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet ||
                 journeySet.has(getMatchOrPlaceholder(firstRound, i + 1).id)
@@ -1048,14 +1183,14 @@ const SingleElimBracket = ({
             left: col1,
             width: CONN_W,
             top: 0,
-            height: totalH + HEADER_H,
+            height: totalH,
           }}
         >
           <Connector
             y1={qfMids[0]}
             y2={qfMids[1]}
             outY={sfMids[0]}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={getConnState(0).activeFrom}
             hasOutput={getConnState(0).hasOutput}
           />
@@ -1063,7 +1198,7 @@ const SingleElimBracket = ({
             y1={qfMids[2]}
             y2={qfMids[3]}
             outY={sfMids[1]}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={getConnState(1).activeFrom}
             hasOutput={getConnState(1).hasOutput}
           />
@@ -1073,12 +1208,15 @@ const SingleElimBracket = ({
           <div
             key={`sf-${i + 1}`}
             className="absolute"
-            style={{ left: col2, top: sfTops[i] + HEADER_H }}
+            style={{ left: col2, top: sfTops[i] }}
           >
             <MatchCard
               match={getMatchOrPlaceholder(secondRound, i + 1)}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={roundTitleForMatch(
+                getMatchOrPlaceholder(secondRound, i + 1),
+              )}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet ||
                 journeySet.has(getMatchOrPlaceholder(secondRound, i + 1).id)
@@ -1093,27 +1231,27 @@ const SingleElimBracket = ({
             left: col3,
             width: CONN_W,
             top: 0,
-            height: totalH + HEADER_H,
+            height: totalH,
           }}
         >
           <Connector
             y1={sfMids[0]}
             y2={sfMids[1]}
             outY={finalMid}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={getConnState(2).activeFrom}
             hasOutput={getConnState(2).hasOutput}
           />
         </div>
 
-        <div
-          className="absolute"
-          style={{ left: col4, top: finalTop + HEADER_H }}
-        >
+        <div className="absolute" style={{ left: col4, top: finalTop }}>
           <MatchCard
             match={getMatchOrPlaceholder(thirdRound, 1)}
-            hoveredPlayer={hoveredPlayer}
-            onHover={setHoveredPlayer}
+            roundTitle={roundTitleForMatch(
+              getMatchOrPlaceholder(thirdRound, 1),
+            )}
+            hoveredTeamId={hoveredTeamId}
+            onHoverTeam={setHover}
             isInJourney={
               !journeySet ||
               journeySet.has(getMatchOrPlaceholder(thirdRound, 1).id)

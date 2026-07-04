@@ -11,8 +11,33 @@ import {
   getMatchesByBracketId,
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
-import { TOURNAMENT_LOGO } from "@/data/tournament";
+import { BracketTeamIcon } from "@/components/BracketTeamIcon";
 import { getDoubleElimRoundTitle } from "@/components/double-elim/roundLabels";
+import {
+  BRACKET_CONN_ACTIVE_STROKE,
+  BRACKET_CONN_BASE_STROKE,
+  BRACKET_CONN_DIM_OPACITY,
+  bracketCardHoverClass,
+  bracketRowHoverClass,
+  type BracketHover,
+  buildMatchProgressOrder,
+  getTeamJourneyMatchIds,
+  isHoverableTeamId,
+  isJourneyConnectorActive,
+} from "@/components/bracketHover";
+import {
+  buildBracketColumnLayout,
+  getSegmentRange,
+  RoundConnector,
+} from "@/components/bracketConnectors";
+import {
+  BRACKET_MATCH_TITLE_H,
+  BRACKET_ROW_BASE_CLASS,
+  getBracketMatchCardHeight,
+  getMatchCardConnectorY,
+  getBracketRowStateClass,
+} from "@/components/bracketTheme";
+import { BracketMatchCardShell } from "@/components/BracketMatchCardShell";
 
 type DoubleElimBracketProps = {
   bracketId?: number | null;
@@ -73,16 +98,13 @@ type DisplayMatch = {
   winner: string | null;
 };
 
-const CARD_W = 252;
-const ROW_H = 38;
-const CARD_H = ROW_H * 2;
+const CARD_W = 272;
+const ROW_H = 46;
+const ROW_BLOCK_H = ROW_H * 2;
+const CARD_H = getBracketMatchCardHeight(ROW_H);
 const CONN_W = 48;
 const ROUND_GAP = 24;
-const HEADER_H = 28;
-const BRACKET_CARD_CLASS =
-  "block overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 shadow-lg";
-const BRACKET_ROW_BASE_CLASS =
-  "flex items-center justify-between px-3 transition-colors duration-150 border-b border-neutral-800";
+const HEADER_H = 0;
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -396,11 +418,13 @@ const PlayerRow = ({
   isWinner,
   isSelected,
   pickState,
-  isHoveredPlayer,
+  isHoveredTeam,
   hasHover,
   isTop,
   onPick,
-  onHover,
+  onHoverTeam,
+  matchId,
+  matchRound,
 }: {
   teamId?: number | null;
   logoUrl?: string | null;
@@ -409,49 +433,44 @@ const PlayerRow = ({
   isWinner: boolean;
   isSelected?: boolean;
   pickState?: PickVisualState | null;
-  isHoveredPlayer: boolean;
+  isHoveredTeam: boolean;
   hasHover: boolean;
   isTop?: boolean;
   onPick?: (teamId: number) => void;
-  onHover: (player: string | null) => void;
+  onHoverTeam: (hover: BracketHover | null) => void;
+  matchId: number;
+  matchRound: number;
 }) => {
   const canPick =
     typeof onPick === "function" && Number.isFinite(Number(teamId));
 
-  const stateToneCls =
-    pickState === "correct"
-      ? "bg-emerald-900/30 text-emerald-100 font-semibold border-l-4 border-l-emerald-400"
-      : pickState === "wrong"
-        ? "bg-rose-900/30 text-rose-100 font-semibold border-l-4 border-l-rose-400"
-        : pickState === "selected"
-          ? "bg-amber-900/30 text-amber-100 font-semibold border-l-4 border-l-amber-300"
-          : isWinner
-            ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
-            : "bg-neutral-900 text-neutral-300";
+  const stateToneCls = getBracketRowStateClass({
+    isHoveredTeam,
+    pickState,
+    isWinner,
+  });
 
-  const hoverCls = hasHover
-    ? isHoveredPlayer
-      ? "brightness-110"
-      : "text-muted-foreground"
-    : "";
+  const hoverCls = bracketRowHoverClass(hasHover, isHoveredTeam);
 
   return (
     <div
-      className={`${BRACKET_ROW_BASE_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-neutral-800" : ""}`}
+      className={`${BRACKET_ROW_BASE_CLASS} ${canPick || isHoverableTeamId(teamId) ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls}`}
       style={{ height: ROW_H }}
-      onMouseEnter={() => onHover(name)}
-      onMouseLeave={() => onHover(null)}
+      onMouseEnter={() =>
+        onHoverTeam(
+          isHoverableTeamId(teamId)
+            ? { teamId, matchId, round: matchRound }
+            : null,
+        )
+      }
+      onMouseLeave={() => onHoverTeam(null)}
       onClick={() => {
         if (!canPick || !teamId) return;
         onPick(teamId);
       }}
     >
       <span className="flex items-center gap-2 text-sm truncate flex-1">
-        <img
-          src={logoUrl || TOURNAMENT_LOGO}
-          alt=""
-          className="w-5 h-5 rounded-sm"
-        />
+        <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
         {name}
       </span>
       <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
@@ -463,13 +482,15 @@ const PlayerRow = ({
 
 const MatchCard = ({
   match,
-  hoveredPlayer,
-  onHover,
+  roundTitle,
+  hoveredTeamId,
+  onHoverTeam,
   isInJourney,
 }: {
   match: DisplayMatch;
-  hoveredPlayer: string | null;
-  onHover: (player: string | null) => void;
+  roundTitle: string;
+  hoveredTeamId: number | null;
+  onHoverTeam: (hover: BracketHover | null) => void;
   isInJourney: boolean;
 }) => {
   const {
@@ -478,7 +499,8 @@ const MatchCard = ({
     onPickTeam,
     disableMatchLink,
   } = useContext(PickemContext);
-  const hasHover = hoveredPlayer !== null;
+  const hasHover = hoveredTeamId !== null;
+  const cardHoverCls = bracketCardHoverClass(hasHover, isInJourney);
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
   const realMatchId = toNumber(match.routeMatchId);
@@ -535,11 +557,13 @@ const MatchCard = ({
         isWinner={match.winner === match.p1}
         isSelected={selectedTeamId === match.teamAId}
         pickState={resolvePickState(match.teamAId)}
-        isHoveredPlayer={hoveredPlayer === match.p1}
+        isHoveredTeam={hoveredTeamId === match.teamAId}
         hasHover={hasHover}
         isTop
         onPick={canPick ? handlePick : undefined}
-        onHover={onHover}
+        onHoverTeam={onHoverTeam}
+        matchId={match.id}
+        matchRound={match.round}
       />
       <PlayerRow
         teamId={match.teamBId}
@@ -549,141 +573,41 @@ const MatchCard = ({
         isWinner={match.winner === match.p2}
         isSelected={selectedTeamId === match.teamBId}
         pickState={resolvePickState(match.teamBId)}
-        isHoveredPlayer={hoveredPlayer === match.p2}
+        isHoveredTeam={hoveredTeamId === match.teamBId}
         hasHover={hasHover}
         onPick={canPick ? handlePick : undefined}
-        onHover={onHover}
+        onHoverTeam={onHoverTeam}
+        matchId={match.id}
+        matchRound={match.round}
       />
     </>
   );
 
-  const faded = hasHover && !isInJourney;
-
   if (!match.routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
-      <div
-        className={`block neo-box-sm overflow-hidden transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
-        style={{ width: CARD_W }}
+      <BracketMatchCardShell
+        title={roundTitle}
+        className={`transition-opacity duration-150 ${cardHoverCls}`}
+        style={{ width: CARD_W, height: CARD_H }}
       >
         {content}
-      </div>
+      </BracketMatchCardShell>
     );
   }
 
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      className={`block transition-all hover:outline hover:outline-1 hover:outline-white/20 ${cardHoverCls}`}
       style={{ width: CARD_W }}
     >
-      {content}
+      <BracketMatchCardShell
+        title={roundTitle}
+        style={{ width: CARD_W, height: CARD_H }}
+      >
+        {content}
+      </BracketMatchCardShell>
     </Link>
-  );
-};
-
-const RoundConnector = ({
-  inYs,
-  outY,
-  hasHover,
-  activeInputIndexes,
-  activeOutput,
-}: {
-  inYs: number[];
-  outY: number;
-  hasHover: boolean;
-  activeInputIndexes: number[];
-  activeOutput: boolean;
-}) => {
-  if (!inYs.length) return null;
-
-  const top = Math.min(...inYs, outY);
-  const bottom = Math.max(...inYs, outY);
-  const svgTop = top;
-  const svgHeight = bottom - top + 2;
-  const midX = CONN_W / 2;
-  const baseStroke = "rgba(255,255,255,0.82)";
-  const hiStroke = "rgba(255,255,255,0.96)";
-  const baseOpacity = hasHover ? 0.25 : 1;
-
-  const normalizedInYs = inYs.map((y) => y - svgTop + 1);
-  const normalizedOutY = outY - svgTop + 1;
-
-  const activeYs = activeInputIndexes
-    .filter((index) => index >= 0 && index < normalizedInYs.length)
-    .map((index) => normalizedInYs[index]);
-
-  return (
-    <svg
-      width={CONN_W}
-      height={svgHeight}
-      className="absolute"
-      style={{ top: svgTop + HEADER_H, left: 0 }}
-    >
-      {normalizedInYs.map((y, index) => (
-        <line
-          key={`base-in-${index}`}
-          x1={0}
-          y1={y}
-          x2={midX}
-          y2={y}
-          stroke={baseStroke}
-          strokeWidth={2}
-          opacity={baseOpacity}
-        />
-      ))}
-
-      <line
-        x1={midX}
-        y1={Math.min(...normalizedInYs)}
-        x2={midX}
-        y2={Math.max(...normalizedInYs)}
-        stroke={baseStroke}
-        strokeWidth={2}
-        opacity={baseOpacity}
-      />
-
-      <line
-        x1={midX}
-        y1={normalizedOutY}
-        x2={CONN_W}
-        y2={normalizedOutY}
-        stroke={baseStroke}
-        strokeWidth={2}
-        opacity={baseOpacity}
-      />
-
-      {activeOutput && activeYs.length ? (
-        <>
-          {activeYs.map((y, idx) => (
-            <line
-              key={`active-in-${idx}`}
-              x1={0}
-              y1={y}
-              x2={midX}
-              y2={y}
-              stroke={hiStroke}
-              strokeWidth={3}
-            />
-          ))}
-          <line
-            x1={midX}
-            y1={Math.min(normalizedOutY, ...activeYs)}
-            x2={midX}
-            y2={Math.max(normalizedOutY, ...activeYs)}
-            stroke={hiStroke}
-            strokeWidth={3}
-          />
-          <line
-            x1={midX}
-            y1={normalizedOutY}
-            x2={CONN_W}
-            y2={normalizedOutY}
-            stroke={hiStroke}
-            strokeWidth={3}
-          />
-        </>
-      ) : null}
-    </svg>
   );
 };
 
@@ -722,21 +646,21 @@ const ElbowConnector = ({
     <svg
       width={width}
       height={height}
-      className="absolute"
+      className="pointer-events-none absolute"
       style={{ left, top }}
     >
       <path
         d={path}
         fill="none"
-        stroke="rgba(255,255,255,0.82)"
+        stroke={BRACKET_CONN_BASE_STROKE}
         strokeWidth={2}
-        opacity={hasHover ? 0.25 : 1}
+        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
       />
       {active ? (
         <path
           d={path}
           fill="none"
-          stroke="rgba(255,255,255,0.96)"
+          stroke={BRACKET_CONN_ACTIVE_STROKE}
           strokeWidth={3}
         />
       ) : null}
@@ -784,7 +708,7 @@ const MergeConnector = ({
     <svg
       width={width}
       height={height}
-      className="absolute"
+      className="pointer-events-none absolute"
       style={{ left, top }}
     >
       {normFromYs.map((y, index) => (
@@ -794,32 +718,32 @@ const MergeConnector = ({
           y1={y}
           x2={midX}
           y2={y}
-          stroke="white"
+          stroke={BRACKET_CONN_BASE_STROKE}
           strokeWidth={2}
-          opacity={hasHover ? 0.25 : 1}
+          opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         />
       ))}
 
       <line
         x1={midX}
-        y1={Math.min(...normFromYs)}
+        y1={Math.min(...normFromYs, normToY)}
         x2={midX}
-        y2={Math.max(...normFromYs)}
-        stroke="white"
+        y2={Math.max(...normFromYs, normToY)}
+        stroke={BRACKET_CONN_BASE_STROKE}
         strokeWidth={2}
-        opacity={hasHover ? 0.25 : 1}
+        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
       />
       <line
         x1={midX}
         y1={normToY}
         x2={eX}
         y2={normToY}
-        stroke="white"
+        stroke={BRACKET_CONN_BASE_STROKE}
         strokeWidth={2}
-        opacity={hasHover ? 0.25 : 1}
+        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
       />
 
-      {activeOutput && activeYs.length ? (
+      {activeYs.length ? (
         <>
           {activeYs.map((y, idx) => (
             <line
@@ -828,43 +752,34 @@ const MergeConnector = ({
               y1={y}
               x2={midX}
               y2={y}
-              stroke="hsl(var(--primary))"
+              stroke={BRACKET_CONN_ACTIVE_STROKE}
               strokeWidth={3}
             />
           ))}
-          <line
-            x1={midX}
-            y1={Math.min(normToY, ...activeYs)}
-            x2={midX}
-            y2={Math.max(normToY, ...activeYs)}
-            stroke="hsl(var(--primary))"
-            strokeWidth={3}
-          />
-          <line
-            x1={midX}
-            y1={normToY}
-            x2={eX}
-            y2={normToY}
-            stroke="hsl(var(--primary))"
-            strokeWidth={3}
-          />
+          {activeOutput ? (
+            <>
+              <line
+                x1={midX}
+                y1={Math.min(normToY, ...activeYs)}
+                x2={midX}
+                y2={Math.max(normToY, ...activeYs)}
+                stroke={BRACKET_CONN_ACTIVE_STROKE}
+                strokeWidth={3}
+              />
+              <line
+                x1={midX}
+                y1={normToY}
+                x2={eX}
+                y2={normToY}
+                stroke={BRACKET_CONN_ACTIVE_STROKE}
+                strokeWidth={3}
+              />
+            </>
+          ) : null}
         </>
       ) : null}
     </svg>
   );
-};
-
-const getSegmentRange = (
-  prevCount: number,
-  currCount: number,
-  currIndex: number,
-) => {
-  const start = Math.floor((currIndex * prevCount) / currCount);
-  const end = Math.max(
-    start,
-    Math.floor(((currIndex + 1) * prevCount) / currCount) - 1,
-  );
-  return { start, end };
 };
 
 const DoubleElimBracket = ({
@@ -877,7 +792,8 @@ const DoubleElimBracket = ({
 }: DoubleElimBracketProps) => {
   const outletContext = useOutletContext<BracketOutletContext | undefined>();
   const tournament = outletContext?.tournament;
-  const [hoveredPlayer, setHoveredPlayer] = useState<string | null>(null);
+  const [hover, setHover] = useState<BracketHover | null>(null);
+  const hoveredTeamId = hover?.teamId ?? null;
 
   const withPickemContext = (content: ReactNode) => (
     <PickemContext.Provider
@@ -1004,16 +920,26 @@ const DoubleElimBracket = ({
     return [...grouped.entries()].sort((a, b) => a[0] - b[0]);
   }, [displayMatches]);
 
-  const journeySet = useMemo(() => {
-    if (!hoveredPlayer) return null;
-    return new Set(
-      displayMatches
-        .filter(
-          (match) => match.p1 === hoveredPlayer || match.p2 === hoveredPlayer,
-        )
-        .map((match) => match.id),
+  const journeySet = useMemo(
+    () => getTeamJourneyMatchIds(displayMatches, hoveredTeamId),
+    [hoveredTeamId, displayMatches],
+  );
+
+  const matchProgressOrder = useMemo(
+    () => buildMatchProgressOrder(displayMatches),
+    [displayMatches],
+  );
+
+  const isPathActive = (
+    source: Pick<DisplayMatch, "id" | "round">,
+    dest: Pick<DisplayMatch, "id" | "round">,
+  ) =>
+    isJourneyConnectorActive(
+      journeySet,
+      source,
+      dest,
+      matchProgressOrder,
     );
-  }, [hoveredPlayer, displayMatches]);
 
   const fourTeamSpecial = useMemo(() => {
     if (rounds.length < 5) return null;
@@ -1136,74 +1062,46 @@ const DoubleElimBracket = ({
     };
   }, [rounds, inferredTeamCount]);
 
-  const layout = useMemo(() => {
-    if (!rounds.length) return null;
-
-    const columns = rounds.map(([, matches]) => matches);
-    const tops: number[][] = [];
-
-    tops.push(columns[0].map((_, index) => index * (CARD_H + ROUND_GAP)));
-
-    for (let col = 1; col < columns.length; col += 1) {
-      const prevTops = tops[col - 1];
-      const prevCount = prevTops.length;
-      const currCount = columns[col].length;
-      const currentTops: number[] = [];
-
-      for (let i = 0; i < currCount; i += 1) {
-        const { start, end } = getSegmentRange(prevCount, currCount, i);
-        const segmentCenters = prevTops
-          .slice(start, end + 1)
-          .map((top) => top + CARD_H / 2);
-        const avgCenter =
-          segmentCenters.reduce((sum, value) => sum + value, 0) /
-          segmentCenters.length;
-        currentTops.push(avgCenter - CARD_H / 2);
-      }
-
-      tops.push(currentTops);
-    }
-
-    const minTop = Math.min(...tops.flat());
-    if (minTop < 0) {
-      for (let c = 0; c < tops.length; c += 1) {
-        tops[c] = tops[c].map((top) => top - minTop);
-      }
-    }
-
-    const maxBottom = Math.max(
-      ...tops.flatMap((columnTops) => columnTops.map((top) => top + CARD_H)),
-    );
-    const totalW = columns.length * CARD_W + (columns.length - 1) * CONN_W;
-
-    return {
-      columns,
-      tops,
-      totalW,
-      totalH: maxBottom + HEADER_H,
-    };
-  }, [rounds]);
+  const layout = useMemo(
+    () =>
+      buildBracketColumnLayout({
+        columns: rounds.map(([, matches]) => matches),
+        cardH: CARD_H,
+        roundGap: ROUND_GAP,
+        cardW: CARD_W,
+        connW: CONN_W,
+        headerH: HEADER_H,
+      }),
+    [rounds],
+  );
 
   if (isLoading) {
-    return <p className="text-sm text-[#EEEEEE]">Đang tải bracket...</p>;
+    return <p className="text-sm text-[#EEEEEE]">Ă„Âang tĂ¡ÂºÂ£i bracket...</p>;
   }
 
   if (isError) {
     return (
       <p className="text-sm text-destructive">
-        Không tải được dữ liệu double elimination.
+        KhÄ‚Â´ng tĂ¡ÂºÂ£i Ă„â€˜Ă†Â°Ă¡Â»Â£c dĂ¡Â»Â¯ liĂ¡Â»â€¡u double elimination.
       </p>
     );
   }
 
   if (!rounds.length) {
     return (
-      <p className="text-sm text-[#EEEEEE]">Chưa có match trong bracket này.</p>
+      <p className="text-sm text-[#EEEEEE]">ChĂ†Â°a cÄ‚Â³ match trong bracket nÄ‚Â y.</p>
     );
   }
 
   const totalRounds = rounds.length;
   const firstRoundMatchCount = rounds[0]?.[1]?.length ?? 0;
+  const getMatchTitle = (round: number) =>
+    getDoubleElimRoundTitle(
+      round,
+      totalRounds,
+      firstRoundMatchCount,
+      teamCount,
+    );
 
   if (eightTeamSpecial) {
     const x1 = 0;
@@ -1235,104 +1133,31 @@ const DoubleElimBracket = ({
     const totalW = x5 + CARD_W;
     const totalH = y4B + CARD_H + HEADER_H + 24;
 
-    const c1A = y1A + HEADER_H + CARD_H / 2;
-    const c1B = y1B + HEADER_H + CARD_H / 2;
-    const c1C = y1C + HEADER_H + CARD_H / 2;
-    const c1D = y1D + HEADER_H + CARD_H / 2;
-    const c2A = y2A + HEADER_H + CARD_H / 2;
-    const c2B = y2B + HEADER_H + CARD_H / 2;
-    const c3 = y3 + HEADER_H + CARD_H / 2;
-    const c4A = y4A + HEADER_H + CARD_H / 2;
-    const c4B = y4B + HEADER_H + CARD_H / 2;
-    const c5A = y5A + HEADER_H + CARD_H / 2;
-    const c5B = y5B + HEADER_H + CARD_H / 2;
-    const c6 = y6 + HEADER_H + CARD_H / 2;
-    const c7 = y7 + HEADER_H + CARD_H / 2;
-    const c8 = y8 + HEADER_H + CARD_H / 2;
+    const c1A = getMatchCardConnectorY(y1A + HEADER_H, ROW_H);
+    const c1B = getMatchCardConnectorY(y1B + HEADER_H, ROW_H);
+    const c1C = getMatchCardConnectorY(y1C + HEADER_H, ROW_H);
+    const c1D = getMatchCardConnectorY(y1D + HEADER_H, ROW_H);
+    const c2A = getMatchCardConnectorY(y2A + HEADER_H, ROW_H);
+    const c2B = getMatchCardConnectorY(y2B + HEADER_H, ROW_H);
+    const c3 = getMatchCardConnectorY(y3 + HEADER_H, ROW_H);
+    const c4A = getMatchCardConnectorY(y4A + HEADER_H, ROW_H);
+    const c4B = getMatchCardConnectorY(y4B + HEADER_H, ROW_H);
+    const c5A = getMatchCardConnectorY(y5A + HEADER_H, ROW_H);
+    const c5B = getMatchCardConnectorY(y5B + HEADER_H, ROW_H);
+    const c6 = getMatchCardConnectorY(y6 + HEADER_H, ROW_H);
+    const c7 = getMatchCardConnectorY(y7 + HEADER_H, ROW_H);
+    const c8 = getMatchCardConnectorY(y8 + HEADER_H, ROW_H);
 
     return withPickemContext(
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 8)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 8)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 8)}
-          </div>
-
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x1,
-              width: CARD_W,
-              textAlign: "center",
-              top: y4A - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 8)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x2,
-              width: CARD_W,
-              textAlign: "center",
-              top: y5A - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(5, totalRounds, firstRoundMatchCount, 8)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x3,
-              width: CARD_W,
-              textAlign: "center",
-              top: y6 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 8)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x4,
-              width: CARD_W,
-              textAlign: "center",
-              top: y7 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 8)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x5,
-              width: CARD_W,
-              textAlign: "center",
-              top: y8 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(8, totalRounds, firstRoundMatchCount, 8)}
-          </div>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[0]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[0].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r1[0].id)
               }
@@ -1341,8 +1166,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[1]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[1].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r1[1].id)
               }
@@ -1351,8 +1177,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1C + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[2]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[2].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r1[2].id)
               }
@@ -1361,8 +1188,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1D + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[3]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[3].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r1[3].id)
               }
@@ -1372,8 +1200,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r2[0]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r2[0].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r2[0].id)
               }
@@ -1382,8 +1211,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r2[1]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r2[1].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r2[1].id)
               }
@@ -1393,8 +1223,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x4, top: y3 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r3}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r3.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r3.id)
               }
@@ -1404,8 +1235,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r4[0]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r4[0].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r4[0].id)
               }
@@ -1414,8 +1246,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r4[1]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r4[1].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r4[1].id)
               }
@@ -1425,8 +1258,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y5A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r5[0]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r5[0].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r5[0].id)
               }
@@ -1435,8 +1269,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y5B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r5[1]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r5[1].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r5[1].id)
               }
@@ -1446,8 +1281,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x3, top: y6 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r6}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r6.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r6.id)
               }
@@ -1456,8 +1292,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x4, top: y7 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r7}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r7.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r7.id)
               }
@@ -1466,8 +1303,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x5, top: y8 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r8}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(eightTeamSpecial.r8.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(eightTeamSpecial.r8.id)
               }
@@ -1479,11 +1317,10 @@ const DoubleElimBracket = ({
             fromY={c1A}
             toX={x2}
             toY={c2A}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(eightTeamSpecial.r1[0].id) &&
-              journeySet.has(eightTeamSpecial.r2[0].id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              eightTeamSpecial.r1[0],
+              eightTeamSpecial.r2[0],
             )}
           />
           <ElbowConnector
@@ -1491,11 +1328,10 @@ const DoubleElimBracket = ({
             fromY={c1B}
             toX={x2}
             toY={c2A}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(eightTeamSpecial.r1[1].id) &&
-              journeySet.has(eightTeamSpecial.r2[0].id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              eightTeamSpecial.r1[1],
+              eightTeamSpecial.r2[0],
             )}
           />
           <ElbowConnector
@@ -1503,11 +1339,10 @@ const DoubleElimBracket = ({
             fromY={c1C}
             toX={x2}
             toY={c2B}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(eightTeamSpecial.r1[2].id) &&
-              journeySet.has(eightTeamSpecial.r2[1].id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              eightTeamSpecial.r1[2],
+              eightTeamSpecial.r2[1],
             )}
           />
           <ElbowConnector
@@ -1515,11 +1350,10 @@ const DoubleElimBracket = ({
             fromY={c1D}
             toX={x2}
             toY={c2B}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(eightTeamSpecial.r1[3].id) &&
-              journeySet.has(eightTeamSpecial.r2[1].id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              eightTeamSpecial.r1[3],
+              eightTeamSpecial.r2[1],
             )}
           />
 
@@ -1528,14 +1362,21 @@ const DoubleElimBracket = ({
             fromYs={[c2A, c2B]}
             toX={x4}
             toY={c3}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={[
-              Boolean(journeySet && journeySet.has(eightTeamSpecial.r2[0].id)),
-              Boolean(journeySet && journeySet.has(eightTeamSpecial.r2[1].id)),
+              isPathActive(
+                eightTeamSpecial.r2[0],
+                eightTeamSpecial.r3,
+              ),
+              isPathActive(
+                eightTeamSpecial.r2[1],
+                eightTeamSpecial.r3,
+              ),
             ]}
-            activeOutput={Boolean(
-              journeySet && journeySet.has(eightTeamSpecial.r3.id),
-            )}
+            activeOutput={
+              isPathActive(eightTeamSpecial.r2[0], eightTeamSpecial.r3) ||
+              isPathActive(eightTeamSpecial.r2[1], eightTeamSpecial.r3)
+            }
           />
 
           <ElbowConnector
@@ -1543,11 +1384,10 @@ const DoubleElimBracket = ({
             fromY={c4A}
             toX={x2}
             toY={c5A}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(eightTeamSpecial.r4[0].id) &&
-              journeySet.has(eightTeamSpecial.r5[0].id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              eightTeamSpecial.r4[0],
+              eightTeamSpecial.r5[0],
             )}
           />
           <ElbowConnector
@@ -1555,11 +1395,10 @@ const DoubleElimBracket = ({
             fromY={c4B}
             toX={x2}
             toY={c5B}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(eightTeamSpecial.r4[1].id) &&
-              journeySet.has(eightTeamSpecial.r5[1].id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              eightTeamSpecial.r4[1],
+              eightTeamSpecial.r5[1],
             )}
           />
 
@@ -1568,14 +1407,21 @@ const DoubleElimBracket = ({
             fromYs={[c5A, c5B]}
             toX={x3}
             toY={c6}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={[
-              Boolean(journeySet && journeySet.has(eightTeamSpecial.r5[0].id)),
-              Boolean(journeySet && journeySet.has(eightTeamSpecial.r5[1].id)),
+              isPathActive(
+                eightTeamSpecial.r5[0],
+                eightTeamSpecial.r6,
+              ),
+              isPathActive(
+                eightTeamSpecial.r5[1],
+                eightTeamSpecial.r6,
+              ),
             ]}
-            activeOutput={Boolean(
-              journeySet && journeySet.has(eightTeamSpecial.r6.id),
-            )}
+            activeOutput={
+              isPathActive(eightTeamSpecial.r5[0], eightTeamSpecial.r6) ||
+              isPathActive(eightTeamSpecial.r5[1], eightTeamSpecial.r6)
+            }
           />
 
           <ElbowConnector
@@ -1583,12 +1429,8 @@ const DoubleElimBracket = ({
             fromY={c6}
             toX={x4}
             toY={c7}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(eightTeamSpecial.r6.id) &&
-              journeySet.has(eightTeamSpecial.r7.id),
-            )}
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(eightTeamSpecial.r6, eightTeamSpecial.r7)}
           />
 
           <MergeConnector
@@ -1596,14 +1438,15 @@ const DoubleElimBracket = ({
             fromYs={[c3, c7]}
             toX={x5}
             toY={c8}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={[
-              Boolean(journeySet && journeySet.has(eightTeamSpecial.r3.id)),
-              Boolean(journeySet && journeySet.has(eightTeamSpecial.r7.id)),
+              isPathActive(eightTeamSpecial.r3, eightTeamSpecial.r8),
+              isPathActive(eightTeamSpecial.r7, eightTeamSpecial.r8),
             ]}
-            activeOutput={Boolean(
-              journeySet && journeySet.has(eightTeamSpecial.r8.id),
-            )}
+            activeOutput={
+              isPathActive(eightTeamSpecial.r3, eightTeamSpecial.r8) ||
+              isPathActive(eightTeamSpecial.r7, eightTeamSpecial.r8)
+            }
           />
         </div>
       </div>,
@@ -1634,89 +1477,27 @@ const DoubleElimBracket = ({
     const totalW = x5 + CARD_W;
     const totalH = y4B + CARD_H + HEADER_H + 24;
 
-    const c1A = y1A + HEADER_H + CARD_H / 2;
-    const c1B = y1B + HEADER_H + CARD_H / 2;
-    const c2A = y2A + HEADER_H + CARD_H / 2;
-    const c2B = y2B + HEADER_H + CARD_H / 2;
-    const c3 = y3 + HEADER_H + CARD_H / 2;
-    const c4A = y4A + HEADER_H + CARD_H / 2;
-    const c4B = y4B + HEADER_H + CARD_H / 2;
-    const c5 = y5 + HEADER_H + CARD_H / 2;
-    const c6 = y6 + HEADER_H + CARD_H / 2;
-    const c7 = y7 + HEADER_H + CARD_H / 2;
+    const c1A = getMatchCardConnectorY(y1A + HEADER_H, ROW_H);
+    const c1B = getMatchCardConnectorY(y1B + HEADER_H, ROW_H);
+    const c2A = getMatchCardConnectorY(y2A + HEADER_H, ROW_H);
+    const c2B = getMatchCardConnectorY(y2B + HEADER_H, ROW_H);
+    const c3 = getMatchCardConnectorY(y3 + HEADER_H, ROW_H);
+    const c4A = getMatchCardConnectorY(y4A + HEADER_H, ROW_H);
+    const c4B = getMatchCardConnectorY(y4B + HEADER_H, ROW_H);
+    const c5 = getMatchCardConnectorY(y5 + HEADER_H, ROW_H);
+    const c6 = getMatchCardConnectorY(y6 + HEADER_H, ROW_H);
+    const c7 = getMatchCardConnectorY(y7 + HEADER_H, ROW_H);
 
     return withPickemContext(
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(1, totalRounds, firstRoundMatchCount, 6)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(2, totalRounds, firstRoundMatchCount, 6)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x4, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(3, totalRounds, firstRoundMatchCount, 6)}
-          </div>
-
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x1,
-              width: CARD_W,
-              textAlign: "center",
-              top: y4A - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(4, totalRounds, firstRoundMatchCount, 6)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x5,
-              width: CARD_W,
-              textAlign: "center",
-              top: y7 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(7, totalRounds, firstRoundMatchCount, 6)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x4,
-              width: CARD_W,
-              textAlign: "center",
-              top: y6 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(6, totalRounds, firstRoundMatchCount, 6)}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x2,
-              width: CARD_W,
-              textAlign: "center",
-              top: y5 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(5, totalRounds, firstRoundMatchCount, 6)}
-          </div>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r1[0]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r1[0].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(sixTeamSpecial.r1[0].id)
               }
@@ -1725,8 +1506,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r1[1]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r1[1].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(sixTeamSpecial.r1[1].id)
               }
@@ -1736,8 +1518,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2A + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r2[0]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r2[0].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(sixTeamSpecial.r2[0].id)
               }
@@ -1746,8 +1529,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2B + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r2[1]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r2[1].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(sixTeamSpecial.r2[1].id)
               }
@@ -1757,8 +1541,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x4, top: y3 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r3}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r3.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r3.id)}
             />
           </div>
@@ -1766,8 +1551,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4A + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r4[0]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r4[0].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(sixTeamSpecial.r4[0].id)
               }
@@ -1776,8 +1562,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4B + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r4[1]}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r4[1].round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(sixTeamSpecial.r4[1].id)
               }
@@ -1786,24 +1573,27 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y5 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r5}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r5.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r5.id)}
             />
           </div>
           <div className="absolute" style={{ left: x4, top: y6 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r6}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r6.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r6.id)}
             />
           </div>
           <div className="absolute" style={{ left: x5, top: y7 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r7}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(sixTeamSpecial.r7.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r7.id)}
             />
           </div>
@@ -1813,24 +1603,16 @@ const DoubleElimBracket = ({
             fromY={c1A}
             toX={x2}
             toY={c2A}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(sixTeamSpecial.r1[0].id) &&
-              journeySet.has(sixTeamSpecial.r2[0].id),
-            )}
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(sixTeamSpecial.r1[0], sixTeamSpecial.r2[0])}
           />
           <ElbowConnector
             fromX={x1 + CARD_W}
             fromY={c1B}
             toX={x2}
             toY={c2B}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(sixTeamSpecial.r1[1].id) &&
-              journeySet.has(sixTeamSpecial.r2[1].id),
-            )}
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(sixTeamSpecial.r1[1], sixTeamSpecial.r2[1])}
           />
 
           <MergeConnector
@@ -1838,14 +1620,15 @@ const DoubleElimBracket = ({
             fromYs={[c2A, c2B]}
             toX={x4}
             toY={c3}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={[
-              Boolean(journeySet && journeySet.has(sixTeamSpecial.r2[0].id)),
-              Boolean(journeySet && journeySet.has(sixTeamSpecial.r2[1].id)),
+              isPathActive(sixTeamSpecial.r2[0], sixTeamSpecial.r3),
+              isPathActive(sixTeamSpecial.r2[1], sixTeamSpecial.r3),
             ]}
-            activeOutput={Boolean(
-              journeySet && journeySet.has(sixTeamSpecial.r3.id),
-            )}
+            activeOutput={
+              isPathActive(sixTeamSpecial.r2[0], sixTeamSpecial.r3) ||
+              isPathActive(sixTeamSpecial.r2[1], sixTeamSpecial.r3)
+            }
           />
 
           <MergeConnector
@@ -1853,40 +1636,38 @@ const DoubleElimBracket = ({
             fromYs={[c4A, c4B]}
             toX={x2}
             toY={c5}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={[
-              Boolean(journeySet && journeySet.has(sixTeamSpecial.r4[0].id)),
-              Boolean(journeySet && journeySet.has(sixTeamSpecial.r4[1].id)),
+              isPathActive(sixTeamSpecial.r4[0], sixTeamSpecial.r5),
+              isPathActive(sixTeamSpecial.r4[1], sixTeamSpecial.r5),
             ]}
-            activeOutput={Boolean(
-              journeySet && journeySet.has(sixTeamSpecial.r5.id),
-            )}
+            activeOutput={
+              isPathActive(sixTeamSpecial.r4[0], sixTeamSpecial.r5) ||
+              isPathActive(sixTeamSpecial.r4[1], sixTeamSpecial.r5)
+            }
           />
           <ElbowConnector
             fromX={x2 + CARD_W}
             fromY={c5}
             toX={x4}
             toY={c6}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(sixTeamSpecial.r5.id) &&
-              journeySet.has(sixTeamSpecial.r6.id),
-            )}
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(sixTeamSpecial.r5, sixTeamSpecial.r6)}
           />
           <MergeConnector
             fromX={x4 + CARD_W}
             fromYs={[c3, c6]}
             toX={x5}
             toY={c7}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={[
-              Boolean(journeySet && journeySet.has(sixTeamSpecial.r3.id)),
-              Boolean(journeySet && journeySet.has(sixTeamSpecial.r6.id)),
+              isPathActive(sixTeamSpecial.r3, sixTeamSpecial.r7),
+              isPathActive(sixTeamSpecial.r6, sixTeamSpecial.r7),
             ]}
-            activeOutput={Boolean(
-              journeySet && journeySet.has(sixTeamSpecial.r7.id),
-            )}
+            activeOutput={
+              isPathActive(sixTeamSpecial.r3, sixTeamSpecial.r7) ||
+              isPathActive(sixTeamSpecial.r6, sixTeamSpecial.r7)
+            }
           />
         </div>
       </div>,
@@ -1915,87 +1696,23 @@ const DoubleElimBracket = ({
     const inX2 = x2;
     const inX5 = x5;
 
-    const c1A = y1A + HEADER_H + CARD_H / 2;
-    const c1B = y1B + HEADER_H + CARD_H / 2;
-    const c2 = y2 + HEADER_H + CARD_H / 2;
-    const c3 = y3 + HEADER_H + CARD_H / 2;
-    const c4 = y4 + HEADER_H + CARD_H / 2;
-    const c5 = y5 + HEADER_H + CARD_H / 2;
+    const c1A = getMatchCardConnectorY(y1A + HEADER_H, ROW_H);
+    const c1B = getMatchCardConnectorY(y1B + HEADER_H, ROW_H);
+    const c2 = getMatchCardConnectorY(y2 + HEADER_H, ROW_H);
+    const c3 = getMatchCardConnectorY(y3 + HEADER_H, ROW_H);
+    const c4 = getMatchCardConnectorY(y4 + HEADER_H, ROW_H);
+    const c5 = getMatchCardConnectorY(y5 + HEADER_H, ROW_H);
 
     return withPickemContext(
       <div className="space-y-3">
         <div className="relative" style={{ width: totalW, height: totalH }}>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x1, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(
-              fourTeamSpecial.r1,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x2, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(
-              fourTeamSpecial.r2,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{ left: x5, width: CARD_W, textAlign: "center", top: 0 }}
-          >
-            {getDoubleElimRoundTitle(
-              fourTeamSpecial.r5,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x1,
-              width: CARD_W,
-              textAlign: "center",
-              top: y3 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(
-              fourTeamSpecial.r3,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
-          <div
-            className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-            style={{
-              left: x2,
-              width: CARD_W,
-              textAlign: "center",
-              top: y4 - 28 + HEADER_H,
-            }}
-          >
-            {getDoubleElimRoundTitle(
-              fourTeamSpecial.r4,
-              totalRounds,
-              firstRoundMatchCount,
-              teamCount,
-            )}
-          </div>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match1A}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(fourTeamSpecial.match1A.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(fourTeamSpecial.match1A.id)
               }
@@ -2004,8 +1721,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match1B}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(fourTeamSpecial.match1B.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(fourTeamSpecial.match1B.id)
               }
@@ -2014,8 +1732,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match2}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(fourTeamSpecial.match2.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(fourTeamSpecial.match2.id)
               }
@@ -2024,8 +1743,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y3 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match3}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(fourTeamSpecial.match3.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(fourTeamSpecial.match3.id)
               }
@@ -2034,8 +1754,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y4 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match4}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(fourTeamSpecial.match4.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(fourTeamSpecial.match4.id)
               }
@@ -2044,8 +1765,9 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x5, top: y5 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match5}
-              hoveredPlayer={hoveredPlayer}
-              onHover={setHoveredPlayer}
+              roundTitle={getMatchTitle(fourTeamSpecial.match5.round)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
               isInJourney={
                 !journeySet || journeySet.has(fourTeamSpecial.match5.id)
               }
@@ -2057,11 +1779,10 @@ const DoubleElimBracket = ({
             fromY={c1A}
             toX={inX2}
             toY={c2}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(fourTeamSpecial.match1A.id) &&
-              journeySet.has(fourTeamSpecial.match2.id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              fourTeamSpecial.match1A,
+              fourTeamSpecial.match2,
             )}
           />
           <ElbowConnector
@@ -2069,11 +1790,10 @@ const DoubleElimBracket = ({
             fromY={c1B}
             toX={inX2}
             toY={c2}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(fourTeamSpecial.match1B.id) &&
-              journeySet.has(fourTeamSpecial.match2.id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              fourTeamSpecial.match1B,
+              fourTeamSpecial.match2,
             )}
           />
           <ElbowConnector
@@ -2081,11 +1801,10 @@ const DoubleElimBracket = ({
             fromY={c3}
             toX={inX2}
             toY={c4}
-            hasHover={hoveredPlayer !== null}
-            active={Boolean(
-              journeySet &&
-              journeySet.has(fourTeamSpecial.match3.id) &&
-              journeySet.has(fourTeamSpecial.match4.id),
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              fourTeamSpecial.match3,
+              fourTeamSpecial.match4,
             )}
           />
           <MergeConnector
@@ -2093,14 +1812,21 @@ const DoubleElimBracket = ({
             fromYs={[c2, c4]}
             toX={inX5}
             toY={c5}
-            hasHover={hoveredPlayer !== null}
+            hasHover={hoveredTeamId !== null}
             activeFrom={[
-              Boolean(journeySet && journeySet.has(fourTeamSpecial.match2.id)),
-              Boolean(journeySet && journeySet.has(fourTeamSpecial.match4.id)),
+              isPathActive(
+                fourTeamSpecial.match2,
+                fourTeamSpecial.match5,
+              ),
+              isPathActive(
+                fourTeamSpecial.match4,
+                fourTeamSpecial.match5,
+              ),
             ]}
-            activeOutput={Boolean(
-              journeySet && journeySet.has(fourTeamSpecial.match5.id),
-            )}
+            activeOutput={
+              isPathActive(fourTeamSpecial.match2, fourTeamSpecial.match5) ||
+              isPathActive(fourTeamSpecial.match4, fourTeamSpecial.match5)
+            }
           />
         </div>
       </div>,
@@ -2109,7 +1835,7 @@ const DoubleElimBracket = ({
 
   if (!layout) {
     return (
-      <p className="text-sm text-[#EEEEEE]">Không thể dựng layout bracket.</p>
+      <p className="text-sm text-[#EEEEEE]">KhÄ‚Â´ng thĂ¡Â»Æ’ dĂ¡Â»Â±ng layout bracket.</p>
     );
   }
 
@@ -2121,41 +1847,23 @@ const DoubleElimBracket = ({
       >
         {layout.columns.map((matches, colIndex) => {
           const colLeft = colIndex * (CARD_W + CONN_W);
-          const roundNumber = rounds[colIndex]?.[0] ?? colIndex + 1;
-          const roundLabel = getDoubleElimRoundTitle(
-            roundNumber,
-            totalRounds,
-            firstRoundMatchCount,
-            teamCount,
-          );
 
           return (
             <div key={`col-${colIndex}`}>
-              <div
-                className="absolute text-xs font-bold text-[#EEEEEE] uppercase tracking-wider"
-                style={{
-                  left: colLeft,
-                  width: CARD_W,
-                  textAlign: "center",
-                  top: 0,
-                }}
-              >
-                {roundLabel}
-              </div>
-
               {matches.map((match, matchIndex) => (
                 <div
                   key={match.id}
                   className="absolute"
                   style={{
                     left: colLeft,
-                    top: layout.tops[colIndex][matchIndex] + HEADER_H,
+                    top: layout.tops[colIndex][matchIndex],
                   }}
                 >
                   <MatchCard
                     match={match}
-                    hoveredPlayer={hoveredPlayer}
-                    onHover={setHoveredPlayer}
+                    roundTitle={getMatchTitle(match.round)}
+                    hoveredTeamId={hoveredTeamId}
+                    onHoverTeam={setHover}
                     isInJourney={!journeySet || journeySet.has(match.id)}
                   />
                 </div>
@@ -2182,31 +1890,38 @@ const DoubleElimBracket = ({
 
                     const inYs = layout.tops[colIndex]
                       .slice(start, end + 1)
-                      .map((top) => top + CARD_H / 2);
-                    const outY =
-                      layout.tops[colIndex + 1][nextIndex] + CARD_H / 2;
+                      .map((top) => getMatchCardConnectorY(top, ROW_H));
+                    const outY = getMatchCardConnectorY(
+                      layout.tops[colIndex + 1][nextIndex],
+                      ROW_H,
+                    );
 
                     return (
                       <RoundConnector
                         key={`conn-${colIndex}-${nextIndex}`}
+                        connW={CONN_W}
+                        headerH={HEADER_H}
                         inYs={inYs}
                         outY={outY}
-                        hasHover={hoveredPlayer !== null}
+                        hasHover={hoveredTeamId !== null}
                         activeInputIndexes={inYs
                           .map((_, localIndex) => {
                             const sourceMatch =
                               layout.columns[colIndex][start + localIndex];
-                            return journeySet?.has(sourceMatch.id)
+                            const destMatch =
+                              layout.columns[colIndex + 1][nextIndex];
+                            return isPathActive(sourceMatch, destMatch)
                               ? localIndex
                               : -1;
                           })
                           .filter((index) => index >= 0)}
-                        activeOutput={Boolean(
-                          journeySet &&
-                          journeySet.has(
-                            layout.columns[colIndex + 1][nextIndex].id,
-                          ),
-                        )}
+                        activeOutput={inYs.some((_, localIndex) => {
+                          const sourceMatch =
+                            layout.columns[colIndex][start + localIndex];
+                          const destMatch =
+                            layout.columns[colIndex + 1][nextIndex];
+                          return isPathActive(sourceMatch, destMatch);
+                        })}
                       />
                     );
                   })}
