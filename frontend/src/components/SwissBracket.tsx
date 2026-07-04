@@ -6,6 +6,13 @@ import {
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
 import { TOURNAMENT_LOGO } from "@/data/tournament";
+import {
+  BRACKET_CONN_ACTIVE_STROKE,
+  BRACKET_CONN_BASE_STROKE,
+  BRACKET_CONN_DIM_OPACITY,
+  bracketCardHoverClass,
+  bracketRowHoverClass,
+} from "@/components/bracketHover";
 
 type SwissBracketProps = {
   bracketId?: number | null;
@@ -356,8 +363,8 @@ const StageConnectorSingle = ({
     >
       <polyline
         points={`0,${nY1} ${bendX},${nY1} ${bendX},${nY2} ${width},${nY2}`}
-        stroke="rgba(255,255,255,0.82)"
-        strokeOpacity={hasHover ? 0.28 : 1}
+        stroke={BRACKET_CONN_BASE_STROKE}
+        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         strokeWidth={2}
         fill="none"
         strokeLinejoin="miter"
@@ -365,7 +372,7 @@ const StageConnectorSingle = ({
       {active ? (
         <polyline
           points={`0,${nY1} ${bendX},${nY1} ${bendX},${nY2} ${width},${nY2}`}
-          stroke="rgba(255,255,255,0.96)"
+          stroke={BRACKET_CONN_ACTIVE_STROKE}
           strokeWidth={3}
           fill="none"
           strokeLinejoin="miter"
@@ -423,8 +430,8 @@ const StageConnectorMerge = ({
         y1={nTop}
         x2={joinX}
         y2={nTop}
-        stroke="rgba(255,255,255,0.82)"
-        strokeOpacity={hasHover ? 0.28 : 1}
+        stroke={BRACKET_CONN_BASE_STROKE}
+        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         strokeWidth={2}
       />
       <line
@@ -432,8 +439,8 @@ const StageConnectorMerge = ({
         y1={nBottom}
         x2={joinX}
         y2={nBottom}
-        stroke="rgba(255,255,255,0.82)"
-        strokeOpacity={hasHover ? 0.28 : 1}
+        stroke={BRACKET_CONN_BASE_STROKE}
+        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         strokeWidth={2}
       />
       <line
@@ -441,14 +448,14 @@ const StageConnectorMerge = ({
         y1={Math.min(nTop, nBottom)}
         x2={joinX}
         y2={Math.max(nTop, nBottom)}
-        stroke="rgba(255,255,255,0.82)"
-        strokeOpacity={hasHover ? 0.28 : 1}
+        stroke={BRACKET_CONN_BASE_STROKE}
+        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         strokeWidth={2}
       />
       <polyline
         points={`${joinX},${nJoin} ${bendX},${nJoin} ${bendX},${nOut} ${outX},${nOut}`}
-        stroke="rgba(255,255,255,0.82)"
-        strokeOpacity={hasHover ? 0.28 : 1}
+        stroke={BRACKET_CONN_BASE_STROKE}
+        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         strokeWidth={2}
         fill="none"
         strokeLinejoin="miter"
@@ -462,7 +469,7 @@ const StageConnectorMerge = ({
               y1={y}
               x2={joinX}
               y2={y}
-              stroke="rgba(255,255,255,0.96)"
+              stroke={BRACKET_CONN_ACTIVE_STROKE}
               strokeWidth={3}
             />
           ))}
@@ -471,12 +478,12 @@ const StageConnectorMerge = ({
             y1={Math.min(nOut, ...activeYs)}
             x2={joinX}
             y2={Math.max(nOut, ...activeYs)}
-            stroke="rgba(255,255,255,0.96)"
+            stroke={BRACKET_CONN_ACTIVE_STROKE}
             strokeWidth={3}
           />
           <polyline
             points={`${joinX},${nOut} ${bendX},${nOut} ${bendX},${nOut} ${outX},${nOut}`}
-            stroke="rgba(255,255,255,0.96)"
+            stroke={BRACKET_CONN_ACTIVE_STROKE}
             strokeWidth={3}
             fill="none"
             strokeLinejoin="miter"
@@ -528,11 +535,7 @@ const PlayerRow = ({
             ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
             : "bg-neutral-900 text-neutral-300";
 
-  const hoverCls = hasHover
-    ? isHoveredTeam
-      ? "brightness-110"
-      : "text-muted-foreground"
-    : "";
+  const hoverCls = bracketRowHoverClass(hasHover, isHoveredTeam);
 
   return (
     <div
@@ -578,7 +581,7 @@ const MatchCard = ({
     disableMatchLink,
   } = useContext(PickemContext);
   const hasHover = hoveredTeamId !== null;
-  const faded = hasHover && !isInJourney;
+  const cardHoverCls = bracketCardHoverClass(hasHover, isInJourney);
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
   const realMatchId = toNumber(match.routeMatchId);
@@ -661,7 +664,7 @@ const MatchCard = ({
   if (disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
-        className={`${BRACKET_CARD_CLASS} transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+        className={`${BRACKET_CARD_CLASS} transition-all ${cardHoverCls}`}
         style={{ width: CARD_W, height: CARD_H }}
       >
         {content}
@@ -672,7 +675,7 @@ const MatchCard = ({
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${cardHoverCls}`}
       style={{ width: CARD_W, height: CARD_H }}
     >
       {content}
@@ -724,7 +727,7 @@ const TeamListCard = ({
           teams.map((team) => (
             <div
               key={`${title}-${team.id}`}
-              className={`flex items-center justify-between rounded-sm border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs transition-colors duration-150 ${hasHover ? (hoveredTeamId === team.id ? toneClass.hover : "opacity-60") : ""}`}
+              className={`flex items-center justify-between rounded-sm border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs transition-colors duration-150 ${hasHover ? (hoveredTeamId === team.id ? `${toneClass.hover} brightness-125 font-semibold` : "opacity-40 text-muted-foreground") : ""}`}
               onMouseEnter={() => onHoverTeam(team.id)}
               onMouseLeave={() => onHoverTeam(null)}
             >

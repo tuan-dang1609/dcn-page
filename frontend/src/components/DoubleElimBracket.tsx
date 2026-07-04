@@ -13,6 +13,13 @@ import {
 } from "@/api/tournaments/index";
 import { TOURNAMENT_LOGO } from "@/data/tournament";
 import { getDoubleElimRoundTitle } from "@/components/double-elim/roundLabels";
+import {
+  BRACKET_CONN_ACTIVE_STROKE,
+  BRACKET_CONN_BASE_STROKE,
+  BRACKET_CONN_DIM_OPACITY,
+  bracketCardHoverClass,
+  bracketRowHoverClass,
+} from "@/components/bracketHover";
 
 type DoubleElimBracketProps = {
   bracketId?: number | null;
@@ -429,11 +436,7 @@ const PlayerRow = ({
             ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
             : "bg-neutral-900 text-neutral-300";
 
-  const hoverCls = hasHover
-    ? isHoveredPlayer
-      ? "brightness-110"
-      : "text-muted-foreground"
-    : "";
+  const hoverCls = bracketRowHoverClass(hasHover, isHoveredPlayer);
 
   return (
     <div
@@ -479,6 +482,7 @@ const MatchCard = ({
     disableMatchLink,
   } = useContext(PickemContext);
   const hasHover = hoveredPlayer !== null;
+  const cardHoverCls = bracketCardHoverClass(hasHover, isInJourney);
   const { game, slug } = useParams();
   const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
   const realMatchId = toNumber(match.routeMatchId);
@@ -557,12 +561,10 @@ const MatchCard = ({
     </>
   );
 
-  const faded = hasHover && !isInJourney;
-
   if (!match.routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
-        className={`block neo-box-sm overflow-hidden transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
+        className={`block neo-box-sm overflow-hidden transition-opacity duration-150 ${cardHoverCls}`}
         style={{ width: CARD_W }}
       >
         {content}
@@ -573,7 +575,7 @@ const MatchCard = ({
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      className={`block neo-box-sm overflow-hidden hover:ring-1 hover:ring-primary/50 transition-all ${cardHoverCls}`}
       style={{ width: CARD_W }}
     >
       {content}
@@ -601,9 +603,9 @@ const RoundConnector = ({
   const svgTop = top;
   const svgHeight = bottom - top + 2;
   const midX = CONN_W / 2;
-  const baseStroke = "rgba(255,255,255,0.82)";
-  const hiStroke = "rgba(255,255,255,0.96)";
-  const baseOpacity = hasHover ? 0.25 : 1;
+  const baseStroke = BRACKET_CONN_BASE_STROKE;
+  const hiStroke = BRACKET_CONN_ACTIVE_STROKE;
+  const baseOpacity = hasHover ? BRACKET_CONN_DIM_OPACITY : 1;
 
   const normalizedInYs = inYs.map((y) => y - svgTop + 1);
   const normalizedOutY = outY - svgTop + 1;
@@ -728,15 +730,15 @@ const ElbowConnector = ({
       <path
         d={path}
         fill="none"
-        stroke="rgba(255,255,255,0.82)"
+        stroke={BRACKET_CONN_BASE_STROKE}
         strokeWidth={2}
-        opacity={hasHover ? 0.25 : 1}
+        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
       />
       {active ? (
         <path
           d={path}
           fill="none"
-          stroke="rgba(255,255,255,0.96)"
+          stroke={BRACKET_CONN_ACTIVE_STROKE}
           strokeWidth={3}
         />
       ) : null}
@@ -794,9 +796,9 @@ const MergeConnector = ({
           y1={y}
           x2={midX}
           y2={y}
-          stroke="white"
+          stroke={BRACKET_CONN_BASE_STROKE}
           strokeWidth={2}
-          opacity={hasHover ? 0.25 : 1}
+          opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         />
       ))}
 
@@ -805,18 +807,18 @@ const MergeConnector = ({
         y1={Math.min(...normFromYs)}
         x2={midX}
         y2={Math.max(...normFromYs)}
-        stroke="white"
+        stroke={BRACKET_CONN_BASE_STROKE}
         strokeWidth={2}
-        opacity={hasHover ? 0.25 : 1}
+        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
       />
       <line
         x1={midX}
         y1={normToY}
         x2={eX}
         y2={normToY}
-        stroke="white"
+        stroke={BRACKET_CONN_BASE_STROKE}
         strokeWidth={2}
-        opacity={hasHover ? 0.25 : 1}
+        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
       />
 
       {activeOutput && activeYs.length ? (
@@ -828,7 +830,7 @@ const MergeConnector = ({
               y1={y}
               x2={midX}
               y2={y}
-              stroke="hsl(var(--primary))"
+              stroke={BRACKET_CONN_ACTIVE_STROKE}
               strokeWidth={3}
             />
           ))}
@@ -837,7 +839,7 @@ const MergeConnector = ({
             y1={Math.min(normToY, ...activeYs)}
             x2={midX}
             y2={Math.max(normToY, ...activeYs)}
-            stroke="hsl(var(--primary))"
+            stroke={BRACKET_CONN_ACTIVE_STROKE}
             strokeWidth={3}
           />
           <line
@@ -845,7 +847,7 @@ const MergeConnector = ({
             y1={normToY}
             x2={eX}
             y2={normToY}
-            stroke="hsl(var(--primary))"
+            stroke={BRACKET_CONN_ACTIVE_STROKE}
             strokeWidth={3}
           />
         </>

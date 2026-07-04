@@ -6,6 +6,13 @@ import {
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
 import { getPlayerJourney, TOURNAMENT_LOGO } from "@/data/tournament";
+import {
+  BRACKET_CONN_ACTIVE_STROKE,
+  BRACKET_CONN_BASE_STROKE,
+  BRACKET_CONN_DIM_OPACITY,
+  bracketCardHoverClass,
+  bracketRowHoverClass,
+} from "@/components/bracketHover";
 
 const CARD_W = 240;
 const ROW_H = 36;
@@ -367,11 +374,7 @@ const PlayerRow = ({
             ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
             : "bg-neutral-900 text-neutral-300";
 
-  const hoverCls = hasHover
-    ? isHoveredPlayer
-      ? "brightness-110"
-      : "text-muted-foreground"
-    : "";
+  const hoverCls = bracketRowHoverClass(hasHover, isHoveredPlayer);
 
   return (
     <div
@@ -429,7 +432,7 @@ const MatchCard = ({
     teamBId,
   } = match;
   const hasHover = hoveredPlayer !== null;
-  const faded = hasHover && !isInJourney;
+  const cardHoverCls = bracketCardHoverClass(hasHover, isInJourney);
   const { game, slug } = useParams();
   const matchParam = routeMatchId ? String(routeMatchId) : null;
   const realMatchId = toNumber(routeMatchId);
@@ -511,7 +514,7 @@ const MatchCard = ({
   if (!routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
-        className={`${BRACKET_CARD_CLASS} transition-opacity duration-150 ${faded ? "opacity-40" : "opacity-100"}`}
+        className={`${BRACKET_CARD_CLASS} transition-opacity duration-150 ${cardHoverCls}`}
         style={{ width: CARD_W }}
       >
         {content}
@@ -522,7 +525,7 @@ const MatchCard = ({
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${faded ? "opacity-40" : "opacity-100"}`}
+      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${cardHoverCls}`}
       style={{ width: CARD_W }}
     >
       {content}
@@ -555,9 +558,9 @@ const Connector = ({
   const lY2 = y2 - svgTop + 1;
   const lOut = outY - svgTop + 1;
   const midX = CONN_W / 2;
-  const baseOpacity = hasHover ? 0.35 : 1;
-  const baseStroke = "rgba(255,255,255,0.82)";
-  const hiStroke = "rgba(255,255,255,0.96)";
+  const baseOpacity = hasHover ? BRACKET_CONN_DIM_OPACITY : 1;
+  const baseStroke = BRACKET_CONN_BASE_STROKE;
+  const hiStroke = BRACKET_CONN_ACTIVE_STROKE;
 
   const fromY =
     activeFrom === "top" ? lY1 : activeFrom === "bottom" ? lY2 : null;
