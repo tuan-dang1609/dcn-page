@@ -6,6 +6,11 @@ import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { API_BASE } from "@/lib/apiBase";
 import { TOURNAMENT_LOGO } from "@/data/tournament";
+import {
+  TOURNAMENT_PAGE_BG_CLASS,
+  TOURNAMENT_PAGE_TITLE_CLASS,
+  TOURNAMENT_PANEL_CLASS,
+} from "@/components/tournamentTheme";
 import TeamRosterDialog from "@/components/TeamRosterDialog";
 
 type RegisteredTeam = {
@@ -167,13 +172,12 @@ const PlayersPage = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-heading">Người chơi</h2>
-        {/* Check-in button moved to header for team owners */}
+        <h2 className={TOURNAMENT_PAGE_TITLE_CLASS}>Người chơi</h2>
       </div>
       {isLoading ? (
-        <p className="text-smtext-[#EEEEEE]">Đang tải người chơi...</p>
+        <p className="text-sm text-neutral-400">Đang tải người chơi...</p>
       ) : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {apiPlayersRaw.map((participant) => (
@@ -181,16 +185,11 @@ const PlayersPage = () => {
             type="button"
             key={`${participant.id ?? participant.team_id}-${participant.name ?? "team"}`}
             onClick={() => openTeamModal(toNumber(participant.id))}
-            style={
+            className={`${TOURNAMENT_PANEL_CLASS} p-3 flex items-center gap-3 transition-colors text-left ${
               toNumber(participant.id) === selectedTournamentTeamId
-                ? { backgroundColor: "#0b0b0d" }
-                : undefined
-            }
-            className={`neo-box-sm p-3 flex items-center gap-3 transition-colors text-left text-foreground ${
-              toNumber(participant.id) === selectedTournamentTeamId
-                ? ""
-                : "bg-card hover:bg-muted/30"
-            } ${participant.isCheckedIn ? "border-emerald-500/70" : "border-red-500/70"}`}
+                ? "border-neutral-400 bg-[#1c1c1c] text-white"
+                : "text-neutral-200 hover:bg-[#1c1c1c]"
+            } ${participant.isCheckedIn ? "border-emerald-500/70" : "border-rose-500/70"}`}
           >
             <div className="flex items-center gap-2">
               <img

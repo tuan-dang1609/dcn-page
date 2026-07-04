@@ -4,6 +4,9 @@ import middleware from "../../utils/middleware.js";
 import logger from "../../utils/logger.js";
 import { deleteBanPickSession } from "../../utils/banPick.js";
 import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
+import {
+  applyMatchProgression,
+} from "../../utils/bracketProgression.js";
 
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Matches";
@@ -25,20 +28,6 @@ const gameProviderRouteTemplates = {
     "https://bigtournament-1.onrender.com/api/auth/valorant/matchdata/valorant/match/:matchId",
   lol: "https://bigtournament-1.onrender.com/api/lol/match/:matchId",
   tft: "https://bigtournament-1.onrender.com/api/tft/match/:matchId",
-};
-
-const COMPACT_SIX_ROUND_SHAPE = "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
-
-const getCompactSixLoserTarget = (currentRound, currentMatchNo) => {
-  const compactSixLoserMap = {
-    "1-1": { round: 4, matchNo: 2, slot: "A" },
-    "1-2": { round: 4, matchNo: 1, slot: "A" },
-    "2-1": { round: 4, matchNo: 1, slot: "B" },
-    "2-2": { round: 4, matchNo: 2, slot: "B" },
-    "3-1": { round: 6, matchNo: 1, slot: "A" },
-  };
-
-  return compactSixLoserMap[`${currentRound}-${currentMatchNo}`] ?? null;
 };
 
 let matchGamesInfoIdColumnCache = null;
@@ -320,213 +309,6 @@ const getMatchGameRowById = async ({
     LIMIT 1
     `,
     [gameRowId],
-  );
-
-  return rows[0] ?? null;
-};
-
-const propagateLoserToLoserBracket = async ({ updatedMatch, winnerTeamId }) => {
-  if (!updatedMatch || !winnerTeamId) {
-    return null;
-  }
-
-  const teamAId = toNumber(updatedMatch.team_a_id);
-  const teamBId = toNumber(updatedMatch.team_b_id);
-  const winnerId = toNumber(winnerTeamId);
-
-  if (!teamAId || !teamBId || !winnerId) {
-    return null;
-  }
-
-  const loserTeamId =
-    winnerId === teamAId ? teamBId : winnerId === teamBId ? teamAId : null;
-
-  if (!loserTeamId) {
-    return null;
-  }
-
-  const loserSeed =
-    loserTeamId === teamAId ? updatedMatch.seed_a : updatedMatch.seed_b;
-
-  const { rows: bracketRows } = await pool.query(
-    `
-    SELECT b.id, b.tournament_id, b.stage, b.format_id,
-           f.type AS format_type, f.has_losers_bracket
-    FROM brackets b
-    JOIN formats f ON f.id = b.format_id
-    WHERE b.id = $1
-    LIMIT 1
-    `,
-    [updatedMatch.bracket_id],
-  );
-
-  if (bracketRows.length === 0) {
-    return null;
-  }
-
-  const bracket = bracketRows[0];
-  const isDoubleElimination =
-    String(bracket.format_type || "") === "elimination" &&
-    Boolean(bracket.has_losers_bracket);
-  const isWinnerBracket = String(bracket.stage || "").toLowerCase() === "main";
-
-  if (!isDoubleElimination || !isWinnerBracket) {
-    return null;
-  }
-
-  const currentRound = toNumber(updatedMatch.round_number);
-  const currentMatchNo = toNumber(updatedMatch.match_no);
-
-  if (!currentRound || !currentMatchNo) {
-    return null;
-  }
-
-  const { rows: roundOneCountRows } = await pool.query(
-    `
-    SELECT COUNT(*)::int AS total
-    FROM matches
-    WHERE bracket_id = $1 AND round_number = 1
-    `,
-    [updatedMatch.bracket_id],
-  );
-
-  const roundOneMatchCount = Number(roundOneCountRows[0]?.total ?? 0);
-  let winnerRounds =
-    roundOneMatchCount > 0 ? Math.max(1, Math.log2(roundOneMatchCount * 2)) : 1;
-
-  const { rows: loserBracketRows } = await pool.query(
-    `
-    SELECT id
-    FROM brackets
-    WHERE tournament_id = $1
-      AND format_id = $2
-      AND LOWER(stage) = 'losers'
-    ORDER BY id ASC
-    LIMIT 1
-    `,
-    [bracket.tournament_id, bracket.format_id],
-  );
-
-  const loserBracketId = toNumber(loserBracketRows[0]?.id);
-
-  const { rows: roundShapeRows } = await pool.query(
-    `
-    SELECT round_number, COUNT(*)::int AS total
-    FROM matches
-    WHERE bracket_id = $1
-    GROUP BY round_number
-    ORDER BY round_number ASC
-    `,
-    [updatedMatch.bracket_id],
-  );
-
-  const roundShape = roundShapeRows
-    .map((row) => `${Number(row.round_number)}:${Number(row.total)}`)
-    .join(",");
-
-  const isCompactSixSingleBracket =
-    !loserBracketId && roundShape === COMPACT_SIX_ROUND_SHAPE;
-
-  if (isCompactSixSingleBracket) {
-    winnerRounds = 3;
-  }
-
-  let targetBracketId = loserBracketId;
-  let targetRound = 1;
-  let targetMatchNo = Math.ceil(currentMatchNo / 2);
-  let preferredSlot = currentMatchNo % 2 === 1 ? "A" : "B";
-
-  if (isCompactSixSingleBracket) {
-    targetBracketId = toNumber(updatedMatch.bracket_id);
-
-    const target = getCompactSixLoserTarget(currentRound, currentMatchNo);
-
-    if (!target) {
-      return null;
-    }
-
-    targetRound = target.round;
-    targetMatchNo = target.matchNo;
-    preferredSlot = target.slot;
-  } else if (loserBracketId) {
-    if (currentRound > 1) {
-      targetRound = Math.max(1, currentRound * 2 - 2);
-      targetMatchNo = currentMatchNo;
-      preferredSlot = "B";
-    }
-  } else {
-    // Single-bracket double elimination mode
-    if (currentRound > winnerRounds) {
-      return null;
-    }
-
-    targetBracketId = toNumber(updatedMatch.bracket_id);
-    const loserMainRounds = Math.max(1, 2 * (winnerRounds - 1));
-
-    let targetLoserRoundIndex = 1;
-
-    if (currentRound === 1) {
-      targetLoserRoundIndex = 1;
-      targetMatchNo = Math.ceil(currentMatchNo / 2);
-      preferredSlot = currentMatchNo % 2 === 1 ? "A" : "B";
-    } else if (currentRound < winnerRounds) {
-      targetLoserRoundIndex = Math.max(2, currentRound * 2 - 2);
-      targetMatchNo = currentMatchNo;
-      preferredSlot = "B";
-    } else {
-      targetLoserRoundIndex = loserMainRounds;
-      targetMatchNo = 1;
-      preferredSlot = "B";
-    }
-
-    targetRound = winnerRounds + targetLoserRoundIndex;
-  }
-
-  if (!targetBracketId) {
-    return null;
-  }
-
-  const { rows: targetRows } = await pool.query(
-    `
-    SELECT *
-    FROM matches
-    WHERE bracket_id = $1
-      AND round_number = $2
-      AND match_no = $3
-    ORDER BY id ASC
-    LIMIT 1
-    `,
-    [targetBracketId, targetRound, targetMatchNo],
-  );
-
-  if (targetRows.length === 0) {
-    return null;
-  }
-
-  const target = targetRows[0];
-
-  let slot = preferredSlot;
-  if (
-    (slot === "A" && toNumber(target.team_a_id)) ||
-    (slot === "B" && toNumber(target.team_b_id))
-  ) {
-    if (!toNumber(target.team_a_id)) slot = "A";
-    else if (!toNumber(target.team_b_id)) slot = "B";
-    else return null;
-  }
-
-  const teamField = slot === "A" ? "team_a_id" : "team_b_id";
-  const seedField = slot === "A" ? "seed_a" : "seed_b";
-
-  const { rows } = await pool.query(
-    `
-    UPDATE matches
-    SET ${teamField} = $1,
-        ${seedField} = $2
-    WHERE id = $3
-    RETURNING *
-    `,
-    [loserTeamId, loserSeed ?? null, target.id],
   );
 
   return rows[0] ?? null;
@@ -1349,44 +1131,15 @@ matchRouter.patch(
 
     const updatedMatch = updatedRows[0] ?? null;
 
-    let nextMatch = null;
-    let loserNextMatch = null;
     const shouldPropagateWinner = body?.propagate_winner !== false;
     const shouldPropagateLoser = body?.propagate_loser !== false;
 
-    if (
-      shouldPropagateWinner &&
-      updatedMatch?.next_match_id &&
-      winnerTeamId &&
-      ["A", "B"].includes(String(updatedMatch.next_slot || "").toUpperCase())
-    ) {
-      const isSlotA = String(updatedMatch.next_slot).toUpperCase() === "A";
-      const teamField = isSlotA ? "team_a_id" : "team_b_id";
-      const seedField = isSlotA ? "seed_a" : "seed_b";
-      const winnerSeed =
-        winnerTeamId === toNumber(updatedMatch.team_a_id)
-          ? updatedMatch.seed_a
-          : updatedMatch.seed_b;
-
-      const { rows: nextRows } = await pool.query(
-        `
-        UPDATE matches
-        SET ${teamField} = $1, ${seedField} = $2
-        WHERE id = $3
-        RETURNING *
-        `,
-        [winnerTeamId, winnerSeed ?? null, updatedMatch.next_match_id],
-      );
-
-      nextMatch = nextRows[0] ?? null;
-    }
-
-    if (shouldPropagateLoser) {
-      loserNextMatch = await propagateLoserToLoserBracket({
-        updatedMatch,
-        winnerTeamId,
-      });
-    }
+    const { nextMatch, loserNextMatch } = await applyMatchProgression({
+      updatedMatch,
+      winnerTeamId,
+      propagateWinner: shouldPropagateWinner,
+      propagateLoser: shouldPropagateLoser,
+    });
 
     let rankingSync = { ok: true };
     try {
@@ -1599,12 +1352,30 @@ matchRouter.post(
       [totalA, totalB, winnerTeamId, "completed", matchId],
     );
 
+    const updatedMatch = matchRows[0] ?? null;
+
+    let nextMatch = null;
+    let loserNextMatch = null;
+
+    if (updatedMatch && winnerTeamId) {
+      const progression = await applyMatchProgression({
+        updatedMatch,
+        winnerTeamId,
+        propagateWinner: body?.propagate_winner !== false,
+        propagateLoser: body?.propagate_loser !== false,
+      });
+      nextMatch = progression.nextMatch;
+      loserNextMatch = progression.loserNextMatch;
+    }
+
     set.status = 201;
     return {
       message: "Thêm game cho match thành công",
       data: {
         games: insertedGames,
-        match: matchRows[0] ?? null,
+        match: updatedMatch,
+        next_match: nextMatch,
+        loser_next_match: loserNextMatch,
       },
     };
   },

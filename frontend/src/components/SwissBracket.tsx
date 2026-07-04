@@ -5,14 +5,26 @@ import {
   getMatchesByBracketId,
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
-import { TOURNAMENT_LOGO } from "@/data/tournament";
+import { BracketTeamIcon } from "@/components/BracketTeamIcon";
 import {
-  BRACKET_CONN_ACTIVE_STROKE,
-  BRACKET_CONN_BASE_STROKE,
-  BRACKET_CONN_DIM_OPACITY,
   bracketCardHoverClass,
   bracketRowHoverClass,
+  type BracketHover,
+  isHoverableTeamId,
 } from "@/components/bracketHover";
+import {
+  BRACKET_INNER_CARD_CLASS,
+  BRACKET_OUTCOME_DOT_CLASS,
+  BRACKET_OUTCOME_DOT_COLORS,
+  BRACKET_ROW_BASE_CLASS,
+  BRACKET_SIDE_TEAM_ROW_CLASS,
+  BRACKET_SIDE_TITLE_CLASS,
+  BRACKET_STAGE_HEADER_CLASS,
+  BRACKET_STAGE_WRAPPER_CLASS,
+  buildSwissOutcomeDots,
+  getBracketRowStateClass,
+  getSwissColumnRoundTitle,
+} from "@/components/bracketTheme";
 
 type SwissBracketProps = {
   bracketId?: number | null;
@@ -76,9 +88,6 @@ type StageMetrics = {
   y: number;
   width: number;
   height: number;
-  centerY: number;
-  leftX: number;
-  rightX: number;
 };
 
 type TeamProgress = {
@@ -90,25 +99,16 @@ type TeamProgress = {
   state: "advanced" | "eliminated" | "pending";
 };
 
-const CARD_W = 232;
-const ROW_H = 36;
+const CARD_W = 268;
+const ROW_H = 44;
 const CARD_H = ROW_H * 2;
-const STAGE_TITLE_H = 26;
-const STAGE_PAD_X = 12;
-const STAGE_PAD_Y = 10;
-const MATCH_GAP = 12;
+const STAGE_HEADER_H = 32;
+const STAGE_HEADER_GAP = 12;
+const MATCH_GAP = 10;
 const STAGE_GAP = 24;
-const CONNECTOR_W = 54;
 const COL_GAP = 42;
 
-const STAGE_W = CARD_W + STAGE_PAD_X * 2;
-const BRACKET_CARD_CLASS =
-  "block overflow-hidden rounded-md border border-neutral-700 bg-neutral-900 shadow-lg";
-const BRACKET_ROW_BASE_CLASS =
-  "flex items-center justify-between px-3 transition-colors duration-150 border-b border-neutral-800";
-const STAGE_HEADER_CLASS =
-  "flex items-center justify-between rounded-md border border-neutral-300 bg-neutral-200 px-3 py-1 text-[11px] font-extrabold uppercase tracking-widest text-neutral-900";
-const STAGE_HEADER_DOT_CLASS = "h-2 w-2 rounded-sm";
+const STAGE_W = CARD_W;
 
 const SWISS_LABELS_8 = ["0-0", "1-0", "0-1", "1-1"];
 const SWISS_LABELS_16 = [
@@ -325,173 +325,22 @@ const getLayoutForRounds = (
   };
 };
 
-const getStageHeight = (matchCount: number) => {
-  const cardsHeight =
-    matchCount * CARD_H + Math.max(0, matchCount - 1) * MATCH_GAP;
-  return STAGE_TITLE_H + STAGE_PAD_Y * 2 + cardsHeight;
-};
+const getStageHeight = (matchCount: number) =>
+  matchCount * CARD_H + Math.max(0, matchCount - 1) * MATCH_GAP;
 
-const StageConnectorSingle = ({
-  x1,
-  x2,
-  y1,
-  y2,
-  hasHover,
-  active,
-}: {
-  x1: number;
-  x2: number;
-  y1: number;
-  y2: number;
-  hasHover: boolean;
-  active: boolean;
-}) => {
-  const top = Math.min(y1, y2);
-  const bottom = Math.max(y1, y2);
-  const width = x2 - x1;
-  const height = bottom - top + 2;
-  const bendX = Math.max(8, Math.min(width - 8, Math.floor(width * 0.45)));
-  const nY1 = y1 - top + 1;
-  const nY2 = y2 - top + 1;
+const getStageWrapperHeight = (matchCount: number) =>
+  STAGE_HEADER_H + STAGE_HEADER_GAP + getStageHeight(Math.max(1, matchCount));
 
-  return (
-    <svg
-      width={width}
-      height={height}
-      className="absolute"
-      style={{ left: x1, top }}
-    >
-      <polyline
-        points={`0,${nY1} ${bendX},${nY1} ${bendX},${nY2} ${width},${nY2}`}
-        stroke={BRACKET_CONN_BASE_STROKE}
-        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-        strokeWidth={2}
-        fill="none"
-        strokeLinejoin="miter"
-      />
-      {active ? (
-        <polyline
-          points={`0,${nY1} ${bendX},${nY1} ${bendX},${nY2} ${width},${nY2}`}
-          stroke={BRACKET_CONN_ACTIVE_STROKE}
-          strokeWidth={3}
-          fill="none"
-          strokeLinejoin="miter"
-        />
-      ) : null}
-    </svg>
-  );
-};
+const getColumnHeight = (
+  labels: string[],
+  stageMatches: Map<string, DisplayMatch[]>,
+) => {
+  const stagesHeight = labels.reduce((sum, label) => {
+    const matches = stageMatches.get(label) ?? [];
+    return sum + getStageWrapperHeight(Math.max(1, matches.length));
+  }, 0);
 
-const StageConnectorMerge = ({
-  x1,
-  x2,
-  yTop,
-  yBottom,
-  yOut,
-  hasHover,
-  activeInputIndexes,
-  activeOutput,
-}: {
-  x1: number;
-  x2: number;
-  yTop: number;
-  yBottom: number;
-  yOut: number;
-  hasHover: boolean;
-  activeInputIndexes: number[];
-  activeOutput: boolean;
-}) => {
-  const top = Math.min(yTop, yBottom, yOut);
-  const bottom = Math.max(yTop, yBottom, yOut);
-  const width = x2 - x1;
-  const height = bottom - top + 2;
-  const joinX = Math.floor(width * 0.35);
-  const bendX = Math.max(joinX + 8, Math.floor(width * 0.7));
-  const outX = width;
-
-  const nTop = yTop - top + 1;
-  const nBottom = yBottom - top + 1;
-  const nOut = yOut - top + 1;
-  const nJoin = (nTop + nBottom) / 2;
-  const sourceYs = [nTop, nBottom];
-  const activeYs = activeInputIndexes
-    .filter((index) => index >= 0 && index < sourceYs.length)
-    .map((index) => sourceYs[index]);
-
-  return (
-    <svg
-      width={width}
-      height={height}
-      className="absolute"
-      style={{ left: x1, top }}
-    >
-      <line
-        x1={0}
-        y1={nTop}
-        x2={joinX}
-        y2={nTop}
-        stroke={BRACKET_CONN_BASE_STROKE}
-        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-        strokeWidth={2}
-      />
-      <line
-        x1={0}
-        y1={nBottom}
-        x2={joinX}
-        y2={nBottom}
-        stroke={BRACKET_CONN_BASE_STROKE}
-        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-        strokeWidth={2}
-      />
-      <line
-        x1={joinX}
-        y1={Math.min(nTop, nBottom)}
-        x2={joinX}
-        y2={Math.max(nTop, nBottom)}
-        stroke={BRACKET_CONN_BASE_STROKE}
-        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-        strokeWidth={2}
-      />
-      <polyline
-        points={`${joinX},${nJoin} ${bendX},${nJoin} ${bendX},${nOut} ${outX},${nOut}`}
-        stroke={BRACKET_CONN_BASE_STROKE}
-        strokeOpacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-        strokeWidth={2}
-        fill="none"
-        strokeLinejoin="miter"
-      />
-      {activeOutput && activeYs.length ? (
-        <>
-          {activeYs.map((y, index) => (
-            <line
-              key={`active-merge-in-${index}`}
-              x1={0}
-              y1={y}
-              x2={joinX}
-              y2={y}
-              stroke={BRACKET_CONN_ACTIVE_STROKE}
-              strokeWidth={3}
-            />
-          ))}
-          <line
-            x1={joinX}
-            y1={Math.min(nOut, ...activeYs)}
-            x2={joinX}
-            y2={Math.max(nOut, ...activeYs)}
-            stroke={BRACKET_CONN_ACTIVE_STROKE}
-            strokeWidth={3}
-          />
-          <polyline
-            points={`${joinX},${nOut} ${bendX},${nOut} ${bendX},${nOut} ${outX},${nOut}`}
-            stroke={BRACKET_CONN_ACTIVE_STROKE}
-            strokeWidth={3}
-            fill="none"
-            strokeLinejoin="miter"
-          />
-        </>
-      ) : null}
-    </svg>
-  );
+  return stagesHeight + Math.max(0, labels.length - 1) * STAGE_GAP;
 };
 
 const PlayerRow = ({
@@ -507,6 +356,8 @@ const PlayerRow = ({
   isTop,
   onPick,
   onHoverTeam,
+  matchId,
+  matchRound,
 }: {
   teamId: number | null;
   logoUrl?: string | null;
@@ -519,29 +370,32 @@ const PlayerRow = ({
   hasHover: boolean;
   isTop?: boolean;
   onPick?: (teamId: number) => void;
-  onHoverTeam: (teamId: number | null) => void;
+  onHoverTeam: (hover: BracketHover | null) => void;
+  matchId: number;
+  matchRound: number;
 }) => {
   const canPick =
     typeof onPick === "function" && Number.isFinite(Number(teamId));
 
-  const stateToneCls =
-    pickState === "correct"
-      ? "bg-emerald-900/30 text-emerald-100 font-semibold border-l-4 border-l-emerald-400"
-      : pickState === "wrong"
-        ? "bg-rose-900/30 text-rose-100 font-semibold border-l-4 border-l-rose-400"
-        : pickState === "selected"
-          ? "bg-amber-900/30 text-amber-100 font-semibold border-l-4 border-l-amber-300"
-          : isWinner
-            ? "bg-amber-900/20 text-amber-100 font-semibold border-l-4 border-l-amber-300"
-            : "bg-neutral-900 text-neutral-300";
+  const stateToneCls = getBracketRowStateClass({
+    isHoveredTeam,
+    pickState,
+    isWinner,
+  });
 
   const hoverCls = bracketRowHoverClass(hasHover, isHoveredTeam);
 
   return (
     <div
-      className={`${BRACKET_ROW_BASE_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls} ${isTop ? "border-b border-neutral-800" : ""}`}
+      className={`${BRACKET_ROW_BASE_CLASS} ${canPick || isHoverableTeamId(teamId) ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls}`}
       style={{ height: ROW_H }}
-      onMouseEnter={() => onHoverTeam(teamId)}
+      onMouseEnter={() =>
+        onHoverTeam(
+          isHoverableTeamId(teamId)
+            ? { teamId, matchId, round: matchRound }
+            : null,
+        )
+      }
       onMouseLeave={() => onHoverTeam(null)}
       onClick={() => {
         if (!canPick || !teamId) return;
@@ -549,11 +403,7 @@ const PlayerRow = ({
       }}
     >
       <span className="flex items-center gap-2 text-sm truncate flex-1">
-        <img
-          src={logoUrl || TOURNAMENT_LOGO}
-          alt=""
-          className="w-5 h-5 rounded-sm"
-        />
+        <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
         {name}
       </span>
       <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
@@ -571,7 +421,7 @@ const MatchCard = ({
 }: {
   match: DisplayMatch;
   hoveredTeamId: number | null;
-  onHoverTeam: (teamId: number | null) => void;
+  onHoverTeam: (hover: BracketHover | null) => void;
   isInJourney: boolean;
 }) => {
   const {
@@ -644,6 +494,8 @@ const MatchCard = ({
         isTop
         onPick={canPick ? handlePick : undefined}
         onHoverTeam={onHoverTeam}
+        matchId={match.id}
+        matchRound={match.round}
       />
       <PlayerRow
         teamId={match.teamBId}
@@ -657,6 +509,8 @@ const MatchCard = ({
         hasHover={hasHover}
         onPick={canPick ? handlePick : undefined}
         onHoverTeam={onHoverTeam}
+        matchId={match.id}
+        matchRound={match.round}
       />
     </>
   );
@@ -664,7 +518,7 @@ const MatchCard = ({
   if (disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <div
-        className={`${BRACKET_CARD_CLASS} transition-all ${cardHoverCls}`}
+        className={`${BRACKET_INNER_CARD_CLASS} flex flex-col divide-y divide-neutral-700 transition-all ${cardHoverCls}`}
         style={{ width: CARD_W, height: CARD_H }}
       >
         {content}
@@ -675,7 +529,7 @@ const MatchCard = ({
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`${BRACKET_CARD_CLASS} hover:ring-1 hover:ring-white/40 transition-all ${cardHoverCls}`}
+      className={`${BRACKET_INNER_CARD_CLASS} flex flex-col divide-y divide-neutral-700 hover:outline hover:outline-1 hover:outline-white/20 transition-all ${cardHoverCls}`}
       style={{ width: CARD_W, height: CARD_H }}
     >
       {content}
@@ -686,68 +540,51 @@ const MatchCard = ({
 const TeamListCard = ({
   title,
   teams,
-  tone,
   hoveredTeamId,
   onHoverTeam,
+  teamMaxRoundById,
 }: {
   title: string;
   teams: TeamProgress[];
-  tone: "advanced" | "eliminated";
   hoveredTeamId: number | null;
-  onHoverTeam: (teamId: number | null) => void;
+  onHoverTeam: (hover: BracketHover | null) => void;
+  teamMaxRoundById: Map<number, number>;
 }) => {
-  const toneClass =
-    tone === "advanced"
-      ? {
-          title: "text-emerald-300",
-          record: "text-emerald-200",
-          empty: "text-emerald-200",
-          hover: "bg-emerald-500/20",
-        }
-      : {
-          title: "text-rose-300",
-          record: "text-rose-200",
-          empty: "text-rose-200",
-          hover: "bg-rose-500/20",
-        };
-
   const hasHover = hoveredTeamId !== null;
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span
-          className={`text-xs font-extrabold uppercase tracking-widest ${toneClass.title}`}
-        >
-          {title}
-        </span>
-      </div>
+    <div className="space-y-3">
+      <h3 className={BRACKET_SIDE_TITLE_CLASS}>{title}</h3>
       <div className="space-y-2">
         {teams.length ? (
           teams.map((team) => (
             <div
               key={`${title}-${team.id}`}
-              className={`flex items-center justify-between rounded-sm border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-xs transition-colors duration-150 ${hasHover ? (hoveredTeamId === team.id ? `${toneClass.hover} brightness-125 font-semibold` : "opacity-40 text-muted-foreground") : ""}`}
-              onMouseEnter={() => onHoverTeam(team.id)}
+              className={`${BRACKET_SIDE_TEAM_ROW_CLASS} ${
+                hasHover
+                  ? hoveredTeamId === team.id
+                    ? "border-neutral-500 text-white"
+                    : "opacity-55 text-neutral-400"
+                  : "text-neutral-200"
+              }`}
+              onMouseEnter={() =>
+                onHoverTeam({
+                  teamId: team.id,
+                  matchId: team.id,
+                  round: teamMaxRoundById.get(team.id) ?? Number.MAX_SAFE_INTEGER,
+                })
+              }
               onMouseLeave={() => onHoverTeam(null)}
             >
-              <span className="flex items-center gap-2 min-w-0">
-                <img
-                  src={team.logoUrl || TOURNAMENT_LOGO}
-                  alt=""
-                  className="w-4 h-4 rounded-sm"
-                />
-                <span className="truncate">{team.name}</span>
-              </span>
-              <span
-                className={`font-semibold ml-2 whitespace-nowrap ${toneClass.record}`}
-              >
-                {team.wins}T - {team.losses}B
-              </span>
+              <BracketTeamIcon teamId={team.id} logoUrl={team.logoUrl} />
+              <span className="truncate text-sm">{team.name}</span>
             </div>
           ))
         ) : (
-          <p className={`text-xs ${toneClass.empty}`}>Chưa có đội.</p>
+          <div className={`${BRACKET_SIDE_TEAM_ROW_CLASS} text-neutral-500`}>
+            <BracketTeamIcon teamId={null} />
+            <span className="text-sm">TBD</span>
+          </div>
         )}
       </div>
     </div>
@@ -764,7 +601,8 @@ const SwissBracket = ({
 }: SwissBracketProps) => {
   const outletContext = useOutletContext<BracketOutletContext | undefined>();
   const tournament = outletContext?.tournament;
-  const [hoveredTeamId, setHoveredTeamId] = useState<number | null>(null);
+  const [hover, setHover] = useState<BracketHover | null>(null);
+  const hoveredTeamId = hover?.teamId ?? null;
 
   const registeredTeams = tournamentRegistered ?? tournament?.registered ?? [];
 
@@ -813,7 +651,7 @@ const SwissBracket = ({
     [matchCountByRound],
   );
 
-  const { labels, layout, relations, advanceWins, eliminateLosses } = useMemo(
+  const { labels, layout, advanceWins, eliminateLosses } = useMemo(
     () => getLayoutForRounds(rounds, matchCountByRound),
     [rounds, matchCountByRound],
   );
@@ -840,43 +678,36 @@ const SwissBracket = ({
 
   const layoutInfo = useMemo(() => {
     const stageMetrics = new Map<string, StageMetrics>();
-    const columnHeights = layout.map((column) => {
-      const stageHeights = column.reduce((sum, label) => {
-        const matches = stageMatches.get(label) ?? [];
-        return sum + getStageHeight(Math.max(1, matches.length));
-      }, 0);
-      return stageHeights + Math.max(0, column.length - 1) * STAGE_GAP;
-    });
+    const columnHeights = layout.map((column) =>
+      getColumnHeight(column, stageMatches),
+    );
 
     const contentHeight = Math.max(0, ...columnHeights);
-    const colStride = STAGE_W + CONNECTOR_W + COL_GAP;
+    const colStride = STAGE_W + COL_GAP;
 
     layout.forEach((column, colIndex) => {
-      const columnTop = (contentHeight - columnHeights[colIndex]) / 2;
       const x = colIndex * colStride;
-      let cursorY = columnTop;
+      let cursorY = 0;
 
       column.forEach((label) => {
         const matches = stageMatches.get(label) ?? [];
-        const stageHeight = getStageHeight(Math.max(1, matches.length));
+        const matchCount = Math.max(1, matches.length);
+        const wrapperHeight = getStageWrapperHeight(matchCount);
 
         stageMetrics.set(label, {
           x,
           y: cursorY,
           width: STAGE_W,
-          height: stageHeight,
-          centerY: cursorY + stageHeight / 2,
-          leftX: x,
-          rightX: x + STAGE_W,
+          height: wrapperHeight,
         });
 
-        cursorY += stageHeight + STAGE_GAP;
+        cursorY += wrapperHeight + STAGE_GAP;
       });
     });
 
     const contentWidth =
       layout.length * STAGE_W +
-      Math.max(0, layout.length - 1) * (CONNECTOR_W + COL_GAP);
+      Math.max(0, layout.length - 1) * COL_GAP;
 
     return {
       stageMetrics,
@@ -885,94 +716,7 @@ const SwissBracket = ({
     };
   }, [layout, stageMatches]);
 
-  const connectors = useMemo(() => {
-    return relations
-      .map((relation) => {
-        const target = layoutInfo.stageMetrics.get(relation.to);
-        const sources = relation.from
-          .map((label) => ({
-            label,
-            metrics: layoutInfo.stageMetrics.get(label),
-          }))
-          .filter((entry) => Boolean(entry.metrics)) as Array<{
-          label: string;
-          metrics: StageMetrics;
-        }>;
-
-        if (!target || !sources.length) return null;
-
-        if (sources.length === 1) {
-          const source = sources[0];
-          return {
-            key: `single-${relation.from.join("-")}-${relation.to}`,
-            type: "single" as const,
-            fromLabel: source.label,
-            toLabel: relation.to,
-            x1: source.metrics.rightX,
-            x2: target.leftX,
-            y1: source.metrics.centerY,
-            y2: target.centerY,
-          };
-        }
-
-        if (sources.length >= 2) {
-          const sortedSources = [...sources].sort(
-            (a, b) => a.metrics.centerY - b.metrics.centerY,
-          );
-          return {
-            key: `merge-${relation.from.join("-")}-${relation.to}`,
-            type: "merge" as const,
-            sourceLabels: sortedSources.map((source) => source.label),
-            toLabel: relation.to,
-            x1: sortedSources[0].metrics.rightX,
-            x2: target.leftX,
-            yTop: sortedSources[0].metrics.centerY,
-            yBottom: sortedSources[sortedSources.length - 1].metrics.centerY,
-            yOut: target.centerY,
-          };
-        }
-
-        return null;
-      })
-      .filter(Boolean) as Array<
-      | {
-          key: string;
-          type: "single";
-          fromLabel: string;
-          toLabel: string;
-          x1: number;
-          x2: number;
-          y1: number;
-          y2: number;
-        }
-      | {
-          key: string;
-          type: "merge";
-          sourceLabels: string[];
-          toLabel: string;
-          x1: number;
-          x2: number;
-          yTop: number;
-          yBottom: number;
-          yOut: number;
-        }
-    >;
-  }, [relations, layoutInfo]);
-
-  const journeyMatchIds = useMemo(() => {
-    if (hoveredTeamId === null) return null;
-
-    return new Set(
-      displayMatches
-        .filter(
-          (match) =>
-            match.teamAId === hoveredTeamId || match.teamBId === hoveredTeamId,
-        )
-        .map((match) => match.id),
-    );
-  }, [displayMatches, hoveredTeamId]);
-
-  const journeyStageLabels = useMemo(() => {
+  const teamStageLabels = useMemo(() => {
     if (hoveredTeamId === null) return null;
 
     const labels = new Set<string>();
@@ -986,6 +730,19 @@ const SwissBracket = ({
 
     return labels;
   }, [hoveredTeamId, stageMatches]);
+
+  const teamMaxRoundById = useMemo(() => {
+    const map = new Map<number, number>();
+    displayMatches.forEach((match) => {
+      const update = (teamId: number | null) => {
+        if (!teamId) return;
+        map.set(teamId, Math.max(map.get(teamId) ?? 0, match.round));
+      };
+      update(match.teamAId);
+      update(match.teamBId);
+    });
+    return map;
+  }, [displayMatches]);
 
   const teamProgress = useMemo(() => {
     const teamMap = new Map<number, TeamProgress>();
@@ -1097,17 +854,16 @@ const SwissBracket = ({
               const metrics = layoutInfo.stageMetrics.get(label);
               if (!metrics) return null;
 
+              const colIndex = layout.findIndex((column) =>
+                column.includes(label),
+              );
               const matches = stageMatches.get(label) ?? [];
-              const stageTitle =
-                label.startsWith("R") && matches.length
-                  ? `Vòng ${matches[0].round}`
-                  : label;
-              const outcomeDots = matches
-                .flatMap((match) =>
-                  isResolvedSwissMatch(match) ? ["win", "loss"] : ["pending"],
-                )
-                .slice(0, 4);
-              while (outcomeDots.length < 4) outcomeDots.push("pending");
+              const stageTitle = getSwissColumnRoundTitle(colIndex);
+              const outcomeDots = buildSwissOutcomeDots(
+                label,
+                advanceWins,
+                eliminateLosses,
+              );
               const renderMatches = matches.length
                 ? matches
                 : [
@@ -1133,49 +889,43 @@ const SwissBracket = ({
               return (
                 <div
                   key={label}
-                  className="absolute rounded-md border border-neutral-700 bg-neutral-900 shadow-lg"
+                  className={`absolute flex flex-col overflow-hidden ${BRACKET_STAGE_WRAPPER_CLASS} transition-opacity duration-150 ${bracketCardHoverClass(hoveredTeamId !== null, !teamStageLabels || teamStageLabels.has(label))}`}
                   style={{
                     left: metrics.x,
                     top: metrics.y,
-                    width: STAGE_W,
+                    width: metrics.width,
                     height: metrics.height,
-                    padding: `${STAGE_PAD_Y}px ${STAGE_PAD_X}px`,
                   }}
                 >
-                  <div className={STAGE_HEADER_CLASS}>
+                  <div className={BRACKET_STAGE_HEADER_CLASS}>
                     <span>{stageTitle}</span>
                     <div className="flex items-center gap-1">
                       {outcomeDots.map((tone, index) => (
                         <span
                           key={`${label}-dot-${index}`}
-                          className={`${STAGE_HEADER_DOT_CLASS} ${
-                            tone === "win"
-                              ? "bg-emerald-500"
-                              : tone === "loss"
-                                ? "bg-rose-500"
-                                : "bg-neutral-400"
-                          }`}
+                          className={`${BRACKET_OUTCOME_DOT_CLASS} ${BRACKET_OUTCOME_DOT_COLORS[tone]}`}
                         />
                       ))}
                     </div>
                   </div>
 
-                  <div className="space-y-3">
+                  <div
+                    className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                    style={{ gap: MATCH_GAP, marginTop: STAGE_HEADER_GAP }}
+                  >
                     {renderMatches.map((match) =>
                       match.routeMatchId > 0 ? (
                         <MatchCard
                           key={match.id}
                           match={match}
                           hoveredTeamId={hoveredTeamId}
-                          onHoverTeam={setHoveredTeamId}
-                          isInJourney={
-                            !journeyMatchIds || journeyMatchIds.has(match.id)
-                          }
+                          onHoverTeam={setHover}
+                          isInJourney
                         />
                       ) : (
                         <div
                           key={`${label}-placeholder`}
-                          className="rounded-md border border-neutral-800 bg-neutral-950"
+                          className="border border-neutral-600 bg-[#141414]"
                           style={{ width: CARD_W, height: CARD_H }}
                         />
                       ),
@@ -1184,50 +934,6 @@ const SwissBracket = ({
                 </div>
               );
             })}
-
-            {connectors.map((connector) =>
-              connector.type === "single" ? (
-                <StageConnectorSingle
-                  key={connector.key}
-                  x1={connector.x1}
-                  x2={connector.x2}
-                  y1={connector.y1}
-                  y2={connector.y2}
-                  hasHover={hoveredTeamId !== null}
-                  active={Boolean(
-                    journeyStageLabels &&
-                    journeyStageLabels.has(connector.fromLabel) &&
-                    journeyStageLabels.has(connector.toLabel),
-                  )}
-                />
-              ) : (
-                <StageConnectorMerge
-                  key={connector.key}
-                  x1={connector.x1}
-                  x2={connector.x2}
-                  yTop={connector.yTop}
-                  yBottom={connector.yBottom}
-                  yOut={connector.yOut}
-                  hasHover={hoveredTeamId !== null}
-                  activeInputIndexes={
-                    journeyStageLabels
-                      ? connector.sourceLabels
-                          .map((label, index) =>
-                            journeyStageLabels.has(label) ? index : -1,
-                          )
-                          .filter((index) => index !== -1)
-                      : []
-                  }
-                  activeOutput={Boolean(
-                    journeyStageLabels &&
-                    connector.sourceLabels.some((label) =>
-                      journeyStageLabels.has(label),
-                    ) &&
-                    journeyStageLabels.has(connector.toLabel),
-                  )}
-                />
-              ),
-            )}
           </div>
 
           <div
@@ -1239,20 +945,20 @@ const SwissBracket = ({
           >
             <div className="w-full">
               <TeamListCard
-                title="Lọt vào"
+                title="LỌT VÀO"
                 teams={teamProgress.advanced}
-                tone="advanced"
                 hoveredTeamId={hoveredTeamId}
-                onHoverTeam={setHoveredTeamId}
+                onHoverTeam={setHover}
+                teamMaxRoundById={teamMaxRoundById}
               />
             </div>
             <div className="w-full">
               <TeamListCard
-                title="Bị loại"
+                title="BỊ LOẠI"
                 teams={teamProgress.eliminated}
-                tone="eliminated"
                 hoveredTeamId={hoveredTeamId}
-                onHoverTeam={setHoveredTeamId}
+                onHoverTeam={setHover}
+                teamMaxRoundById={teamMaxRoundById}
               />
             </div>
           </div>

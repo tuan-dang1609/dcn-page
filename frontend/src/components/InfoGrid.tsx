@@ -13,7 +13,7 @@ type TournamentInfo = {
   icon_game_url?: string;
   max_player_per_team?: number;
   max_participate?: number;
-  total_prize?: number | string;
+  prizes?: Array<{ prize?: string }>;
   date_start?: string;
   date_end?: string;
 };
@@ -43,6 +43,16 @@ const formatDateTime = (value?: string) => {
 
 const displayValue = (isLoading: boolean, value: string) =>
   isLoading ? "..." : value;
+
+const formatPrizeSummary = (prizes?: Array<{ prize?: string }>) => {
+  if (!prizes?.length) return "--";
+
+  const labels = prizes
+    .map((item) => String(item?.prize ?? "").trim())
+    .filter(Boolean);
+
+  return labels.length ? labels.join(" · ") : "--";
+};
 
 const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
   const infoItems = [
@@ -75,11 +85,8 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
     },
     {
       icon: Trophy,
-      label: "TỔNG GIẢI THƯỞNG",
-      value: displayValue(
-        isLoading,
-        tournament?.total_prize ? `${tournament.total_prize} VND` : "0 VND",
-      ),
+      label: "GIẢI THƯỞNG",
+      value: displayValue(isLoading, formatPrizeSummary(tournament?.prizes)),
       color: "bg-accent",
     },
     {

@@ -1366,7 +1366,7 @@ const BanPickTimelinePanel = ({
           return (
             <div
               key={item.key}
-              className="rounded-lg border border-border/50 bg-black/20 px-3 py-2"
+              className="rounded-lg border border-border/50 /20 px-3 py-2"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -1388,7 +1388,7 @@ const BanPickTimelinePanel = ({
                   </span>
 
                   {team && (
-                    <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-black/25 px-1.5 py-1">
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 /25 px-1.5 py-1">
                       <img
                         src={team.logo}
                         alt={team.tag}
@@ -1489,7 +1489,7 @@ const TeamLobbyRoster = ({
             return (
               <div
                 key={`${team.tag}-${player.name}-${index}`}
-                className={`rounded-md border border-border/50 bg-black/20 px-2 py-1.5 text-xs ${
+                className={`rounded-md border border-border/50 /20 px-2 py-1.5 text-xs ${
                   align === "right" ? "text-right" : "text-left"
                 }`}
               >
@@ -1525,7 +1525,7 @@ const TeamLobbyRoster = ({
             );
           })
         ) : (
-          <div className="rounded-md border border-dashed border-border/50 bg-black/10 px-2 py-2 text-xs text-muted-foreground">
+          <div className="rounded-md border border-dashed border-border/50 /10 px-2 py-2 text-xs text-muted-foreground">
             Chưa có roster
           </div>
         )}
@@ -1685,7 +1685,7 @@ const BanPickLobbyPanel = ({
 
   return (
     <section className="mx-auto px-4 md:px-8 py-6 space-y-3">
-      <div className="rounded-2xl border border-border/70 bg-black/25 p-4 md:p-5 space-y-4">
+      <div className="rounded-2xl border border-border/70 /25 p-4 md:p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-primary">
             Lobby Ban/Pick
@@ -1707,7 +1707,7 @@ const BanPickLobbyPanel = ({
         </div>
 
         {!canAct ? (
-          <div className="rounded-md border border-border/60 bg-black/20 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-md border border-border/60 /20 px-3 py-2 text-xs text-muted-foreground">
             Chế độ xem: chỉ thành viên của 2 team trong trận mới có thể thao tác.
           </div>
         ) : null}
@@ -1725,7 +1725,7 @@ const BanPickLobbyPanel = ({
               className={`rounded-lg border px-3 py-3 space-y-2.5 ${
                 isMyTurn
                   ? "border-primary/45 bg-primary/5"
-                  : "border-border/60 bg-black/20"
+                  : "border-border/60 /20"
               }`}
             >
               <div className="flex items-center justify-between gap-3">
@@ -1763,7 +1763,7 @@ const BanPickLobbyPanel = ({
                           ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
                           : isSelected
                             ? "text-amber-300 border-amber-500/40 bg-amber-500/10"
-                            : "text-muted-foreground border-border/50 bg-black/10";
+                            : "text-muted-foreground border-border/50 /10";
 
                   const actionMeta =
                     row.actionBy && row.actionType
@@ -1797,7 +1797,7 @@ const BanPickLobbyPanel = ({
                             className="w-12 h-7 rounded object-cover border border-border/40"
                           />
                         ) : (
-                          <span className="w-12 h-7 rounded border border-border/40 bg-black/30" />
+                          <span className="w-12 h-7 rounded border border-border/40 /30" />
                         )}
                         <span className="min-w-0">
                           <span className="block truncate text-sm font-semibold">
@@ -1942,7 +1942,7 @@ const PendingMatchOverviewPanel = ({
 
   return (
     <section className="mx-auto px-4 md:px-8 py-6">
-      <div className="rounded-2xl border border-border/70 bg-black/30 p-4 md:p-6 space-y-4">
+      <div className="rounded-2xl border border-border/70 /30 p-4 md:p-6 space-y-4">
         <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
           <span className="text-primary">Quick Match</span>
           <span>Overview</span>
@@ -1958,7 +1958,7 @@ const PendingMatchOverviewPanel = ({
           />
 
           <div className="space-y-3">
-            <div className="rounded-md border border-border/70 bg-black/20 px-3 py-2 flex items-center justify-between gap-3">
+            <div className="rounded-md border border-border/70 /20 px-3 py-2 flex items-center justify-between gap-3">
               <p className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
                 Room ID
               </p>
@@ -1982,7 +1982,7 @@ const PendingMatchOverviewPanel = ({
                         ? "border-primary/60 bg-primary/10"
                         : hasMatchId
                           ? "border-emerald-500/40 bg-emerald-500/10"
-                          : "border-border/60 bg-black/10"
+                          : "border-border/60 /10"
                     }`}
                   >
                     <p className="text-sm font-semibold">
@@ -3011,7 +3011,7 @@ const MatchDetailPage = () => {
                 </div>
                 <Link
                   to={buildMatchLink(prevDetail.id)}
-                  className="inline-flex h-8 items-center rounded-md border border-border/70 bg-black/25 px-2 hover:bg-black/40 transition-colors shrink-0"
+                  className="inline-flex h-8 items-center rounded-md border border-border/70 /25 px-2 hover:/40 transition-colors shrink-0"
                 >
                   <img
                     src={
@@ -3056,7 +3056,7 @@ const MatchDetailPage = () => {
               <div className="inline-flex items-center gap-2 min-w-0">
                 <Link
                   to={buildMatchLink(nextDetail.id)}
-                  className="inline-flex h-8 items-center rounded-md border border-border/70 bg-black/25 px-2 hover:bg-black/40 transition-colors shrink-0"
+                  className="inline-flex h-8 items-center rounded-md border border-border/70 /25 px-2 hover:/40 transition-colors shrink-0"
                 >
                   <img
                     src={
@@ -3115,7 +3115,7 @@ const MatchDetailPage = () => {
             />
           </div>
 
-          <div className="rounded-md border border-border/80 bg-black/25 px-4 py-2.5 flex items-center gap-5 md:gap-3 justify-center">
+          <div className="rounded-md border border-border/80 /25 px-4 py-2.5 flex items-center gap-5 md:gap-3 justify-center">
             <span className="text-2xl md:text-4xl font-black tabular-nums text-rose-400">
               {match.team1.score}
             </span>

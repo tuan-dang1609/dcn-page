@@ -5,7 +5,12 @@
   "private": true,
   "scripts": {
     "start": "bun run index.ts",
-    "dev": "bun --watch index.ts"
+    "dev": "bun --watch index.ts",
+    "bracket:diagnose": "bun run scripts/bracket-ops.js diagnose",
+    "bracket:repropagate": "bun run scripts/bracket-ops.js repropagate",
+    "bracket:reset": "bun run scripts/bracket-ops.js reset",
+    "bracket:delete": "bun run scripts/bracket-ops.js delete",
+    "supabase:keepalive": "bun run scripts/supabase-keepalive.js"
   },
   "devDependencies": {
     "@types/bun": "latest"

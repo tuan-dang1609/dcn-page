@@ -12,6 +12,13 @@ import {
   TableRow,
   TableCell,
 } from "@/components/ui/table";
+import {
+  TOURNAMENT_PAGE_BG_CLASS,
+  TOURNAMENT_PAGE_TITLE_CLASS,
+  TOURNAMENT_PANEL_CLASS,
+  TOURNAMENT_TABLE_HEADER_CLASS,
+  TOURNAMENT_TABLE_ROW_CLASS,
+} from "@/components/tournamentTheme";
 
 const medals = ["🥇", "🥈", "🥉"];
 
@@ -53,29 +60,29 @@ const LeaderboardPage = () => {
   const rankingBracketId = leaderboardEnvelope?.ranking_bracket_id ?? null;
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-heading">Bảng xếp hạng</h2>
+    <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
+      <h2 className={TOURNAMENT_PAGE_TITLE_CLASS}>Bảng xếp hạng</h2>
 
       {isTournamentLoading || isLoading ? (
-        <p className="text-smtext-[#EEEEEE]">Đang tải bảng xếp hạng...</p>
+        <p className="text-sm text-neutral-400">Đang tải bảng xếp hạng...</p>
       ) : null}
 
       {isError ? (
-        <p className="text-sm text-destructive">
+        <p className="text-sm text-rose-400">
           Không tải được bảng xếp hạng từ API.
         </p>
       ) : null}
 
       {!isLoading && !isError && !leaderboard.length ? (
-        <p className="text-smtext-[#EEEEEE]">
+        <p className="text-sm text-neutral-400">
           Chưa có dữ liệu xếp hạng cho giải này.
         </p>
       ) : null}
 
-      <div className="neo-box-square bg-card overflow-x-auto">
+      <div className={`${TOURNAMENT_PANEL_CLASS} overflow-x-auto`}>
         <Table className="min-w-[680px]">
           <TableHeader>
-            <TableRow className="neo-leaderboard-header">
+            <TableRow className={TOURNAMENT_TABLE_HEADER_CLASS}>
               <TableHead className="w-24 text-center whitespace-nowrap">
                 Hạng
               </TableHead>
@@ -99,7 +106,7 @@ const LeaderboardPage = () => {
               return (
                 <TableRow
                   key={`${row.tournament_id}-${row.team_id}`}
-                  className="neo-leaderboard-row"
+                  className={TOURNAMENT_TABLE_ROW_CLASS}
                 >
                   <TableCell className="text-center font-bold text-base">
                     {` ${placementText}`}

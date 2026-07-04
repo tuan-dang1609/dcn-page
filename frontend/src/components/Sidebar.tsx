@@ -13,6 +13,14 @@ const Sidebar = ({ tournament, isLoading }) => {
       ? Math.min(100, Math.max(0, (registeredCount / maxParticipate) * 100))
       : 0;
 
+  const prizeItems = Array.isArray(tournament?.prizes)
+    ? tournament.prizes.map((item) => ({
+        key: String(item?.id ?? item?.place_label ?? item?.place_order ?? ""),
+        place: item?.place_label ?? "--",
+        prize: String(item?.prize ?? item?.amount ?? "--"),
+      }))
+    : [];
+
   return (
     <div className="space-y-6">
       {/* Players */}
@@ -107,22 +115,25 @@ const Sidebar = ({ tournament, isLoading }) => {
       <div className="bg-card border border-border rounded-lg p-5">
         <h3 className="text-lg font-bold mb-4">Giải thưởng</h3>
         <div className="space-y-2">
-          {[
-            { place: "🥇 1st", prize: "0 VND" },
-            { place: "🥈 2nd", prize: "0 VND" },
-            { place: "🥉 3rd", prize: "0 VND" },
-            { place: "4th", prize: "0 VND" },
-          ].map((item) => (
-            <div
-              key={item.place}
-              className="bg-muted/30 border border-border rounded-lg p-3 flex justify-between items-center"
-            >
-              <span className="font-semibold text-sm">{item.place}</span>
-              <span className="font-semibold text-primary text-sm">
-                {item.prize}
-              </span>
-            </div>
-          ))}
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">...</p>
+          ) : prizeItems.length ? (
+            prizeItems.map((item) => (
+              <div
+                key={item.key}
+                className="bg-muted/30 border border-border rounded-lg p-3 flex justify-between items-center"
+              >
+                <span className="font-semibold text-sm">{item.place}</span>
+                <span className="font-semibold text-primary text-sm">
+                  {item.prize}
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Chưa cập nhật giải thưởng
+            </p>
+          )}
         </div>
       </div>
     </div>

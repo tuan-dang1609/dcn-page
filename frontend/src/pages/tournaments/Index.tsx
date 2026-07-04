@@ -5,6 +5,7 @@ import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
+import { TOURNAMENT_PAGE_BG_CLASS } from "@/components/tournamentTheme";
 import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
 
 const Layout = () => {
@@ -85,7 +86,9 @@ const Layout = () => {
               </div>
             </div>
           ) : (
-            <Outlet context={{ tournament, isLoading, refetch }} />
+            <div className={TOURNAMENT_PAGE_BG_CLASS}>
+              <Outlet context={{ tournament, isLoading, refetch }} />
+            </div>
           )}
         </div>
       </div>

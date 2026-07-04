@@ -9,6 +9,11 @@ import SingleElimBracket from "@/components/BracketView";
 import DoubleElimBracket from "@/components/DoubleElimBracket";
 import SwissBracket from "@/components/SwissBracket";
 import RoundRobinBracket from "@/components/RoundRobinBracket";
+import { TournamentTabCard } from "@/components/TournamentTabCard";
+import {
+  TOURNAMENT_PAGE_BG_CLASS,
+  TOURNAMENT_TAB_ROW_CLASS,
+} from "@/components/tournamentTheme";
 
 type BracketOutletContext = {
   tournament?: {
@@ -79,7 +84,7 @@ const BracketPage = () => {
   const isRoundRobinBracket =
     selectedFormatType === "round_robin" || selectedFormatId === 3;
 
-  const bracketGroups = useMemo(() => {
+  const bracketTabs = useMemo(() => {
     const order: string[] = [];
     const grouped = new Map<string, typeof brackets>();
 
@@ -98,94 +103,63 @@ const BracketPage = () => {
       grouped.get(key)!.push(bracket);
     });
 
-    return order.map((key) => {
+    return order.flatMap((key) => {
       const items = [...(grouped.get(key) ?? [])].sort((a, b) => a.id - b.id);
-      const title = (items[0]?.name || "").trim();
+      const groupTitle = (items[0]?.name || "").trim();
+      const isDuplicate = !key.startsWith("__single_") && items.length > 1;
 
-      return {
-        key,
-        items,
-        isDuplicate: !key.startsWith("__single_") && items.length > 1,
-        title,
-      };
+      if (!isDuplicate) {
+        const bracket = items[0];
+        return [
+          {
+            id: bracket.id,
+            title: bracket.name || `Bracket ${bracket.id}`,
+          },
+        ];
+      }
+
+      return items.map((bracket, index) => ({
+        id: bracket.id,
+        title: groupTitle
+          ? `${groupTitle} · ${toBranchLabel(index)}`
+          : toBranchLabel(index),
+      }));
     });
   }, [brackets]);
 
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-heading">Nhánh đấu</h2>
+  const resolvedActiveId = activeBracketId ?? brackets[0]?.id ?? null;
 
+  return (
+    <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
       {isLoading ? (
-        <p className="text-smtext-[#EEEEEE]">Đang tải danh sách bracket...</p>
+        <p className="text-sm text-neutral-400">Đang tải danh sách bracket...</p>
       ) : null}
 
       {isError ? (
-        <p className="text-sm text-destructive">
+        <p className="text-sm text-rose-400">
           Không tải được danh sách bracket.
         </p>
       ) : null}
 
-      {/* Sub-tabs */}
-      <div className="flex flex-wrap gap-2">
-        {bracketGroups.map((group) => {
-          if (!group.isDuplicate) {
-            const bracket = group.items[0];
-            const isActive =
-              (activeBracketId ?? brackets[0]?.id) === bracket.id;
-            return (
-              <button
-                key={bracket.id}
-                onClick={() => setActiveBracketId(bracket.id)}
-                className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${
-                  isActive
-                    ? "bg-primary text-primary-foreground neo-box-sm"
-                    : "bg-mutedtext-[#EEEEEE] hover:bg-muted/80"
-                }`}
-              >
-                {bracket.name || `Bracket ${bracket.id}`}
-              </button>
-            );
-          }
-
-          return (
-            <div
-              key={group.key}
-              className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/40"
-            >
-              <span className="text-xs font-boldtext-[#EEEEEE]">
-                {group.title}
-              </span>
-              <div className="flex items-center gap-1">
-                {group.items.map((bracket, index) => {
-                  const isActive =
-                    (activeBracketId ?? brackets[0]?.id) === bracket.id;
-
-                  return (
-                    <button
-                      key={bracket.id}
-                      onClick={() => setActiveBracketId(bracket.id)}
-                      className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
-                        isActive
-                          ? "bg-primary text-primary-foreground neo-box-sm"
-                          : "bg-mutedtext-[#EEEEEE] hover:bg-muted/80"
-                      }`}
-                    >
-                      {toBranchLabel(index)}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {bracketTabs.length ? (
+        <div className={TOURNAMENT_TAB_ROW_CLASS}>
+          {bracketTabs.map((tab) => (
+            <TournamentTabCard
+              key={tab.id}
+              title={tab.title}
+              isActive={resolvedActiveId === tab.id}
+              onClick={() => setActiveBracketId(tab.id)}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {!isLoading && !brackets.length ? (
-        <p className="text-md text-center text-foreground font-bold">
+        <p className="text-md text-center font-bold text-neutral-300">
           Hiện giải đấu chưa bắt đầu, vui lòng quay lại sau.
         </p>
       ) : (
-        <div className="p-6 overflow-x-auto">
+        <div className="overflow-x-auto  pt-2">
           {selectedFormatId === 1 ? (
             <SingleElimBracket bracketId={selectedBracketId} />
           ) : null}
@@ -207,7 +181,7 @@ const BracketPage = () => {
           selectedFormatId !== 2 &&
           !isRoundRobinBracket &&
           !isSwissBracket ? (
-            <p className="text-smtext-[#EEEEEE]">
+            <p className="text-sm text-neutral-400">
               Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ
               hỗ trợ hiển thị Single Elimination, Double Elimination, Round
               Robin và Swiss.
