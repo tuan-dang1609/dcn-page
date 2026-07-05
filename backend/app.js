@@ -64,6 +64,7 @@ const defaultAllowedOrigins = [
   "http://127.0.0.1:3001",
   "https://dcnpagetest.vercel.app",
   "https://dcn-page.vercel.app",
+  "https://dcntournament.vercel.app",
   "https://dcn-page.onrender.com",
   process.env.FRONTEND_URL,
   process.env.FRONTEND_ORIGIN,
@@ -72,7 +73,9 @@ const defaultAllowedOrigins = [
 const allowedOrigins = [
   ...defaultAllowedOrigins,
   ...parseOriginList(process.env.CORS_ALLOWED_ORIGINS),
-].map(normalizeOrigin);
+]
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
 const allowedOriginSet = new Set(allowedOrigins);
 
@@ -89,7 +92,9 @@ const isAllowedOrigin = (origin) => {
 };
 
 const buildCorsHeaders = (origin) => ({
-  "access-control-allow-origin": normalizeOrigin(origin),
+  "access-control-allow-origin": String(origin ?? "")
+    .trim()
+    .replace(/\/+$/, ""),
   "access-control-allow-credentials": "true",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers":
