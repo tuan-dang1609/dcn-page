@@ -66,6 +66,109 @@ function slugify(s) {
     .replace(/^_+|_+$/g, "");
 }
 
+const loadTournamentInfo = async (tournamentId) => {
+  const { rows: tRows } = await pool.query(
+    `SELECT t.id, t.name, t.slug, g.short_name, g.name AS game_name, g.icon_game_url, f.name AS format, t.banner_url, t.season, t.date_start,
+      t.date_end, t.register_start, t.register_end,
+      COALESCE(t.check_in_start, t.register_start) AS check_in_start,
+      COALESCE(t.check_in_end, t.register_end) AS check_in_end,
+      t.created_by, t.max_player_per_team, t.max_participate
+   FROM tournaments t
+   JOIN games g ON t.game_id = g.id
+   LEFT JOIN formats f ON f.id = t.format_id
+   WHERE t.id = $1
+   LIMIT 1`,
+    [tournamentId],
+  );
+
+  if (tRows.length === 0) return null;
+
+  const tournament = tRows[0];
+
+  const { rows: mRows } = await pool.query(
+    "SELECT id, title, context, milestone_time FROM milestones WHERE tournament_id = $1 ORDER BY milestone_time",
+    [tournament.id],
+  );
+
+  const { rows: rulesRows } = await pool.query(
+    "SELECT * FROM rules WHERE tournament_id = $1 ORDER BY id",
+    [tournament.id],
+  );
+  const { rows: tourTeam } = await pool.query(
+    `SELECT
+       tt.id,
+       tt.team_id,
+       tt.tournament_id,
+       t.name,
+       t.short_name,
+       t.logo_url,
+       t.team_color_hex,
+       u.nickname,
+       t.created_at,
+       COALESCE(
+         (to_jsonb(tt)->>'is_checked_in')::boolean,
+         (to_jsonb(tt)->>'isCheckedIn')::boolean,
+         false
+       ) AS "isCheckedIn"
+ FROM tournament_teams tt
+ JOIN teams t ON t.id = tt.team_id
+ JOIN users u ON u.id = t.created_by
+ WHERE tt.tournament_id = $1`,
+    [tournament.id],
+  );
+  const { rows: requirementRows } = await pool.query(
+    `SELECT r.device, r.discord, rg1.name AS rank_min, rg2.name AS rank_max
+   FROM requirements r
+   LEFT JOIN rank_game rg1 ON rg1.id = r.rank_min
+   LEFT JOIN rank_game rg2 ON rg2.id = r.rank_max
+   WHERE tournament_id = $1
+   ORDER BY r.id`,
+    [tournament.id],
+  );
+
+  const { rows: creatorRows } = await pool.query(
+    "SELECT nickname, profile_picture FROM users WHERE id = $1",
+    [tournament.created_by],
+  );
+
+  const { rows: regCountRows } = await pool.query(
+    "SELECT COUNT(*)::int AS registered_count FROM tournament_teams WHERE tournament_id = $1",
+    [tournament.id],
+  );
+  const registered_count = regCountRows[0]?.registered_count ?? 0;
+
+  let prizeRows = [];
+
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT id, place_label, place_order, prize, description
+      FROM tournament_prizes
+      WHERE tournament_id = $1
+      ORDER BY place_order ASC, id ASC
+      `,
+      [tournament.id],
+    );
+    prizeRows = rows;
+  } catch {
+    prizeRows = [];
+  }
+
+  return {
+    status: "success",
+    info: {
+      ...tournament,
+      registered_count,
+      prizes: prizeRows,
+      registered: tourTeam,
+      rule: rulesRows,
+      requirement: requirementRows[0] || null,
+      milestones: mRows,
+      created_by: creatorRows[0] || null,
+    },
+  };
+};
+
 tournamentRouter.get(
   "/games",
   async ({ set }) => {
@@ -109,15 +212,10 @@ tournamentRouter.get(
 
     try {
       const { rows: tRows } = await pool.query(
-        `SELECT t.id, t.name, g.short_name, g.name AS game_name, g.icon_game_url, f.name AS format, t.banner_url, t.season, t.date_start,
-          t.date_end, t.register_start, t.register_end,
-          COALESCE(t.check_in_start, t.register_start) AS check_in_start,
-          COALESCE(t.check_in_end, t.register_end) AS check_in_end,
-          t.created_by, t.max_player_per_team, t.max_participate
+        `SELECT t.id
        FROM tournaments t
        JOIN games g ON t.game_id = g.id
-       JOIN formats f ON f.id = t.format_id
-       WHERE g.short_name = $1 AND t.slug = $2
+       WHERE LOWER(g.short_name) = LOWER($1) AND t.slug = $2
        LIMIT 1`,
         [game, slug],
       );
@@ -126,100 +224,27 @@ tournamentRouter.get(
         set.status = 404;
         return {
           status: "error",
-          error: { code: "NOT_FOUND", message: "Tournament not found" },
+          error: "Tournament not found",
         };
       }
 
-      const tournament = tRows[0];
+      const payload = await loadTournamentInfo(tRows[0].id);
 
-      const { rows: mRows } = await pool.query(
-        "SELECT id, title, context, milestone_time FROM milestones WHERE tournament_id = $1 ORDER BY milestone_time",
-        [tournament.id],
-      );
-
-      const { rows: rulesRows } = await pool.query(
-        "SELECT * FROM rules WHERE tournament_id = $1 ORDER BY id",
-        [tournament.id],
-      );
-      const { rows: tourTeam } = await pool.query(
-        `SELECT
-           tt.id,
-           tt.team_id,
-           tt.tournament_id,
-           t.name,
-           t.short_name,
-           t.logo_url,
-           t.team_color_hex,
-           u.nickname,
-           t.created_at,
-           COALESCE(
-             (to_jsonb(tt)->>'is_checked_in')::boolean,
-             (to_jsonb(tt)->>'isCheckedIn')::boolean,
-             false
-           ) AS "isCheckedIn"
-     FROM tournament_teams tt
-     JOIN teams t ON t.id = tt.team_id
-     JOIN users u ON u.id = t.created_by
-     WHERE tt.tournament_id = $1`,
-        [tournament.id],
-      );
-      const { rows: requirementRows } = await pool.query(
-        `SELECT r.device, r.discord, rg1.name AS rank_min, rg2.name AS rank_max
-       FROM requirements r
-       JOIN rank_game rg1 ON rg1.id = r.rank_min
-       JOIN rank_game rg2 ON rg2.id = r.rank_max
-       WHERE tournament_id = $1
-       ORDER BY r.id`,
-        [tournament.id],
-      );
-
-      const { rows: creatorRows } = await pool.query(
-        "SELECT nickname, profile_picture FROM users WHERE id = $1",
-        [tournament.created_by],
-      );
-
-      const { rows: regCountRows } = await pool.query(
-        "SELECT COUNT(*)::int AS registered_count FROM tournament_teams WHERE tournament_id = $1",
-        [tournament.id],
-      );
-      const registered_count = regCountRows[0]?.registered_count ?? 0;
-
-      let prizeRows = [];
-
-      try {
-        const { rows } = await pool.query(
-          `
-          SELECT id, place_label, place_order, prize, description
-          FROM tournament_prizes
-          WHERE tournament_id = $1
-          ORDER BY place_order ASC, id ASC
-          `,
-          [tournament.id],
-        );
-        prizeRows = rows;
-      } catch {
-        prizeRows = [];
+      if (!payload) {
+        set.status = 404;
+        return {
+          status: "error",
+          error: "Tournament not found",
+        };
       }
 
       set.status = 200;
-      return {
-        status: "success",
-        info: {
-          ...tournament,
-          registered_count,
-          prizes: prizeRows,
-          registered: tourTeam,
-          rule: rulesRows,
-          requirement: requirementRows[0] || null,
-          milestones: mRows,
-          created_by: creatorRows[0] || null,
-        },
-      };
+      return payload;
     } catch {
       set.status = 500;
       return {
         status: "error",
-        error: { code: "INTERNAL_ERROR" },
+        error: "Internal server error",
       };
     }
   },
@@ -244,6 +269,37 @@ tournamentRouter.get(
         },
       ],
     },
+  },
+);
+
+tournamentRouter.get(
+  "/:tournament_id/info",
+  async ({ params, set }) => {
+    const tournamentId = Number(params.tournament_id);
+
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      set.status = 400;
+      return { status: "error", error: "tournament_id không hợp lệ" };
+    }
+
+    try {
+      const payload = await loadTournamentInfo(tournamentId);
+
+      if (!payload) {
+        set.status = 404;
+        return { status: "error", error: "Tournament not found" };
+      }
+
+      set.status = 200;
+      return payload;
+    } catch {
+      set.status = 500;
+      return { status: "error", error: "Internal server error" };
+    }
+  },
+  {
+    tags: [TAG],
+    summary: "Get tournament info by id",
   },
 );
 

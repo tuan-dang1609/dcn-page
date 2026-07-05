@@ -44,14 +44,32 @@ const formatDateTime = (value?: string) => {
 const displayValue = (isLoading: boolean, value: string) =>
   isLoading ? "..." : value;
 
-const formatPrizeSummary = (prizes?: Array<{ prize?: string }>) => {
+const parseVndAmounts = (text: string) => {
+  const matches = text.matchAll(/(\d[\d.,\s]*)\s*VND/gi);
+  let total = 0;
+
+  for (const match of matches) {
+    const digits = match[1].replace(/[^\d]/g, "");
+    const amount = Number(digits);
+    if (Number.isFinite(amount) && amount > 0) {
+      total += amount;
+    }
+  }
+
+  return total;
+};
+
+const formatTotalPrize = (prizes?: Array<{ prize?: string }>) => {
   if (!prizes?.length) return "--";
 
-  const labels = prizes
-    .map((item) => String(item?.prize ?? "").trim())
-    .filter(Boolean);
+  const total = prizes.reduce(
+    (sum, item) => sum + parseVndAmounts(String(item?.prize ?? "")),
+    0,
+  );
 
-  return labels.length ? labels.join(" · ") : "--";
+  if (total <= 0) return "--";
+
+  return `${total.toLocaleString("vi-VN")} VND`;
 };
 
 const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
@@ -85,8 +103,8 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
     },
     {
       icon: Trophy,
-      label: "GIẢI THƯỞNG",
-      value: displayValue(isLoading, formatPrizeSummary(tournament?.prizes)),
+      label: "TỔNG GIẢI THƯỞNG",
+      value: displayValue(isLoading, formatTotalPrize(tournament?.prizes)),
       color: "bg-accent",
     },
     {

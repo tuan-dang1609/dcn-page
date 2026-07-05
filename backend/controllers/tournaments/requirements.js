@@ -4,6 +4,19 @@ import middleware from "../../utils/middleware.js";
 const requirementRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Requirements";
 
+let ensureRequirementsSchemaPromise = null;
+
+const ensureRequirementsSchema = async () => {
+  if (!ensureRequirementsSchemaPromise) {
+    ensureRequirementsSchemaPromise = pool.query(`
+      ALTER TABLE requirements ALTER COLUMN rank_min DROP NOT NULL;
+      ALTER TABLE requirements ALTER COLUMN rank_max DROP NOT NULL;
+    `);
+  }
+
+  return ensureRequirementsSchemaPromise.catch(() => {});
+};
+
 const ensureTournamentManagePermission = async (user, tournamentId, set) => {
   if (!user) {
     set.status = 401;
@@ -61,6 +74,12 @@ const normalizeDiscordBoolean = (value) => {
   return { hasValue: true, value: null };
 };
 
+const normalizeRankId = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 requirementRouter.get(
   "/ranks",
   async ({ set }) => {
@@ -80,6 +99,8 @@ requirementRouter.get(
 requirementRouter.post(
   "/:id",
   async ({ params, body, set, user }) => {
+    await ensureRequirementsSchema();
+
     const id = Number(params.id);
 
     if (!Number.isFinite(id)) {
@@ -118,12 +139,20 @@ requirementRouter.post(
         : null;
 
     const deviceLiteral = all_devices ? toPgTextArray(all_devices) : null;
+    const normalizedRankMin = normalizeRankId(rank_min);
+    const normalizedRankMax = normalizeRankId(rank_max);
 
     const { rows } = await pool.query(
       `INSERT INTO requirements (rank_min, rank_max, device, discord, tournament_id)
      VALUES ($1, $2, $3::text[], $4, $5)
      RETURNING *`,
-      [rank_min, rank_max, deviceLiteral, parsedDiscord.value ?? false, id],
+      [
+        normalizedRankMin,
+        normalizedRankMax,
+        deviceLiteral,
+        parsedDiscord.value ?? false,
+        id,
+      ],
     );
 
     set.status = 201;
@@ -148,10 +177,18 @@ requirementRouter.post(
           "application/json": {
             schema: {
               type: "object",
-              required: ["rank_min", "rank_max"],
+              required: [],
               properties: {
-                rank_min: { type: "integer", example: 1 },
-                rank_max: { type: "integer", example: 10 },
+                rank_min: {
+                  type: ["integer", "null"],
+                  example: 1,
+                  description: "Bỏ trống hoặc null = All rank",
+                },
+                rank_max: {
+                  type: ["integer", "null"],
+                  example: 10,
+                  description: "Bỏ trống hoặc null = All rank",
+                },
                 devices: {
                   oneOf: [
                     { type: "array", items: { type: "string" } },
@@ -194,6 +231,8 @@ requirementRouter.post(
 requirementRouter.patch(
   "/:id",
   async ({ params, body, set, user }) => {
+    await ensureRequirementsSchema();
+
     const tournamentId = Number(params.id);
 
     if (!Number.isFinite(tournamentId)) {
@@ -216,6 +255,14 @@ requirementRouter.patch(
       body ?? {},
       "discord",
     );
+    const hasRankMinField = Object.prototype.hasOwnProperty.call(
+      body ?? {},
+      "rank_min",
+    );
+    const hasRankMaxField = Object.prototype.hasOwnProperty.call(
+      body ?? {},
+      "rank_max",
+    );
 
     const { rank_min, rank_max, devices, discord } = body ?? {};
     const parsedDiscord = normalizeDiscordBoolean(discord);
@@ -233,14 +280,6 @@ requirementRouter.patch(
     const existing = existingRows[0] ?? null;
 
     if (!existing) {
-      if (rank_min === undefined || rank_max === undefined) {
-        set.status = 400;
-        return {
-          error:
-            "Tournament chưa có requirements. Cần truyền rank_min và rank_max để tạo mới.",
-        };
-      }
-
       const allDevices = Array.isArray(devices)
         ? devices
         : devices
@@ -256,8 +295,8 @@ requirementRouter.patch(
         RETURNING *
         `,
         [
-          rank_min,
-          rank_max,
+          hasRankMinField ? normalizeRankId(rank_min) : null,
+          hasRankMaxField ? normalizeRankId(rank_max) : null,
           deviceLiteral,
           parsedDiscord.value ?? false,
           tournamentId,
@@ -271,8 +310,12 @@ requirementRouter.patch(
       };
     }
 
-    const nextRankMin = rank_min ?? existing.rank_min;
-    const nextRankMax = rank_max ?? existing.rank_max;
+    const nextRankMin = hasRankMinField
+      ? normalizeRankId(rank_min)
+      : existing.rank_min;
+    const nextRankMax = hasRankMaxField
+      ? normalizeRankId(rank_max)
+      : existing.rank_max;
 
     let nextDeviceLiteral = toPgTextArray(existing.device ?? null);
     if (hasDevicesField) {

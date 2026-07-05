@@ -6,8 +6,12 @@ const Sidebar = ({ tournament, isLoading }) => {
   const registeredCount = Number(tournament?.registered_count ?? 0);
   const maxParticipate = Number(tournament?.max_participate ?? 0);
   const requirement = tournament?.requirement ?? {};
-  const rankMin = requirement?.rank_min ?? "--";
-  const rankMax = requirement?.rank_max ?? "--";
+  const rankLabel = (() => {
+    const min = String(requirement?.rank_min ?? "").trim();
+    const max = String(requirement?.rank_max ?? "").trim();
+    if (!min || !max || min === "--" || max === "--") return "All rank";
+    return `${min} → ${max}`;
+  })();
   const progressPercent =
     maxParticipate > 0
       ? Math.min(100, Math.max(0, (registeredCount / maxParticipate) * 100))
@@ -23,10 +27,10 @@ const Sidebar = ({ tournament, isLoading }) => {
 
   return (
     <div className="space-y-6">
-      {/* Players */}
+      {/* Teams */}
       <div className="rounded-lg bg-card p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold">Người chơi</h3>
+          <h3 className="text-lg font-bold">Số đội</h3>
           <Link to="participants">
             <button className=" font-bold text-sm hover:underline">
               XEM TẤT CẢ
@@ -62,9 +66,7 @@ const Sidebar = ({ tournament, isLoading }) => {
         <div className="space-y-0 divide-y-2 divide-border">
           <div className="flex justify-between py-3">
             <span className="text-muted-foreground">Mức rank</span>
-            <span className="font-bold">
-              {rankMin} → {rankMax}
-            </span>
+            <span className="font-bold">{rankLabel}</span>
           </div>
           <div className="flex justify-between py-3">
             <span className="text-muted-foreground">Trường</span>
