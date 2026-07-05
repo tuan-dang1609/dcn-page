@@ -30,7 +30,12 @@ export const getAllTournaments = () =>
 
 export const getTournamentBySlug = (game: string, slug: string) =>
   axios.get<TournamentBySlugResponse>(
-    `${tournamentsBaseUrl}/by-slug/${game}/${slug}`,
+    `${tournamentsBaseUrl}/by-slug/${encodeURIComponent(game)}/${encodeURIComponent(slug)}`,
+  );
+
+export const getTournamentInfoById = (tournamentId: number | string) =>
+  axios.get<TournamentBySlugResponse>(
+    `${tournamentsBaseUrl}/${tournamentId}/info`,
   );
 
 export const getBracketsByTournamentId = (tournamentId: number | string) =>
@@ -231,8 +236,8 @@ export const syncPrizes = (
   );
 
 export interface RequirementPayload {
-  rank_min: number;
-  rank_max: number;
+  rank_min?: number | null;
+  rank_max?: number | null;
   devices?: string[];
   discord?: boolean;
 }

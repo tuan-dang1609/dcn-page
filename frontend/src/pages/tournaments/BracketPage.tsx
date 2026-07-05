@@ -11,6 +11,13 @@ import SwissBracket from "@/components/SwissBracket";
 import RoundRobinBracket from "@/components/RoundRobinBracket";
 import { TournamentTabCard } from "@/components/TournamentTabCard";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   TOURNAMENT_PAGE_BG_CLASS,
   TOURNAMENT_TAB_ROW_CLASS,
 } from "@/components/tournamentTheme";
@@ -142,16 +149,36 @@ const BracketPage = () => {
       ) : null}
 
       {bracketTabs.length ? (
-        <div className={TOURNAMENT_TAB_ROW_CLASS}>
-          {bracketTabs.map((tab) => (
-            <TournamentTabCard
-              key={tab.id}
-              title={tab.title}
-              isActive={resolvedActiveId === tab.id}
-              onClick={() => setActiveBracketId(tab.id)}
-            />
-          ))}
-        </div>
+        <>
+          <div className={`hidden md:flex ${TOURNAMENT_TAB_ROW_CLASS}`}>
+            {bracketTabs.map((tab) => (
+              <TournamentTabCard
+                key={tab.id}
+                title={tab.title}
+                isActive={resolvedActiveId === tab.id}
+                onClick={() => setActiveBracketId(tab.id)}
+              />
+            ))}
+          </div>
+
+          <div className="md:hidden">
+            <Select
+              value={String(resolvedActiveId ?? "")}
+              onValueChange={(value) => setActiveBracketId(Number(value))}
+            >
+              <SelectTrigger className="w-full border border-[#333] bg-[#141414] text-white">
+                <SelectValue placeholder="Chọn bracket" />
+              </SelectTrigger>
+              <SelectContent>
+                {bracketTabs.map((tab) => (
+                  <SelectItem key={tab.id} value={String(tab.id)}>
+                    {tab.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </>
       ) : null}
 
       {!isLoading && !brackets.length ? (

@@ -10,7 +10,7 @@ import {
   getAllTournaments,
   getGames,
   getRankGames,
-  getTournamentBySlug,
+  getTournamentInfoById,
   syncMilestones,
   syncPrizes,
   syncRules,
@@ -29,6 +29,39 @@ import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import axios from "axios";
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+  if (!axios.isAxiosError(error)) {
+    if (error instanceof Error && error.message) return error.message;
+    return fallback;
+  }
+
+  const data = error.response?.data as {
+    error?: string | { code?: string; message?: string };
+    message?: string;
+  };
+
+  const payloadError = data?.error;
+  if (typeof payloadError === "string" && payloadError.trim()) {
+    return payloadError;
+  }
+  if (
+    payloadError &&
+    typeof payloadError === "object" &&
+    typeof payloadError.message === "string" &&
+    payloadError.message.trim()
+  ) {
+    return payloadError.message;
+  }
+
+  if (typeof data?.message === "string" && data.message.trim()) {
+    return data.message;
+  }
+
+  if (error.message) return error.message;
+  return fallback;
+};
 
 const allowedRoleIds = new Set([1, 2, 3]);
 const stepLabels = [
@@ -422,7 +455,7 @@ const TournamentSetupPage = () => {
 
   const applyTournamentDetails = (
     details: NonNullable<
-      Awaited<ReturnType<typeof getTournamentBySlug>>["data"]["info"]
+      Awaited<ReturnType<typeof getTournamentInfoById>>["data"]["info"]
     >,
   ) => {
     const nextMilestones = Array.isArray(details.milestones)
@@ -466,6 +499,18 @@ const TournamentSetupPage = () => {
     setPendingRequirement(
       (details.requirement ?? null) as TournamentRequirementApi,
     );
+
+    setCompletedSteps({
+      1: true,
+      2: nextMilestones.some(
+        (item) => item.title.trim() && item.context.trim(),
+      ),
+      3: nextRules.some((item) => item.title.trim() && item.content.trim()),
+      4: nextPrizes.some(
+        (item) => item.place_label.trim() && item.prize.trim(),
+      ),
+      5: Boolean(details.requirement),
+    });
   };
 
   const applyTournamentToForm = (selected: TournamentListItem) => {
@@ -513,24 +558,19 @@ const TournamentSetupPage = () => {
     const selected = tournamentById.get(nextId);
     if (!selected) return;
 
+    setTournamentMode("update");
     applyTournamentToForm(selected);
 
-    const selectedGame = gameById.get(String(selected.game_id ?? ""));
-    if (!selectedGame?.short_name || !selected.slug) return;
-
     setDetailsLoading(true);
-    void getTournamentBySlug(selectedGame.short_name, selected.slug)
+    void getTournamentInfoById(nextId)
       .then((response) => {
         const info = response.data?.info;
         if (info) applyTournamentDetails(info);
       })
-      .catch((error: any) => {
+      .catch((error: unknown) => {
         toast({
           title: "Không tải được chi tiết giải đấu",
-          description:
-            error?.response?.data?.error ||
-            error?.message ||
-            "Vui lòng thử lại.",
+          description: getApiErrorMessage(error, "Vui lòng thử lại."),
           variant: "destructive",
         });
       })
@@ -687,8 +727,7 @@ const TournamentSetupPage = () => {
     } catch (error: any) {
       toast({
         title: "Lưu giải đấu thất bại",
-        description:
-          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        description: getApiErrorMessage(error, "Vui lòng thử lại."),
         variant: "destructive",
       });
     } finally {
@@ -739,8 +778,7 @@ const TournamentSetupPage = () => {
     } catch (error: any) {
       toast({
         title: "Lưu milestones thất bại",
-        description:
-          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        description: getApiErrorMessage(error, "Vui lòng thử lại."),
         variant: "destructive",
       });
     } finally {
@@ -788,8 +826,7 @@ const TournamentSetupPage = () => {
     } catch (error: any) {
       toast({
         title: "Lưu rules thất bại",
-        description:
-          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        description: getApiErrorMessage(error, "Vui lòng thử lại."),
         variant: "destructive",
       });
     } finally {
@@ -845,8 +882,7 @@ const TournamentSetupPage = () => {
     } catch (error: any) {
       toast({
         title: "Lưu giải thưởng thất bại",
-        description:
-          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        description: getApiErrorMessage(error, "Vui lòng thử lại."),
         variant: "destructive",
       });
     } finally {
@@ -860,15 +896,6 @@ const TournamentSetupPage = () => {
 
     const rankMin = toNumber(requirements.rank_min);
     const rankMax = toNumber(requirements.rank_max);
-
-    if (rankMin === null || rankMax === null) {
-      toast({
-        title: "Thiếu rank",
-        description: "Cần rank_min và rank_max hợp lệ.",
-        variant: "destructive",
-      });
-      return;
-    }
 
     const devices = requirements.devices_csv
       .split(",")
@@ -901,8 +928,7 @@ const TournamentSetupPage = () => {
     } catch (error: any) {
       toast({
         title: "Lưu requirements thất bại",
-        description:
-          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        description: getApiErrorMessage(error, "Vui lòng thử lại."),
         variant: "destructive",
       });
     } finally {
@@ -1732,7 +1758,7 @@ const TournamentSetupPage = () => {
                   }
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 >
-                  <option value="">Chọn rank_min</option>
+                  <option value="">All rank</option>
                   {rankOptions.map((rank) => (
                     <option key={rank.id} value={String(rank.id)}>
                       {rank.name}
@@ -1752,7 +1778,7 @@ const TournamentSetupPage = () => {
                   }
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 >
-                  <option value="">Chọn rank_max</option>
+                  <option value="">All rank</option>
                   {rankOptions.map((rank) => (
                     <option key={rank.id} value={String(rank.id)}>
                       {rank.name}

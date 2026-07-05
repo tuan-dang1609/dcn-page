@@ -23,7 +23,7 @@ const Layout = () => {
   );
   const isRulePage = Boolean(useMatch("/tournament/:game/:slug/rule"));
   const { game, slug } = useParams();
-  const { tournament, isLoading, refetch } = useTournamentBySlug(game, slug);
+  const { tournament, isLoading, error, refetch } = useTournamentBySlug(game, slug);
   const location = useLocation();
 
   const tournamentTitle = tournament?.name?.trim() || "Giải đấu";
@@ -58,6 +58,23 @@ const Layout = () => {
     // Ensure we start at the top when navigating inside tournament pages
     window.scrollTo(0, 0);
   }, [location.pathname]);
+
+  if (!isLoading && !tournament && error) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="max-w-lg text-center space-y-3">
+          <h1 className="text-2xl font-bold">Không tìm thấy giải đấu</h1>
+          <p className="text-muted-foreground">
+            URL: /tournament/{game}/{slug}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Kiểm tra lại game slug và tournament slug trong database (bảng{" "}
+            <code>games.short_name</code> và <code>tournaments.slug</code>).
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isMatchDetailPage || isLobbyPage) {
     return (
