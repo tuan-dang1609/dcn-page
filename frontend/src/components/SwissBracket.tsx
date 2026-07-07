@@ -22,6 +22,7 @@ import {
   BRACKET_STAGE_HEADER_CLASS,
   BRACKET_STAGE_WRAPPER_CLASS,
   buildSwissOutcomeDots,
+  formatBracketSideScore,
   getBracketRowStateClass,
   getSwissColumnRoundTitle,
 } from "@/components/bracketTheme";
@@ -107,6 +108,7 @@ const STAGE_HEADER_GAP = 12;
 const MATCH_GAP = 10;
 const STAGE_GAP = 24;
 const COL_GAP = 42;
+const SIDE_COL_GAP = 72;
 
 const STAGE_W = CARD_W;
 
@@ -149,6 +151,40 @@ const SWISS_RELATIONS_16 = [
   { from: ["0-2", "1-1"], to: "1-2" },
   { from: ["2-1", "1-2"], to: "2-2" },
 ];
+
+const SWISS_EXPECTED_MATCHES_8: Record<string, number> = {
+  "0-0": 4,
+  "1-0": 2,
+  "0-1": 2,
+  "1-1": 2,
+};
+
+const SWISS_EXPECTED_MATCHES_16: Record<string, number> = {
+  "0-0": 8,
+  "1-0": 4,
+  "0-1": 4,
+  "2-0": 2,
+  "0-2": 2,
+  "1-1": 4,
+  "2-1": 3,
+  "1-2": 3,
+  "2-2": 3,
+};
+
+const getSwissExpectedMatchesByLabel = (
+  labels: string[],
+): Record<string, number> | null => {
+  if (labels.length === 4 && labels.every((l) => SWISS_LABELS_8.includes(l))) {
+    return SWISS_EXPECTED_MATCHES_8;
+  }
+  if (
+    labels.length === 9 &&
+    labels.every((l) => SWISS_LABELS_16.includes(l))
+  ) {
+    return SWISS_EXPECTED_MATCHES_16;
+  }
+  return null;
+};
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -334,20 +370,42 @@ const getStageWrapperHeight = (matchCount: number) =>
 const getColumnHeight = (
   labels: string[],
   stageMatches: Map<string, DisplayMatch[]>,
+  expectedMatchesByLabel: Record<string, number> | null,
 ) => {
   const stagesHeight = labels.reduce((sum, label) => {
     const matches = stageMatches.get(label) ?? [];
-    return sum + getStageWrapperHeight(Math.max(1, matches.length));
+    const expected = expectedMatchesByLabel?.[label];
+    const matchCount = expected ?? Math.max(1, matches.length);
+    return sum + getStageWrapperHeight(matchCount);
   }, 0);
 
   return stagesHeight + Math.max(0, labels.length - 1) * STAGE_GAP;
 };
+
+const createTbdPlaceholder = (label: string, index: number): DisplayMatch => ({
+  id: -(index + 1),
+  routeMatchId: -1,
+  round: 0,
+  matchNo: index,
+  teamAId: null,
+  teamBId: null,
+  winnerTeamId: null,
+  p1: "TBD",
+  p2: "TBD",
+  p1Logo: null,
+  p2Logo: null,
+  s1: null,
+  s2: null,
+  winner: null,
+  status: "scheduled",
+});
 
 const PlayerRow = ({
   teamId,
   logoUrl,
   name,
   score,
+  otherScore,
   isWinner,
   isSelected,
   pickState,
@@ -363,6 +421,7 @@ const PlayerRow = ({
   logoUrl?: string | null;
   name: string;
   score: number | null;
+  otherScore: number | null;
   isWinner: boolean;
   isSelected?: boolean;
   pickState?: PickVisualState | null;
@@ -407,7 +466,7 @@ const PlayerRow = ({
         {name}
       </span>
       <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
-        {score ?? "-"}
+        {formatBracketSideScore(score, otherScore)}
       </span>
     </div>
   );
@@ -486,6 +545,7 @@ const MatchCard = ({
         logoUrl={match.p1Logo}
         name={match.p1}
         score={match.s1}
+        otherScore={match.s2}
         isWinner={match.winner === match.p1}
         isSelected={selectedTeamId === match.teamAId}
         pickState={resolvePickState(match.teamAId)}
@@ -502,6 +562,7 @@ const MatchCard = ({
         logoUrl={match.p2Logo}
         name={match.p2}
         score={match.s2}
+        otherScore={match.s1}
         isWinner={match.winner === match.p2}
         isSelected={selectedTeamId === match.teamBId}
         pickState={resolvePickState(match.teamBId)}
@@ -540,52 +601,61 @@ const MatchCard = ({
 const TeamListCard = ({
   title,
   teams,
+  slotCount,
   hoveredTeamId,
   onHoverTeam,
   teamMaxRoundById,
 }: {
   title: string;
   teams: TeamProgress[];
+  slotCount?: number;
   hoveredTeamId: number | null;
   onHoverTeam: (hover: BracketHover | null) => void;
   teamMaxRoundById: Map<number, number>;
 }) => {
   const hasHover = hoveredTeamId !== null;
+  const tbdCount = slotCount
+    ? Math.max(0, slotCount - teams.length)
+    : teams.length
+      ? 0
+      : 1;
 
   return (
     <div className="space-y-3">
       <h3 className={BRACKET_SIDE_TITLE_CLASS}>{title}</h3>
       <div className="space-y-2">
-        {teams.length ? (
-          teams.map((team) => (
-            <div
-              key={`${title}-${team.id}`}
-              className={`${BRACKET_SIDE_TEAM_ROW_CLASS} ${
-                hasHover
-                  ? hoveredTeamId === team.id
-                    ? "border-neutral-500 text-white"
-                    : "opacity-55 text-neutral-400"
-                  : "text-neutral-200"
-              }`}
-              onMouseEnter={() =>
-                onHoverTeam({
-                  teamId: team.id,
-                  matchId: team.id,
-                  round: teamMaxRoundById.get(team.id) ?? Number.MAX_SAFE_INTEGER,
-                })
-              }
-              onMouseLeave={() => onHoverTeam(null)}
-            >
-              <BracketTeamIcon teamId={team.id} logoUrl={team.logoUrl} />
-              <span className="truncate text-sm">{team.name}</span>
-            </div>
-          ))
-        ) : (
-          <div className={`${BRACKET_SIDE_TEAM_ROW_CLASS} text-neutral-500`}>
+        {teams.map((team) => (
+          <div
+            key={`${title}-${team.id}`}
+            className={`${BRACKET_SIDE_TEAM_ROW_CLASS} ${
+              hasHover
+                ? hoveredTeamId === team.id
+                  ? "border-neutral-500 text-white"
+                  : "opacity-55 text-neutral-400"
+                : "text-neutral-200"
+            }`}
+            onMouseEnter={() =>
+              onHoverTeam({
+                teamId: team.id,
+                matchId: team.id,
+                round: teamMaxRoundById.get(team.id) ?? Number.MAX_SAFE_INTEGER,
+              })
+            }
+            onMouseLeave={() => onHoverTeam(null)}
+          >
+            <BracketTeamIcon teamId={team.id} logoUrl={team.logoUrl} />
+            <span className="truncate text-sm">{team.name}</span>
+          </div>
+        ))}
+        {Array.from({ length: tbdCount }, (_, index) => (
+          <div
+            key={`${title}-tbd-${index}`}
+            className={`${BRACKET_SIDE_TEAM_ROW_CLASS} text-neutral-500`}
+          >
             <BracketTeamIcon teamId={null} />
             <span className="text-sm">TBD</span>
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
@@ -656,6 +726,30 @@ const SwissBracket = ({
     [rounds, matchCountByRound],
   );
 
+  const expectedMatchesByLabel = useMemo(
+    () => getSwissExpectedMatchesByLabel(labels),
+    [labels],
+  );
+
+  const teamCount = useMemo(() => {
+    const firstRound = rounds[0];
+    const firstRoundMatches = firstRound
+      ? (matchCountByRound.get(firstRound) ?? 0)
+      : 0;
+    if (firstRoundMatches > 0) return firstRoundMatches * 2;
+    if (registeredTeams.length > 0) return registeredTeams.length;
+    return expectedMatchesByLabel?.["0-0"]
+      ? expectedMatchesByLabel["0-0"] * 2
+      : 8;
+  }, [
+    rounds,
+    matchCountByRound,
+    registeredTeams.length,
+    expectedMatchesByLabel,
+  ]);
+
+  const outcomeSlotCount = teamCount / 2;
+
   const stageMatches = useMemo(() => {
     const stageByRound = new Map<number, string>();
     rounds.forEach((round, index) => {
@@ -679,7 +773,7 @@ const SwissBracket = ({
   const layoutInfo = useMemo(() => {
     const stageMetrics = new Map<string, StageMetrics>();
     const columnHeights = layout.map((column) =>
-      getColumnHeight(column, stageMatches),
+      getColumnHeight(column, stageMatches, expectedMatchesByLabel),
     );
 
     const contentHeight = Math.max(0, ...columnHeights);
@@ -691,7 +785,8 @@ const SwissBracket = ({
 
       column.forEach((label) => {
         const matches = stageMatches.get(label) ?? [];
-        const matchCount = Math.max(1, matches.length);
+        const expected = expectedMatchesByLabel?.[label];
+        const matchCount = expected ?? Math.max(1, matches.length);
         const wrapperHeight = getStageWrapperHeight(matchCount);
 
         stageMetrics.set(label, {
@@ -714,7 +809,7 @@ const SwissBracket = ({
       contentHeight,
       contentWidth,
     };
-  }, [layout, stageMatches]);
+  }, [layout, stageMatches, expectedMatchesByLabel]);
 
   const teamStageLabels = useMemo(() => {
     if (hoveredTeamId === null) return null;
@@ -842,7 +937,7 @@ const SwissBracket = ({
       }}
     >
       <div className="w-full">
-        <div className="flex items-start gap-4 min-w-max">
+        <div className="flex items-start min-w-max">
           <div
             className="relative shrink-0"
             style={{
@@ -858,33 +953,25 @@ const SwissBracket = ({
                 column.includes(label),
               );
               const matches = stageMatches.get(label) ?? [];
+              const expectedCount =
+                expectedMatchesByLabel?.[label] ??
+                Math.max(1, matches.length);
               const stageTitle = getSwissColumnRoundTitle(colIndex);
               const outcomeDots = buildSwissOutcomeDots(
                 label,
                 advanceWins,
                 eliminateLosses,
               );
-              const renderMatches = matches.length
-                ? matches
-                : [
-                    {
-                      id: -1,
-                      routeMatchId: -1,
-                      round: 0,
-                      matchNo: 0,
-                      teamAId: null,
-                      teamBId: null,
-                      winnerTeamId: null,
-                      p1: "TBD",
-                      p2: "TBD",
-                      p1Logo: null,
-                      p2Logo: null,
-                      s1: null,
-                      s2: null,
-                      winner: null,
-                      status: "scheduled",
-                    } as DisplayMatch,
-                  ];
+              const renderMatches =
+                matches.length >= expectedCount
+                  ? matches
+                  : [
+                      ...matches,
+                      ...Array.from(
+                        { length: expectedCount - matches.length },
+                        (_, index) => createTbdPlaceholder(label, index),
+                      ),
+                    ];
 
               return (
                 <div
@@ -913,7 +1000,7 @@ const SwissBracket = ({
                     className="flex min-h-0 flex-1 flex-col overflow-hidden"
                     style={{ gap: MATCH_GAP, marginTop: STAGE_HEADER_GAP }}
                   >
-                    {renderMatches.map((match) =>
+                    {renderMatches.map((match, index) =>
                       match.routeMatchId > 0 ? (
                         <MatchCard
                           key={match.id}
@@ -924,7 +1011,7 @@ const SwissBracket = ({
                         />
                       ) : (
                         <div
-                          key={`${label}-placeholder`}
+                          key={`${label}-placeholder-${index}`}
                           className="border border-neutral-600 bg-[#141414]"
                           style={{ width: CARD_W, height: CARD_H }}
                         />
@@ -941,12 +1028,14 @@ const SwissBracket = ({
             style={{
               width: STAGE_W,
               gap: STAGE_GAP,
+              marginLeft: SIDE_COL_GAP,
             }}
           >
             <div className="w-full">
               <TeamListCard
                 title="LỌT VÀO"
                 teams={teamProgress.advanced}
+                slotCount={outcomeSlotCount}
                 hoveredTeamId={hoveredTeamId}
                 onHoverTeam={setHover}
                 teamMaxRoundById={teamMaxRoundById}
@@ -956,6 +1045,7 @@ const SwissBracket = ({
               <TeamListCard
                 title="BỊ LOẠI"
                 teams={teamProgress.eliminated}
+                slotCount={outcomeSlotCount}
                 hoveredTeamId={hoveredTeamId}
                 onHoverTeam={setHover}
                 teamMaxRoundById={teamMaxRoundById}

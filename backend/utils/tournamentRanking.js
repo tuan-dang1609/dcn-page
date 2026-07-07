@@ -9,8 +9,15 @@ const toNumber = (value) => {
   return Number.isFinite(n) ? n : null;
 };
 
+let rankingTablesReadyPromise = null;
+
 const ensureRankingTables = async () => {
-  await pool.query(`
+  if (rankingTablesReadyPromise) {
+    return rankingTablesReadyPromise;
+  }
+
+  rankingTablesReadyPromise = (async () => {
+    await pool.query(`
     CREATE TABLE IF NOT EXISTS series_point_rules (
       id BIGSERIAL PRIMARY KEY,
       series_id BIGINT NOT NULL REFERENCES series(id) ON DELETE CASCADE,
@@ -90,6 +97,9 @@ const ensureRankingTables = async () => {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
+  })();
+
+  return rankingTablesReadyPromise;
 };
 
 const getTournamentRankingBracketId = async (tournamentId) => {
@@ -529,14 +539,32 @@ const upsertTournamentResults = async ({
     [tournamentId, ...teamIds],
   );
 
-  for (const item of rankings) {
+  if (!rankings.length) return;
+
+  const values = [];
+  const rowPlaceholders = rankings.map((item, index) => {
     const placement = toNumber(item.placement);
     const placementEnd = toNumber(item.placement_end) ?? placement;
     const placementLabel = item.placement_label ?? null;
     const points = isFinal && placement ? (pointMap.get(placement) ?? 0) : 0;
+    const offset = index * 8;
 
-    await pool.query(
-      `
+    values.push(
+      item.team_id,
+      placement,
+      placementEnd,
+      placementLabel,
+      points,
+      item.wins,
+      item.losses,
+      isFinal,
+    );
+
+    return `($1, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`;
+  });
+
+  await pool.query(
+    `
       INSERT INTO tournament_team_results (
         tournament_id,
         team_id,
@@ -549,7 +577,7 @@ const upsertTournamentResults = async ({
         is_final,
         calculated_at
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+      VALUES ${rowPlaceholders.join(", ")}
       ON CONFLICT (tournament_id, team_id)
       DO UPDATE SET
         placement = EXCLUDED.placement,
@@ -560,20 +588,9 @@ const upsertTournamentResults = async ({
         losses = EXCLUDED.losses,
         is_final = EXCLUDED.is_final,
         calculated_at = now()
-      `,
-      [
-        tournamentId,
-        item.team_id,
-        placement,
-        placementEnd,
-        placementLabel,
-        points,
-        item.wins,
-        item.losses,
-        isFinal,
-      ],
-    );
-  }
+    `,
+    [tournamentId, ...values],
+  );
 };
 
 const rebuildAchievements = async ({ tournamentId, rankings, isFinal }) => {
@@ -584,21 +601,43 @@ const rebuildAchievements = async ({ tournamentId, rankings, isFinal }) => {
 
   if (!isFinal) return;
 
-  for (const item of rankings) {
-    const payload = getAchievementPayload(item);
-    if (!payload) continue;
+  const achievementRows = rankings
+    .map((item) => {
+      const payload = getAchievementPayload(item);
+      if (!payload) return null;
 
-    const baseMeta = {
-      placement_start: item.placement,
-      placement_end: item.placement_end,
-      placement_label: item.placement_label,
-      wins: item.wins,
-      losses: item.losses,
-      played: item.played,
-    };
+      return {
+        team_id: item.team_id,
+        payload,
+        meta: {
+          placement_start: item.placement,
+          placement_end: item.placement_end,
+          placement_label: item.placement_label,
+          wins: item.wins,
+          losses: item.losses,
+          played: item.played,
+        },
+      };
+    })
+    .filter(Boolean);
 
-    await pool.query(
-      `
+  if (!achievementRows.length) return;
+
+  const values = [];
+  const rowPlaceholders = achievementRows.map((row, index) => {
+    const offset = index * 5;
+    values.push(
+      row.team_id,
+      row.payload.code,
+      row.payload.title,
+      row.payload.description,
+      JSON.stringify(row.meta),
+    );
+    return `($1, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}::jsonb)`;
+  });
+
+  await pool.query(
+    `
       INSERT INTO tournament_team_achievements (
         tournament_id,
         team_id,
@@ -607,22 +646,14 @@ const rebuildAchievements = async ({ tournamentId, rankings, isFinal }) => {
         description,
         meta
       )
-      VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+      VALUES ${rowPlaceholders.join(", ")}
       ON CONFLICT (tournament_id, team_id, code) DO UPDATE
       SET title = EXCLUDED.title,
           description = EXCLUDED.description,
           meta = EXCLUDED.meta
-      `,
-      [
-        tournamentId,
-        item.team_id,
-        payload.code,
-        payload.title,
-        payload.description,
-        JSON.stringify(baseMeta),
-      ],
-    );
-  }
+    `,
+    [tournamentId, ...values],
+  );
 };
 
 const rebuildSeriesTotals = async (seriesId) => {
@@ -827,6 +858,69 @@ export const recalculateTournamentResults = async (tournamentId) => {
     rankings,
     is_final: isFinal,
   };
+};
+
+const TOURNAMENT_RESULTS_SELECT = `
+  SELECT
+    r.tournament_id,
+    r.team_id,
+    r.placement,
+    r.placement_end,
+    r.placement_label,
+    r.points,
+    r.wins,
+    r.losses,
+    r.is_final,
+    r.calculated_at,
+    t.name,
+    t.short_name,
+    t.logo_url,
+    t.team_color_hex
+  FROM tournament_team_results r
+  JOIN teams t ON t.id = r.team_id
+  WHERE r.tournament_id = $1
+  ORDER BY r.wins DESC, r.losses ASC, r.placement ASC NULLS LAST, r.points DESC, t.id ASC
+`;
+
+/** Read cached BXH rows only — single SELECT, no schema migration. */
+export const fetchTournamentResultsRows = async (tournamentId) => {
+  const normalizedTournamentId = toNumber(tournamentId);
+  if (!normalizedTournamentId) {
+    throw new Error("tournament_id khong hop le");
+  }
+
+  const { rows } = await pool.query(TOURNAMENT_RESULTS_SELECT, [
+    normalizedTournamentId,
+  ]);
+  return rows;
+};
+
+/** Lightweight read for GET /results — no ensureRankingTables(). */
+export const readTournamentRankingBracketId = async (tournamentId) => {
+  const normalizedTournamentId = toNumber(tournamentId);
+  if (!normalizedTournamentId) return null;
+
+  const { rows } = await pool.query(
+    `
+    SELECT bracket_id
+    FROM tournament_ranking_brackets
+    WHERE tournament_id = $1
+    LIMIT 1
+    `,
+    [normalizedTournamentId],
+  );
+
+  return toNumber(rows[0]?.bracket_id);
+};
+
+/** Fire-and-forget recalc — dùng sau khi cập nhật score từ Score Control. */
+export const scheduleTournamentResultsRecalculate = (tournamentId) => {
+  const normalizedTournamentId = toNumber(tournamentId);
+  if (!normalizedTournamentId) {
+    return null;
+  }
+
+  return recalculateTournamentResults(normalizedTournamentId);
 };
 
 export {

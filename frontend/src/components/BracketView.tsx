@@ -25,6 +25,7 @@ import {
 } from "@/components/bracketConnectors";
 import {
   BRACKET_ROW_BASE_CLASS,
+  formatBracketSideScore,
   getBracketMatchCardHeight,
   getMatchCardConnectorY,
   getBracketRowStateClass,
@@ -347,6 +348,7 @@ interface PlayerRowProps {
   logo_url?: string | null;
   name: string;
   score: number | null;
+  otherScore: number | null;
   isWinner: boolean;
   isSelected?: boolean;
   pickState?: PickVisualState | null;
@@ -364,6 +366,7 @@ const PlayerRow = ({
   logo_url,
   name,
   score,
+  otherScore,
   isWinner,
   isSelected,
   pickState,
@@ -408,7 +411,7 @@ const PlayerRow = ({
         {name}
       </span>
       <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
-        {score !== null ? score : "-"}
+        {formatBracketSideScore(score, otherScore)}
       </span>
     </div>
   );
@@ -500,6 +503,7 @@ const MatchCard = ({
         logo_url={p1Logo}
         name={p1}
         score={s1}
+        otherScore={s2}
         isWinner={winner === p1}
         isSelected={selectedTeamId === teamAId}
         pickState={resolvePickState(teamAId)}
@@ -516,6 +520,7 @@ const MatchCard = ({
         logo_url={p2Logo}
         name={p2}
         score={s2}
+        otherScore={s1}
         isWinner={winner === p2}
         isSelected={selectedTeamId === teamBId}
         pickState={resolvePickState(teamBId)}

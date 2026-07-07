@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
+import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
 
 const teamTourRoute = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Tournament Teams";
@@ -272,6 +273,8 @@ teamTourRoute.post(
      RETURNING *`,
       [teamId, tournamentId],
     );
+
+    void recalculateTournamentResults(tournamentId).catch(() => {});
 
     set.status = 201;
     return teamTour[0];

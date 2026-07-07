@@ -7,61 +7,77 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  TOURNAMENT_NAV_LINK_ACTIVE,
+  TOURNAMENT_NAV_LINK_BASE,
+  TOURNAMENT_NAV_LINK_INACTIVE,
+  TOURNAMENT_NAV_WRAPPER_CLASS,
+} from "@/components/tournamentTheme";
 
 const Navigation = () => {
   const { game, slug } = useParams();
-  const basePath = game && slug ? `/tournament/${game}/${slug}` : "/tournament";
-
-  const links = [
-    { to: basePath, label: "Tổng quan" },
-    { to: `${basePath}/bracket`, label: "Nhánh đấu" },
-    { to: `${basePath}/participants`, label: "Danh sách" },
-    { to: `${basePath}/leaderboard`, label: "BXH" },
-    { to: `${basePath}/rule`, label: "Luật" },
-  ];
   const navigate = useNavigate();
   const location = useLocation();
+  const basePath = game && slug ? `/tournament/${game}/${slug}` : "/tournament";
+
+  const links = useMemo(
+    () => [
+      { to: basePath, label: "Tổng quan" },
+      { to: `${basePath}/bracket`, label: "Nhánh đấu" },
+      { to: `${basePath}/participants`, label: "Danh sách" },
+      { to: `${basePath}/leaderboard`, label: "BXH" },
+      { to: `${basePath}/rule`, label: "Luật" },
+    ],
+    [basePath],
+  );
 
   const selectedValue = useMemo(() => {
     const sorted = [...links].sort((a, b) => b.to.length - a.to.length);
-    const found = sorted.find((l) => location.pathname.startsWith(l.to));
+    const found = sorted.find((link) => location.pathname.startsWith(link.to));
     return found ? found.to : basePath;
   }, [location.pathname, links, basePath]);
 
+  const activeLabel =
+    links.find((link) => link.to === selectedValue)?.label ?? "Tổng quan";
+
   return (
-    <nav className="bg-card/50 backdrop-blur-sm border border-border rounded-lg">
-      <div className="hidden md:flex justify-center gap-1 p-1.5">
+    <nav className={TOURNAMENT_NAV_WRAPPER_CLASS}>
+      <div className="p-2 md:hidden">
+        <Select value={selectedValue} onValueChange={(value) => navigate(value)}>
+          <SelectTrigger className="h-10 w-full border-neutral-600 bg-[#1a1a1a] text-xs font-extrabold uppercase tracking-wide text-white">
+            <SelectValue placeholder={activeLabel}>{activeLabel}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {links.map((link) => (
+              <SelectItem
+                key={link.to}
+                value={link.to}
+                className="text-xs font-bold uppercase tracking-wide"
+              >
+                {link.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="hidden w-full md:flex">
         {links.map((link) => (
           <NavLink
             key={link.to}
             to={link.to}
             end={link.to === basePath}
             className={({ isActive }) =>
-              `px-5 py-2 font-semibold text-sm transition-all rounded-md ${
+              `${TOURNAMENT_NAV_LINK_BASE} ${
                 isActive
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  ? TOURNAMENT_NAV_LINK_ACTIVE
+                  : TOURNAMENT_NAV_LINK_INACTIVE
               }`
             }
           >
             {link.label}
           </NavLink>
         ))}
-      </div>
-
-      <div className="md:hidden p-2">
-        <Select value={selectedValue} onValueChange={(v) => navigate(v)}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Chọn mục" />
-          </SelectTrigger>
-          <SelectContent>
-            {links.map((l) => (
-              <SelectItem key={l.to} value={l.to}>
-                {l.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
     </nav>
   );

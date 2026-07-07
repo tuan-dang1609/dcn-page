@@ -1,10 +1,11 @@
 import {
-  Gamepad2,
-  Users,
-  UserCheck,
-  Trophy,
-  CalendarDays,
   CalendarCheck,
+  CalendarDays,
+  Gamepad2,
+  Trophy,
+  UserCheck,
+  Users,
+  type LucideIcon,
 } from "lucide-react";
 
 type TournamentInfo = {
@@ -23,11 +24,18 @@ type InfoGridProps = {
   isLoading?: boolean;
 };
 
+type InfoItem = {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  imageUrl?: string | null;
+};
+
 const formatDateTime = (value?: string) => {
-  if (!value) return "--";
+  if (!value) return "—";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--";
+  if (Number.isNaN(date.getTime())) return "—";
 
   return new Intl.DateTimeFormat("vi-VN", {
     weekday: "short",
@@ -42,7 +50,7 @@ const formatDateTime = (value?: string) => {
 };
 
 const displayValue = (isLoading: boolean, value: string) =>
-  isLoading ? "..." : value;
+  isLoading ? "…" : value;
 
 const parseVndAmounts = (text: string) => {
   const matches = text.matchAll(/(\d[\d.,\s]*)\s*VND/gi);
@@ -60,98 +68,94 @@ const parseVndAmounts = (text: string) => {
 };
 
 const formatTotalPrize = (prizes?: Array<{ prize?: string }>) => {
-  if (!prizes?.length) return "--";
+  if (!prizes?.length) return "—";
 
   const total = prizes.reduce(
     (sum, item) => sum + parseVndAmounts(String(item?.prize ?? "")),
     0,
   );
 
-  if (total <= 0) return "--";
+  if (total <= 0) return "—";
 
   return `${total.toLocaleString("vi-VN")} VND`;
 };
 
 const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
-  const infoItems = [
+  const infoItems: InfoItem[] = [
     {
       icon: Gamepad2,
-      label: "GAME",
+      label: "Game",
       value: displayValue(
         isLoading,
-        tournament?.game_name ?? tournament?.short_name ?? "--",
+        tournament?.game_name ?? tournament?.short_name ?? "—",
       ),
       imageUrl: tournament?.icon_game_url,
     },
     {
       icon: Users,
-      label: "SỐ NGƯỜI TRONG ĐỘI",
+      label: "Số người trong đội",
       value: displayValue(
         isLoading,
-        String(tournament?.max_player_per_team ?? "--"),
+        String(tournament?.max_player_per_team ?? "—"),
       ),
-      color: "bg-accent",
     },
     {
       icon: UserCheck,
-      label: "GIỚI HẠN",
+      label: "Giới hạn",
       value: displayValue(
         isLoading,
-        String(tournament?.max_participate ?? "--"),
+        String(tournament?.max_participate ?? "—"),
       ),
-      color: "bg-secondary",
     },
     {
       icon: Trophy,
-      label: "TỔNG GIẢI THƯỞNG",
+      label: "Tổng giải thưởng",
       value: displayValue(isLoading, formatTotalPrize(tournament?.prizes)),
-      color: "bg-accent",
     },
     {
       icon: CalendarDays,
-      label: "BẮT ĐẦU",
+      label: "Bắt đầu",
       value: displayValue(isLoading, formatDateTime(tournament?.date_start)),
-      color: "bg-success",
     },
     {
       icon: CalendarCheck,
-      label: "KẾT THÚC",
+      label: "Kết thúc",
       value: displayValue(isLoading, formatDateTime(tournament?.date_end)),
-      color: "bg-secondary",
     },
   ];
 
   return (
-    <div>
-      <h2 className="text-2xl mb-4 font-bold">Thông tin</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <section>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 xl:grid-cols-3">
         {infoItems.map((item) => (
           <div
             key={item.label}
-            className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 hover:border-primary/30 transition-colors"
+            className="flex min-h-[72px] items-center gap-2.5 border border-neutral-700 bg-[#141414] p-2.5 sm:min-h-[76px] sm:gap-3 sm:p-3"
           >
             {item.imageUrl ? (
               <img
                 src={item.imageUrl}
-                alt={`${item.label} icon`}
-                className="w-10 h-10  object-cover"
+                alt=""
+                className="h-10 w-10 shrink-0 object-contain sm:h-11 sm:w-11"
               />
             ) : (
-              <div className={` p-1 rounded-lg`}>
-                <item.icon className="w-8 h-8 text-foreground" />
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] sm:h-9 sm:w-9">
+                <item.icon className="h-4 w-4 text-neutral-200 sm:h-5 sm:w-5" />
               </div>
             )}
 
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widertext-[#EEEEEE]">
+            <div className="min-w-0 flex-1">
+              <p className="text-[9px] font-extrabold uppercase tracking-wider text-neutral-500 sm:text-[10px]">
                 {item.label}
               </p>
-              <p className="font-bold text-foreground">{item.value}</p>
+              <p className="mt-0.5 text-xs font-bold leading-snug text-white sm:text-sm">
+                <span className="line-clamp-2 break-words">{item.value}</span>
+              </p>
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 };
 

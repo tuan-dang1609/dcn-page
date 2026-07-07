@@ -1,24 +1,52 @@
 import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { Trash2 } from "lucide-react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  fetchTournamentTeamPlayers,
+  tournamentTeamPlayersQueryKey,
+} from "@/api/tournaments/queryFns";
 import { API_BASE } from "@/lib/apiBase";
 import { TOURNAMENT_LOGO } from "@/data/tournament";
+import {
+  TOURNAMENT_PANEL_CLASS,
+  TOURNAMENT_TABLE_HEADER_CLASS,
+  TOURNAMENT_TABLE_HEADER_ROW_CLASS,
+  TOURNAMENT_TABLE_ROW_CLASS,
+} from "@/components/tournamentTheme";
 
 type TeamMember = {
-  id: number | string;
+  tournament_team_player_id?: number | string;
+  user_id?: number | string;
+  id?: number | string;
   username?: string;
   nickname?: string | null;
   riot_account?: string | null;
   profile_picture?: string | null;
   real_name?: string | null;
+  role_in_team?: string | null;
 };
 
-type TeamDetailsResponse = {
-  players?: TeamMember[];
+const getMemberKey = (member: TeamMember, index: number) =>
+  String(
+    member.tournament_team_player_id ??
+      member.user_id ??
+      member.id ??
+      `member-${index}`,
+  );
+
+const getMemberUserId = (member: TeamMember) => {
+  const raw = member.user_id ?? member.id;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 interface TeamRosterDialogProps {
@@ -28,6 +56,7 @@ interface TeamRosterDialogProps {
   teamName?: string | null;
   teamShortName?: string | null;
   teamLogoUrl?: string | null;
+  showRiotId?: boolean;
 }
 
 const getInitials = (name?: string | null) => {
@@ -38,6 +67,115 @@ const getInitials = (name?: string | null) => {
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 };
 
+/** Avatar in roster modal — responsive size. */
+const ROSTER_MEMBER_AVATAR_CLASS =
+  "flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center overflow-hidden border border-neutral-600 bg-[#2d2d2d] text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-neutral-300";
+
+/** ~5 member rows visible; scales with viewport on mobile. */
+const ROSTER_BODY_MAX_HEIGHT_CLASS =
+  "max-h-[min(17.5rem,calc(100dvh-13rem))] sm:max-h-[min(19rem,calc(88vh-12rem))]";
+
+const ROSTER_TABLE_CLASS = "w-full min-w-[16rem] border-collapse table-fixed sm:min-w-0";
+
+const ROSTER_TABLE_HEADER_TH = `${TOURNAMENT_TABLE_HEADER_CLASS} px-3 py-3 sm:px-4 min-h-[2.75rem] sm:min-h-[3rem] align-middle`;
+
+const ROSTER_TABLE_BODY_TD =
+  "px-3 py-3 sm:px-4 sm:py-3.5 align-middle min-h-[3.25rem] sm:min-h-[3.5rem]";
+
+const RosterMembersTable = ({
+  members,
+  showRiotId,
+}: {
+  members: TeamMember[];
+  showRiotId: boolean;
+}) => {
+  const colGroup = (
+    <colgroup>
+      <col className="w-11 sm:w-12" />
+      <col />
+      {showRiotId ? <col className="w-[7.5rem] sm:w-[11rem]" /> : null}
+    </colgroup>
+  );
+
+  const headerRow = (
+    <tr className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
+      <th className={`${ROSTER_TABLE_HEADER_TH} w-12`} />
+      <th className={`${ROSTER_TABLE_HEADER_TH} whitespace-nowrap text-left`}>
+        Thành viên
+      </th>
+      {showRiotId ? (
+        <th className={`${ROSTER_TABLE_HEADER_TH} whitespace-nowrap text-left`}>
+          Riot ID
+        </th>
+      ) : null}
+    </tr>
+  );
+
+  return (
+    <div className="w-full min-w-0 overflow-hidden border border-neutral-700">
+      <div className="overflow-x-auto">
+        <table className={ROSTER_TABLE_CLASS}>
+          {colGroup}
+          <thead>{headerRow}</thead>
+        </table>
+      </div>
+      <div
+        className={`overflow-x-auto overflow-y-auto border-t border-neutral-700 ${ROSTER_BODY_MAX_HEIGHT_CLASS}`}
+      >
+        <table className={ROSTER_TABLE_CLASS}>
+          {colGroup}
+          <tbody>
+            {members.map((member, index) => {
+              const displayName = member.nickname || member.username || "—";
+              const riotAccount = String(member.riot_account ?? "").trim();
+
+              return (
+                <tr
+                  key={getMemberKey(member, index)}
+                  className={TOURNAMENT_TABLE_ROW_CLASS}
+                >
+                  <td className={`${ROSTER_TABLE_BODY_TD} w-11 sm:w-12`}>
+                    <div className={ROSTER_MEMBER_AVATAR_CLASS}>
+                      {member.profile_picture ? (
+                        <img
+                          src={member.profile_picture}
+                          alt={displayName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        getInitials(displayName)
+                      )}
+                    </div>
+                  </td>
+                  <td className={ROSTER_TABLE_BODY_TD}>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold text-white">
+                        {displayName}
+                      </div>
+                      {member.real_name ? (
+                        <div className="truncate text-xs text-neutral-400">
+                          {member.real_name}
+                        </div>
+                      ) : null}
+                    </div>
+                  </td>
+                  {showRiotId ? (
+                    <td className={ROSTER_TABLE_BODY_TD}>
+                      <div className="truncate font-mono text-xs sm:text-sm text-neutral-200">
+                        {riotAccount || "—"}
+                      </div>
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 const TeamRosterDialog = ({
   open,
   onOpenChange,
@@ -45,91 +183,39 @@ const TeamRosterDialog = ({
   teamName,
   teamShortName,
   teamLogoUrl,
+  showRiotId = false,
 }: TeamRosterDialogProps) => {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [members, setMembers] = useState<TeamMember[]>([]);
+  const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
   const [removing, setRemoving] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const { user, token } = useAuth();
+  const { token } = useAuth();
 
-  useEffect(() => {
-    if (!open || !teamId) {
-      setMembers([]);
-      setError(null);
-      return;
-    }
+  const {
+    data: teamData,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: tournamentTeamPlayersQueryKey(teamId ?? undefined),
+    queryFn: () => fetchTournamentTeamPlayers(teamId!),
+    enabled: teamId !== null && teamId !== undefined && teamId !== "",
+    staleTime: 60_000,
+  });
 
-    let mounted = true;
+  const members: TeamMember[] = Array.isArray(teamData?.players)
+    ? (teamData.players as TeamMember[])
+    : [];
 
-    const loadTeam = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await axios.get<TeamDetailsResponse>(
-          `${API_BASE}/api/tournaments/team/players/${teamId}`,
-        );
-        if (!mounted) return;
-        setMembers(
-          Array.isArray(res.data?.players)
-            ? (res.data?.players as unknown as TeamMember[])
-            : [],
-        );
-      } catch (err) {
-        if (!mounted) return;
-        setMembers([]);
-        setError("Không tải được danh sách đội.");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    void loadTeam();
-    // refresh when requested
-
-    return () => {
-      mounted = false;
-    };
-  }, [open, teamId]);
-
-  useEffect(() => {
-    if (!open || !teamId) return;
-    // trigger reload when refreshKey changes
-    let mounted = true;
-    const reload = async () => {
-      try {
-        const res = await axios.get<TeamDetailsResponse>(
-          `${API_BASE}/api/tournaments/team/players/${teamId}`,
-        );
-        if (!mounted) return;
-        setMembers(
-          Array.isArray(res.data?.players)
-            ? (res.data?.players as unknown as TeamMember[])
-            : [],
-        );
-      } catch {
-        if (!mounted) return;
-        setError("Không tải được danh sách đội.");
-      }
-    };
-
-    void reload();
-
-    return () => {
-      mounted = false;
-    };
-  }, [refreshKey, open, teamId]);
-
-  // listen for global updates when members change elsewhere
   useEffect(() => {
     const handler = (e: Event) => {
       try {
         const custom = e as CustomEvent<{ teamId?: number | string }>;
         if (!custom?.detail) return;
         if (String(custom.detail.teamId) === String(teamId)) {
-          setRefreshKey((k) => k + 1);
+          void queryClient.invalidateQueries({
+            queryKey: tournamentTeamPlayersQueryKey(teamId ?? undefined),
+          });
         }
       } catch {
         // ignore
@@ -142,105 +228,95 @@ const TeamRosterDialog = ({
         "team:members-updated",
         handler as EventListener,
       );
-  }, [teamId]);
+  }, [queryClient, teamId]);
+
+  const dialogTitle = teamName
+    ? `Thành viên — ${teamName}`
+    : "Thành viên đội";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        style={{ backgroundColor: "#000" }}
-        className="sm:max-w-7xl max-w-[95vw] border-slate-700 text-slate-100"
+        disableAnimation
+        className={`${TOURNAMENT_PANEL_CLASS} flex w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] max-h-[min(100dvh-1rem,34rem)] flex-col gap-0 overflow-hidden rounded-none border-neutral-700 p-0 text-neutral-200 sm:w-full sm:max-w-3xl sm:max-h-[min(88vh,34rem)]`}
       >
-        <div className="p-4 border-b border-slate-800">
-          <div className="flex items-center gap-6">
-            <img
-              src={teamLogoUrl || TOURNAMENT_LOGO}
-              alt={teamName || "Team logo"}
-              className="w-20 h-20 rounded-full object-cover"
-            />
-            <div className="flex-1">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold">
-                    {teamName || "Đội chưa có tên"}
-                  </h2>
-                  {teamShortName ? (
-                    <p className="text-sm text-slate-300">{teamShortName}</p>
-                  ) : null}
-                </div>
-              </div>
+        <DialogTitle className="sr-only">{dialogTitle}</DialogTitle>
+
+        <div className="z-20 shrink-0 border-b border-neutral-700 bg-[#141414] px-3 py-3.5 pr-11 sm:px-5 sm:py-4 sm:pr-12">
+          <div className="flex items-center gap-3 sm:gap-3.5">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] sm:h-14 sm:w-14">
+              <img
+                src={teamLogoUrl || TOURNAMENT_LOGO}
+                alt={teamName || "Team logo"}
+                className="h-9 w-9 object-contain sm:h-10 sm:w-10"
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-base font-extrabold uppercase text-white leading-snug sm:text-[19px]">
+                {teamName || "Đội chưa có tên"}
+              </p>
+              {teamShortName ? (
+                <p className="mt-1 truncate text-[11px] font-semibold uppercase text-neutral-400 sm:text-xs">
+                  {teamShortName}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
 
-        <div className="p-6">
-          {loading ? (
-            <p className="text-sm text-slate-300">
+        <div className="flex min-h-0 flex-1 flex-col px-3 py-3 sm:px-5">
+          {open && isLoading ? (
+            <p className="text-sm text-neutral-400">
               Đang tải danh sách thành viên...
             </p>
           ) : null}
-          {error ? <p className="text-sm text-red-300">{error}</p> : null}
+          {open && isError ? (
+            <p className="text-sm text-rose-400">
+              Không tải được danh sách đội.
+            </p>
+          ) : null}
 
-          {!loading && !error ? (
-            <div>
+          {open && !isLoading && !isError ? (
+            <>
               {members.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                  {members.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center gap-4 rounded-md  border border-slate-700 px-4 py-3 w-full"
-                    >
-                      <div className="w-14 h-14 rounded-full overflow-hidden  flex items-center justify-center shrink-0">
-                        {member.profile_picture ? (
-                          <img
-                            src={member.profile_picture}
-                            alt={member.nickname || member.username}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="bg-slate-700 w-full h-full flex items-center justify-center text-slate-100 font-semibold text-base">
-                            {getInitials(member.nickname ?? member.username)}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-white truncate">
-                          {member.nickname || member.username}
-                        </div>
-                        {member.real_name ? (
-                          <div className="text-xs text-slate-400 truncate">
-                            {member.real_name}
-                          </div>
-                        ) : null}
-                        <div className="text-xs text-sky-300 mt-1 truncate">
-                          Riot ID: {member.riot_account ?? "N/A"}
-                        </div>
-                      </div>
-                      {/* delete action intentionally removed from roster dialog */}
-                    </div>
-                  ))}
-                </div>
+                <RosterMembersTable
+                  members={members}
+                  showRiotId={showRiotId}
+                />
               ) : (
-                <div className="rounded-md border border-dashed border-slate-700 bg-slate-900/50 px-4 py-6 text-center text-sm text-slate-300">
-                  Team chưa có thành viên.
+                <div className="border border-dashed border-neutral-700 bg-[#111111] px-4 py-8 text-center text-sm text-neutral-400">
+                  Đội chưa có thành viên.
                 </div>
               )}
-
-              <div className="mt-6 flex justify-end">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>
-                  Đóng
-                </Button>
-              </div>
-            </div>
+            </>
           ) : null}
         </div>
+
+        {open && !isLoading && !isError ? (
+          <div className="z-20 shrink-0 border-t border-neutral-700 bg-[#141414] px-3 py-3 sm:px-5">
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                className="w-full border-neutral-600 bg-transparent text-neutral-200 hover:bg-[#1c1c1c] hover:text-white sm:w-auto"
+              >
+                Đóng
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </DialogContent>
-      {/* Confirm remove modal */}
+
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="sm:max-w-sm max-w-[90vw] border-slate-700 text-slate-100">
-          <div className="p-4">
-            <h3 className="text-lg font-semibold">Xác nhận xóa đồng đội</h3>
-            <p className="text-sm text-slate-300 mt-2">
+        <DialogContent
+          disableAnimation
+          className={`${TOURNAMENT_PANEL_CLASS} sm:max-w-sm max-w-[90vw] rounded-none border-neutral-700 text-neutral-200`}
+        >
+          <DialogTitle className="text-lg font-bold uppercase tracking-wide text-white">
+            Xác nhận xóa đồng đội
+          </DialogTitle>
+          <div className="p-4 pt-0">
+            <p className="mt-2 text-sm text-neutral-400">
               Bạn có chắc muốn xóa <strong>{memberToRemove?.username}</strong>{" "}
               khỏi team không? Hành động này sẽ gỡ họ khỏi team.
             </p>
@@ -250,6 +326,7 @@ const TeamRosterDialog = ({
                 variant="outline"
                 onClick={() => setConfirmOpen(false)}
                 disabled={removing}
+                className="border-neutral-600 bg-transparent text-neutral-200"
               >
                 Hủy
               </Button>
@@ -258,13 +335,13 @@ const TeamRosterDialog = ({
                   if (!teamId || !memberToRemove) return;
                   setRemoving(true);
                   try {
-                    // compute remaining member ids (exclude memberToRemove)
                     const remaining = members
-                      .map((m) => Number(m.id))
+                      .map((m) => getMemberUserId(m))
                       .filter(
-                        (id) =>
-                          Number.isFinite(id) &&
-                          id !== Number(memberToRemove.id),
+                        (id): id is number =>
+                          id !== null &&
+                          id !==
+                            getMemberUserId(memberToRemove),
                       );
 
                     await axios.patch(
@@ -284,7 +361,7 @@ const TeamRosterDialog = ({
                     });
                     setConfirmOpen(false);
                     setMemberToRemove(null);
-                    setRefreshKey((k) => k + 1);
+                    await refetch();
                     try {
                       window.dispatchEvent(
                         new CustomEvent("team:members-updated", {
@@ -294,7 +371,7 @@ const TeamRosterDialog = ({
                     } catch {
                       /* ignore */
                     }
-                  } catch (err) {
+                  } catch {
                     toast({
                       title: "Không thể xóa",
                       description: "Vui lòng thử lại.",
@@ -304,7 +381,7 @@ const TeamRosterDialog = ({
                     setRemoving(false);
                   }
                 }}
-                className="bg-red-600 text-white"
+                className="bg-rose-700 text-white hover:bg-rose-600"
                 disabled={removing}
               >
                 {removing ? "Đang xóa..." : "Xác nhận xóa"}

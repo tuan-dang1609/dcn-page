@@ -3,6 +3,7 @@ import swagger from "@elysiajs/swagger";
 import { testConnection } from "./utils/db.js";
 import logger from "./utils/logger.js";
 import middleware from "./utils/middleware.js";
+import { ensureRankingTables } from "./utils/tournamentRanking.js";
 
 import userRouter from "./controllers/users.js";
 import loginRouter from "./controllers/login.js";
@@ -17,6 +18,7 @@ import roundRouter from "./controllers/tournaments/rounds.js";
 import teamTourRoute from "./controllers/tournaments/tournament_team.js";
 import playerTourRoute from "./controllers/tournaments/tournament_team_player.js";
 import matchRouter from "./controllers/tournaments/matches.js";
+import aovStatsRouter from "./controllers/tournaments/aovMatchStats.js";
 import bracketRouter from "./controllers/tournaments/brackets.js";
 import seriesRouter from "./controllers/series.js";
 import pickemRouter from "./controllers/pickem.js";
@@ -66,6 +68,7 @@ const defaultAllowedOrigins = [
   "https://dcn-page.vercel.app",
   "https://dcntournament.vercel.app",
   "https://dcn-page.onrender.com",
+  "https://dcn-page-hmek.onrender.com",
   process.env.FRONTEND_URL,
   process.env.FRONTEND_ORIGIN,
 ];
@@ -198,7 +201,9 @@ const app = new Elysia()
   .group("/api/tournaments/teams", (app) => app.use(teamTourRoute))
   .group("/api/tournaments/team/players", (app) => app.use(playerTourRoute))
   .group("/api/tournaments/brackets", (app) => app.use(bracketRouter))
-  .group("/api/tournaments/matches", (app) => app.use(matchRouter))
+  .group("/api/tournaments/matches", (app) =>
+    app.use(matchRouter).use(aovStatsRouter),
+  )
   .use(middleware.unknownEndpoint)
   .use(middleware.errorHandler);
 
@@ -206,6 +211,9 @@ const app = new Elysia()
   try {
     await testConnection();
     logger.info("connected to Postgres");
+    void ensureRankingTables().catch((err) => {
+      logger.error("ranking tables init failed:", err.message);
+    });
   } catch (err) {
     logger.error("error connecting to Postgres:", err.message);
   }

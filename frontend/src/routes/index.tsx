@@ -25,6 +25,7 @@ const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const SignupPage = lazy(() => import("@/pages/SignupPage"));
 const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
 const ScoreControlPage = lazy(() => import("@/pages/ScoreControlPage"));
+const AovStatsImportPage = lazy(() => import("@/pages/AovStatsImportPage"));
 const TournamentSetupPage = lazy(() => import("@/pages/TournamentSetupPage"));
 const BracketSetupPage = lazy(() => import("@/pages/BracketSetupPage"));
 const MatchDetailPage = lazy(() => import("@/pages/MatchDetailPage"));
@@ -86,6 +87,10 @@ const routes = [
   {
     path: "/ops/score-control",
     element: withTitle(withSuspense(<ScoreControlPage />), "Điều khiển điểm"),
+  },
+  {
+    path: "/ops/aov-import",
+    element: withTitle(withSuspense(<AovStatsImportPage />), "Tạo match_id AOV"),
   },
   {
     path: "/ops/tournament-setup",

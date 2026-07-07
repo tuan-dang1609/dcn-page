@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import {
-  getTournamentResults,
-  type TournamentTeamResult,
-} from "@/api/tournaments";
+  fetchTournamentLeaderboardEnvelope,
+  tournamentLeaderboardQueryKey,
+} from "@/api/tournaments/queryFns";
+import type { TournamentTeamResult } from "@/api/tournaments";
 import {
   Table,
   TableHeader,
@@ -17,7 +18,9 @@ import {
   TOURNAMENT_PAGE_TITLE_CLASS,
   TOURNAMENT_PANEL_CLASS,
   TOURNAMENT_TABLE_HEADER_CLASS,
-  TOURNAMENT_TABLE_ROW_CLASS,
+  TOURNAMENT_TABLE_HEADER_ROW_CLASS,
+  TOURNAMENT_TABLE_MIN_CLASS,
+  TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS,
 } from "@/components/tournamentTheme";
 
 const medals = ["🥇", "🥈", "🥉"];
@@ -47,17 +50,13 @@ const LeaderboardPage = () => {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["tournament-leaderboard", tournamentId],
+    queryKey: tournamentLeaderboardQueryKey(tournamentId),
     enabled: Boolean(tournamentId),
-    queryFn: async () => {
-      const response = await getTournamentResults(tournamentId!);
-      return response.data;
-    },
-    staleTime: 15000,
+    queryFn: async () => fetchTournamentLeaderboardEnvelope(tournamentId!),
+    staleTime: 60000,
   });
 
   const leaderboard = leaderboardEnvelope?.data ?? [];
-  const rankingBracketId = leaderboardEnvelope?.ranking_bracket_id ?? null;
 
   return (
     <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
@@ -79,23 +78,33 @@ const LeaderboardPage = () => {
         </p>
       ) : null}
 
-      <div className={`${TOURNAMENT_PANEL_CLASS} overflow-x-auto`}>
-        <Table className="min-w-[680px]">
+      <div className={`${TOURNAMENT_PANEL_CLASS} w-full overflow-x-auto`}>
+        <Table className={TOURNAMENT_TABLE_MIN_CLASS}>
           <TableHeader>
-            <TableRow className={TOURNAMENT_TABLE_HEADER_CLASS}>
-              <TableHead className="w-24 text-center whitespace-nowrap">
+            <TableRow className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
+              <TableHead
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-24 text-center whitespace-nowrap`}
+              >
                 Hạng
               </TableHead>
-              <TableHead className="min-w-[260px] whitespace-nowrap">
+              <TableHead
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} min-w-[260px] whitespace-nowrap`}
+              >
                 Đội
               </TableHead>
-              <TableHead className="w-20 text-center whitespace-nowrap">
+              <TableHead
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-20 text-center whitespace-nowrap`}
+              >
                 Thắng
               </TableHead>
-              <TableHead className="w-20 text-center whitespace-nowrap">
+              <TableHead
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-20 text-center whitespace-nowrap`}
+              >
                 Thua
               </TableHead>
-              <TableHead className="w-28 text-center whitespace-nowrap">
+              <TableHead
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-28 text-center whitespace-nowrap`}
+              >
                 Điểm Thưởng
               </TableHead>
             </TableRow>
@@ -103,13 +112,21 @@ const LeaderboardPage = () => {
           <TableBody>
             {leaderboard.map((row: TournamentTeamResult) => {
               const placementText = row.placement_label ?? "-";
+              const medal = toMedal(row.placement_label);
               return (
                 <TableRow
                   key={`${row.tournament_id}-${row.team_id}`}
-                  className={TOURNAMENT_TABLE_ROW_CLASS}
+                  className={TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS}
                 >
                   <TableCell className="text-center font-bold text-base">
-                    {` ${placementText}`}
+                    {medal ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span aria-hidden>{medal}</span>
+                        <span>{placementText}</span>
+                      </span>
+                    ) : (
+                      placementText
+                    )}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
                     <div className="flex items-center gap-2">

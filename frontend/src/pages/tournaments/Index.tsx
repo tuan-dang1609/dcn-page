@@ -5,6 +5,7 @@ import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
+import { useTournamentPrefetch } from "@/hooks/useTournamentPrefetch";
 import { TOURNAMENT_PAGE_BG_CLASS } from "@/components/tournamentTheme";
 import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
 
@@ -24,6 +25,7 @@ const Layout = () => {
   const isRulePage = Boolean(useMatch("/tournament/:game/:slug/rule"));
   const { game, slug } = useParams();
   const { tournament, isLoading, error, refetch } = useTournamentBySlug(game, slug);
+  useTournamentPrefetch(tournament?.id, tournament?.registered);
   const location = useLocation();
 
   const tournamentTitle = tournament?.name?.trim() || "Giải đấu";
@@ -88,17 +90,21 @@ const Layout = () => {
     <div className="min-h-screen bg-background">
       <div className="space-y-8">
         <HeroBanner tournament={tournament} />
-        <div className="px-4 md:px-8 mb-10">
-          <Navigation />
+        <div className="flex justify-center px-4 md:px-8">
+          <div className="w-full max-w-4xl">
+            <Navigation />
+          </div>
         </div>
-        <div className="px-4 md:px-8">
+        <div className="px-4 md:px-8 pb-10">
           {isTournamentHome ? (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-8">
+            <div
+              className={`grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px] lg:gap-8 ${TOURNAMENT_PAGE_BG_CLASS}`}
+            >
+              <div className="min-w-0 space-y-6">
                 <InfoGrid tournament={tournament} isLoading={isLoading} />
                 <Timeline tournament={tournament} />
               </div>
-              <div>
+              <div className="min-w-0">
                 <Sidebar tournament={tournament} isLoading={isLoading} />
               </div>
             </div>

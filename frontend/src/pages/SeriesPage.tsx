@@ -561,10 +561,10 @@ const SeriesPage = () => {
                 gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
               }}
             >
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase  text-[#EEEEEE] neo-leaderboard-header">
                 #
               </div>
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] neo-leaderboard-header">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase  text-[#EEEEEE] neo-leaderboard-header">
                 Đội tuyển
               </div>
               {completedTournamentIds.map((tid) => {
@@ -579,7 +579,7 @@ const SeriesPage = () => {
                   </div>
                 );
               })}
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.12em] text-[#EEEEEE] text-right">
+              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase  text-[#EEEEEE] text-right">
                 Tổng
               </div>
             </div>

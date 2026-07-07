@@ -3,7 +3,9 @@ import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
 import {
   ensureRankingTables,
+  fetchTournamentResultsRows,
   getTournamentRankingBracketId,
+  readTournamentRankingBracketId,
   recalculateTournamentResults,
   setTournamentRankingBracketId,
 } from "../../utils/tournamentRanking.js";
@@ -410,9 +412,15 @@ tournamentRouter.patch(
   },
 );
 
+const parseRefreshFlag = (query) =>
+  query?.refresh === "1" ||
+  query?.refresh === "true" ||
+  query?.recalculate === "1" ||
+  query?.recalculate === "true";
+
 tournamentRouter.get(
   "/:tournament_id/results",
-  async ({ params, set }) => {
+  async ({ params, query, set, user }) => {
     const tournamentId = Number(params.tournament_id);
 
     if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
@@ -420,49 +428,56 @@ tournamentRouter.get(
       return { error: "tournament_id không hợp lệ" };
     }
 
-    await ensureRankingTables();
-    const recalculated = await recalculateTournamentResults(tournamentId);
+    if (parseRefreshFlag(query)) {
+      const permission = await ensureTournamentManagePermission(
+        user,
+        tournamentId,
+        set,
+      );
+      if (!permission.ok) return permission.error;
 
-    const { rows } = await pool.query(
-      `
-      SELECT
-        r.tournament_id,
-        r.team_id,
-        r.placement,
-        r.placement_end,
-        r.placement_label,
-        r.points,
-        r.wins,
-        r.losses,
-        r.is_final,
-        r.calculated_at,
-        t.name,
-        t.short_name,
-        t.logo_url,
-        t.team_color_hex
-      FROM tournament_team_results r
-      JOIN teams t ON t.id = r.team_id
-      WHERE r.tournament_id = $1
-      ORDER BY r.wins DESC, r.losses ASC, r.placement ASC NULLS LAST, r.points DESC, t.id ASC
-      `,
-      [tournamentId],
-    );
+      const recalculated = await recalculateTournamentResults(tournamentId);
+      const rows = await fetchTournamentResultsRows(tournamentId);
+
+      set.status = 200;
+      return {
+        ranking_bracket_id: recalculated.ranking_bracket_id ?? null,
+        data: rows,
+      };
+    }
+
+    const [rankingBracketId, rows] = await Promise.all([
+      readTournamentRankingBracketId(tournamentId),
+      fetchTournamentResultsRows(tournamentId),
+    ]);
 
     set.status = 200;
     return {
-      ranking_bracket_id: recalculated.ranking_bracket_id ?? null,
+      ranking_bracket_id: rankingBracketId,
       data: rows,
     };
   },
   {
     tags: [TAG],
     summary: "Get tournament team results (placement + points)",
+    detail: {
+      parameters: [
+        {
+          name: "refresh",
+          in: "query",
+          required: false,
+          schema: { type: "string", example: "1" },
+          description:
+            "Admin only: force recalculate before read (?refresh=1)",
+        },
+      ],
+    },
   },
 );
 
 tournamentRouter.get(
   "/:tournament_id/achievements",
-  async ({ params, set }) => {
+  async ({ params, query, set, user }) => {
     const tournamentId = Number(params.tournament_id);
 
     if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
@@ -470,10 +485,19 @@ tournamentRouter.get(
       return { error: "tournament_id không hợp lệ" };
     }
 
-    await ensureRankingTables();
-    const recalculated = await recalculateTournamentResults(tournamentId);
+    if (parseRefreshFlag(query)) {
+      const permission = await ensureTournamentManagePermission(
+        user,
+        tournamentId,
+        set,
+      );
+      if (!permission.ok) return permission.error;
+      await recalculateTournamentResults(tournamentId);
+    }
 
-    const { rows } = await pool.query(
+    const [rankingBracketId, { rows }] = await Promise.all([
+      readTournamentRankingBracketId(tournamentId),
+      pool.query(
       `
       SELECT
         a.tournament_id,
@@ -498,8 +522,9 @@ tournamentRouter.get(
       WHERE a.tournament_id = $1
       ORDER BY r.placement ASC NULLS LAST, t.id ASC, a.code ASC
       `,
-      [tournamentId],
-    );
+        [tournamentId],
+      ),
+    ]);
 
     const normalizedRows = rows.map((row) => ({
       ...row,
@@ -508,7 +533,7 @@ tournamentRouter.get(
 
     set.status = 200;
     return {
-      ranking_bracket_id: recalculated.ranking_bracket_id ?? null,
+      ranking_bracket_id: rankingBracketId,
       data: normalizedRows,
     };
   },

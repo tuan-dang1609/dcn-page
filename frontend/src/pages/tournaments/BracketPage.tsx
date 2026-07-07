@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import {
-  getBracketsByTournamentId,
-  type Bracket,
-} from "@/api/tournaments/index";
+  fetchNormalizedTournamentBrackets,
+  tournamentBracketsQueryKey,
+} from "@/api/tournaments/queryFns";
+import { type Bracket } from "@/api/tournaments/index";
 import SingleElimBracket from "@/components/BracketView";
 import DoubleElimBracket from "@/components/DoubleElimBracket";
 import SwissBracket from "@/components/SwissBracket";
@@ -57,23 +58,10 @@ const BracketPage = () => {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["tournament-brackets", tournament?.id],
+    queryKey: tournamentBracketsQueryKey(tournament?.id),
     enabled: Boolean(tournament?.id),
-    queryFn: async () => {
-      const response = await getBracketsByTournamentId(tournament!.id!);
-      const items = response.data?.data ?? [];
-
-      return items
-        .map((bracket) => ({
-          ...bracket,
-          id: toNumber(bracket.id),
-          format_id: toNumber(bracket.format_id),
-        }))
-        .filter(
-          (bracket): bracket is Bracket & { id: number; format_id: number } =>
-            Number.isFinite(bracket.id) && Number.isFinite(bracket.format_id),
-        );
-    },
+    queryFn: async () =>
+      fetchNormalizedTournamentBrackets(tournament!.id!),
     staleTime: Number.POSITIVE_INFINITY,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
