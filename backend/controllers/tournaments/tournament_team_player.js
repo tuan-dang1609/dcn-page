@@ -29,6 +29,7 @@ playerTourRoute.get(
       SELECT
         ttp.id AS tournament_team_player_id,
         u.id AS user_id,
+        u.username,
         u.nickname,
         u.profile_picture,
         u.riot_account,

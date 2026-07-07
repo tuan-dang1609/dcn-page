@@ -4,6 +4,7 @@ import type {
   Bracket,
   DataEnvelope,
   Match,
+  MatchLinkedPlayersResponse,
   TournamentTeamPlayersResponse,
   Tournament,
   TournamentBySlugResponse,
@@ -412,6 +413,11 @@ export const getMatchGameIds = (matchId: number | string) =>
     getAuthConfig(),
   );
 
+export const getMatchLinkedPlayers = (matchId: number | string) =>
+  axios.get<DataEnvelope<MatchLinkedPlayersResponse>>(
+    `${tournamentsBaseUrl}/matches/matches/${matchId}/linked-players`,
+  );
+
 export const createMatchGameId = (
   matchId: number | string,
   payload: UpsertMatchGameIdPayload,
@@ -556,6 +562,8 @@ export type {
   Bracket,
   DataEnvelope,
   Match,
+  MatchLinkedPlayersResponse,
+  MatchLinkedPlayer,
   TournamentTeamPlayersResponse,
   Tournament,
   TournamentBySlugResponse,

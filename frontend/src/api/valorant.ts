@@ -1,5 +1,5 @@
-﻿import axios from "axios";
-import { bigTournamentApiUrl } from "@/lib/bigtournamentApi";
+import axios from "axios";
+import { apiUrl } from "@/lib/apiBase";
 
 export interface ValorantApiPlayerStats {
   multiKills?: number;
@@ -61,9 +61,9 @@ export interface ValorantMatchDataResponse {
   matchData: ValorantApiMatchData;
 }
 
-const VALORANT_MATCH_BASE_URL = bigTournamentApiUrl(
-  "/api/auth/valorant/matchdata",
-);
-
 export const getValorantMatchData = (matchId: string) =>
-  axios.get<ValorantMatchDataResponse>(`${VALORANT_MATCH_BASE_URL}/${matchId}`);
+  axios.get<ValorantMatchDataResponse>(
+    apiUrl(
+      `/api/tournaments/matches/external/valorant/${encodeURIComponent(matchId)}`,
+    ),
+  );
