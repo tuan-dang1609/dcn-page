@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import axios from "axios";
-import type { MatchDetail, RoundHistoryEntry } from "@/types/matchDetail";
+import type { MatchDetail, RoundHistoryEntry, AovGameRoster } from "@/types/matchDetail";
 import { useAuth, type User as AuthUser } from "@/contexts/AuthContext";
 import type { RoundBanPickPayload } from "@/api/banpick";
 import { API_BASE } from "@/lib/apiBase";
@@ -22,6 +22,10 @@ import {
   type TftApiResponse,
 } from "@/api/tft";
 import {
+  getAovMatchStats,
+  type AovMatchGameStats,
+} from "@/api/aovStats";
+import {
   getBracketsByTournamentId,
   getMatchGameIds,
   getMatchesByBracketId,
@@ -31,6 +35,25 @@ import {
   type TournamentBySlugResponse,
 } from "@/api/tournaments";
 import type { TournamentTeamPlayersResponse } from "@/api/tournaments/types";
+import {
+  TOURNAMENT_PAGE_BG_CLASS,
+  TOURNAMENT_PAGE_TITLE_CLASS,
+  TOURNAMENT_TABLE_HEADER_CLASS,
+  TOURNAMENT_TABLE_HEADER_ROW_CLASS,
+  TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS,
+  TOURNAMENT_TEAM_TAG_BADGE_CLASS,
+} from "@/components/tournamentTheme";
+
+const MATCH_STAT_PANEL = "overflow-hidden";
+const MATCH_STAT_TH =
+  "px-2 py-1.5 text-center text-[11px] font-extrabold uppercase tracking-wider text-neutral-900 bg-[#D1D5DB]";
+const MATCH_STAT_TH_NAME =
+  "sticky left-0 z-20 min-w-[180px] bg-[#D1D5DB] px-4 py-1.5 text-left border-r border-neutral-600 text-neutral-900";
+const MATCH_STAT_TD =
+  "px-2 py-3 text-[11px] text-neutral-200 text-center tabular-nums";
+const MATCH_STAT_TD_NAME =
+  "sticky left-0 z-10 bg-[#141414] group-hover:bg-[#1c1c1c] px-4 py-3 border-r border-neutral-800";
+const MATCH_STAT_TR = `${TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS} group`;
 
 const formatDate = (d: string) =>
   new Date(d).toLocaleDateString("vi-VN", {
@@ -408,6 +431,12 @@ const normalizeGameSlug = (value?: string) => {
     return "lol";
   if (["tft", "teamfighttactics", "teamfight_tactics"].includes(normalized))
     return "tft";
+  if (
+    ["aov", "arenaofvalor", "arena_of_valor", "lienquan", "lq"].includes(
+      normalized,
+    )
+  )
+    return "aov";
 
   return normalized;
 };
@@ -419,6 +448,7 @@ const resolveGameType = (value?: string): MatchDetail["gameType"] => {
   if (normalized === "lol") return "lol";
   if (normalized === "tft") return "tft";
   if (normalized === "wildrift") return "wildrift";
+  if (normalized === "aov") return "aov";
 
   return "cs2";
 };
@@ -538,7 +568,12 @@ const buildMatchDetailFromApi = ({
       teamTag: team2Tag,
       players: [],
     },
-    statTabs: gameType === "valorant" ? ["All Maps"] : ["All Games"],
+    statTabs:
+      gameType === "valorant"
+        ? ["All Maps"]
+        : gameType === "aov"
+          ? []
+          : ["All Games"],
   };
 };
 
@@ -706,10 +741,15 @@ const mergeTftApiIntoMatch = (
 
 const getProviderMatchIds = (
   gameIds: MatchGameIdRecord[],
-  provider: "val" | "lol" | "tft",
+  provider: "val" | "lol" | "tft" | "aov",
 ) => {
   const ids = gameIds
     .filter((item) => {
+      const infoGameId = String(item.info_game_id ?? "").trim();
+      if (provider === "aov" && /^aov:/i.test(infoGameId)) {
+        return true;
+      }
+
       const providerKey = normalizeGameSlug(
         item.external_provider ??
           item.resolved_provider ??
@@ -721,6 +761,75 @@ const getProviderMatchIds = (
     .filter((value) => Boolean(value));
 
   return Array.from(new Set(ids));
+};
+
+const toAovPlayerStat = (
+  player: AovMatchGameStats["players"][number],
+  index: number,
+) => ({
+  name: String(player.ign ?? "").trim() || `Player ${index + 1}`,
+  icon: `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
+  kills: toNumber(player.kills) ?? 0,
+  deaths: toNumber(player.deaths) ?? 0,
+  assists: toNumber(player.assists) ?? 0,
+  performanceScore: toNumber(player.performance_score) ?? undefined,
+  gold: toNumber(player.gold) ?? undefined,
+});
+
+const mergeAovStatsIntoMatch = (
+  baseMatch: MatchDetail,
+  games: AovMatchGameStats[],
+): MatchDetail => {
+  if (!games.length) return baseMatch;
+
+  const sortedGames = [...games].sort(
+    (a, b) => (toNumber(a.game_no) ?? 0) - (toNumber(b.game_no) ?? 0),
+  );
+
+  const aovGameRosters: AovGameRoster[] = sortedGames.map((game) => {
+    const bluePlayers = (game.players ?? []).filter(
+      (player) => player.team_side === "blue",
+    );
+    const redPlayers = (game.players ?? []).filter(
+      (player) => player.team_side === "red",
+    );
+
+    return {
+      label: `Ván ${game.game_no}`,
+      team1Kills: toNumber(game.team_a_score) ?? 0,
+      team2Kills: toNumber(game.team_b_score) ?? 0,
+      team1Roster: {
+        ...baseMatch.team1Roster,
+        players: bluePlayers.map((player, index) =>
+          toAovPlayerStat(player, index),
+        ),
+      },
+      team2Roster: {
+        ...baseMatch.team2Roster,
+        players: redPlayers.map((player, index) =>
+          toAovPlayerStat(player, index),
+        ),
+      },
+    };
+  });
+
+  const maps = aovGameRosters.map((game) => ({
+    mapName: game.label,
+    team1Score: game.team1Kills,
+    team2Score: game.team2Kills,
+  }));
+
+  const firstGame = aovGameRosters[0];
+
+  return {
+    ...baseMatch,
+    gameType: "aov",
+    maps,
+    team1Roster: firstGame?.team1Roster ?? baseMatch.team1Roster,
+    team2Roster: firstGame?.team2Roster ?? baseMatch.team2Roster,
+    aovGameRosters,
+    statTabs: aovGameRosters.map((game) => game.label),
+  };
 };
 
 const normalizeTeamId = (value?: string | null) =>
@@ -1296,7 +1405,7 @@ const MapScoreRow = ({
   const bgImg = mapImages[map.mapName];
 
   return (
-    <div className="relative rounded-xl overflow-hidden h-14 border border-border/60 bg-card/70">
+    <div className="relative rounded-xl overflow-hidden h-14 bg-card/70">
       <div className="absolute inset-0">
         <img src={bgImg} alt="" className="w-full h-full object-cover" />
         <div className="absolute inset-0 bg-background/80 backdrop-blur-[1px]" />
@@ -1366,7 +1475,7 @@ const BanPickTimelinePanel = ({
           return (
             <div
               key={item.key}
-              className="rounded-lg border border-border/50 /20 px-3 py-2"
+              className="rounded-lg px-3 py-2"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -1382,13 +1491,13 @@ const BanPickTimelinePanel = ({
 
                 <div className="flex items-center gap-2 shrink-0">
                   <span
-                    className={`inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-extrabold uppercase tracking-[0.12em] ${badgeClass}`}
+                    className={`inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-extrabold uppercase  ${badgeClass}`}
                   >
                     {item.type}
                   </span>
 
                   {team && (
-                    <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 /25 px-1.5 py-1">
+                    <span className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1">
                       <img
                         src={team.logo}
                         alt={team.tag}
@@ -1813,7 +1922,7 @@ const BanPickLobbyPanel = ({
 
                       {statusBadge ? (
                         <span
-                          className={`shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-black uppercase tracking-[0.12em] ${statusToneClass}`}
+                          className={`shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-black uppercase  ${statusToneClass}`}
                         >
                           {statusBadge}
                         </span>
@@ -1829,7 +1938,7 @@ const BanPickLobbyPanel = ({
                 <button
                   onClick={() => void confirmAction()}
                   disabled={!banPick.selectedMapId}
-                  className={`h-10 rounded-md px-4 text-xs font-black uppercase tracking-[0.12em] transition-colors ${
+                  className={`h-10 rounded-md px-4 text-xs font-black uppercase  transition-colors ${
                     banPick.selectedMapId
                       ? currentAction?.type === "ban"
                         ? "bg-rose-500/90 text-white hover:bg-rose-400"
@@ -1844,7 +1953,7 @@ const BanPickLobbyPanel = ({
               ) : (
                 <button
                   disabled
-                  className="h-10 rounded-md px-4 text-xs font-black uppercase tracking-[0.12em] bg-muted text-muted-foreground cursor-not-allowed"
+                  className="h-10 rounded-md px-4 text-xs font-black uppercase  bg-muted text-muted-foreground cursor-not-allowed"
                 >
                   {banPick.phase === "side_select"
                     ? "Đang chọn side"
@@ -1959,7 +2068,7 @@ const PendingMatchOverviewPanel = ({
 
           <div className="space-y-3">
             <div className="rounded-md border border-border/70 /20 px-3 py-2 flex items-center justify-between gap-3">
-              <p className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+              <p className="text-[11px] uppercase  text-muted-foreground">
                 Room ID
               </p>
               <p className="text-sm font-semibold text-foreground">
@@ -2046,7 +2155,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center  flex-wrap gap-4">
+      <div className="flex items-center flex-wrap gap-4 justify-between">
         <div>
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
             Match Stats
@@ -2055,7 +2164,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
             Thống kê chi tiết từng người chơi
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {tabs.map((tab, i) => (
             <button
               key={`${tab}-${i}`}
@@ -2073,22 +2182,22 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
       </div>
 
       {selectedMapForRounds && selectedRoundHistory.length > 0 && (
-        <div className="w-full rounded-md border border-cyan-400/10 px-3 py-2">
+        <div className="w-full px-3 py-2">
           <div className="grid w-full grid-cols-[84px_minmax(0,1fr)] items-start gap-3">
             <div className="shrink-0 min-w-18.5">
               <div className="flex items-center justify-between text-[11px] leading-none">
-                <span className="font-semibold text-slate-100 uppercase tracking-wide">
+                <span className="font-semibold text-neutral-200 uppercase tracking-wide">
                   {match.team1.tag}
                 </span>
-                <span className="font-black tabular-nums text-lg text-cyan-300">
+                <span className="font-black tabular-nums text-lg text-white">
                   {selectedMapForRounds.team1Score}
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between text-[11px] leading-none">
-                <span className="font-semibold text-slate-100 uppercase tracking-wide">
+                <span className="font-semibold text-neutral-200 uppercase tracking-wide">
                   {match.team2.tag}
                 </span>
-                <span className="font-black tabular-nums text-lg text-rose-300">
+                <span className="font-black tabular-nums text-lg text-white">
                   {selectedMapForRounds.team2Score}
                 </span>
               </div>
@@ -2122,7 +2231,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
                     >
                       <span
                         className={`inline-flex h-4 w-4 items-center justify-center ${
-                          isTeam1Win ? "text-cyan-300" : "text-slate-600"
+                          isTeam1Win ? "text-white" : "text-neutral-600"
                         }`}
                       >
                         {isTeam1Win ? (
@@ -2138,7 +2247,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
 
                       <span
                         className={`inline-flex h-4 w-4 items-center justify-center ${
-                          isTeam2Win ? "text-rose-400" : "text-slate-600"
+                          isTeam2Win ? "text-white" : "text-neutral-600"
                         }`}
                       >
                         {isTeam2Win ? (
@@ -2152,7 +2261,7 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
                         )}
                       </span>
 
-                      <span className="mt-0.5 text-[10px] text-slate-500 tabular-nums">
+                      <span className="mt-0.5 text-[10px] text-neutral-500 tabular-nums">
                         {round.roundNum + 1}
                       </span>
                     </div>
@@ -2166,101 +2275,181 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {activeRosters.map((roster) => (
-          <div
-            key={roster.teamTag}
-            className="bg-card border border-border rounded-xl overflow-hidden"
-          >
+          <div key={roster.teamTag} className={MATCH_STAT_PANEL}>
             <div className="overflow-x-auto">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] border-collapse">
-                  <thead>
-                    <tr className="border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-[#EEEEEE]">
-                      <th className="!w-[180px] sticky left-0 z-20 bg-card px-4 py-3 text-left normal-case text-base font-bold text-foreground border-r border-border/40">
+              <table className="w-full min-w-[760px] border-collapse">
+                <thead>
+                  <tr className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
+                    <th className={MATCH_STAT_TH_NAME}>
+                      <div className="flex items-center gap-2 min-w-0 normal-case">
+                        <img
+                          src={roster.teamLogo}
+                          alt={roster.teamTag}
+                          className="w-5 h-5 rounded-sm"
+                        />
+                        <span className="truncate text-sm font-extrabold uppercase tracking-wide">
+                          {roster.teamName}
+                        </span>
+                      </div>
+                    </th>
+                    <th className={MATCH_STAT_TH}>ACS</th>
+                    <th className={MATCH_STAT_TH}>K</th>
+                    <th className={MATCH_STAT_TH}>D</th>
+                    <th className={MATCH_STAT_TH}>+/-</th>
+                    <th className={MATCH_STAT_TH}>ADR</th>
+                    <th className={MATCH_STAT_TH}>HS%</th>
+                    <th className={MATCH_STAT_TH}>FK</th>
+                    <th className={MATCH_STAT_TH}>FD</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roster.players.map((p, playerIndex) => (
+                    <tr key={`${roster.teamTag}-${p.name}-${playerIndex}`} className={MATCH_STAT_TR}>
+                      <td className={MATCH_STAT_TD_NAME}>
                         <div className="flex items-center gap-2 min-w-0">
-                          <img
-                            src={roster.teamLogo}
-                            alt={roster.teamTag}
-                            className="w-5 h-5 rounded"
-                          />
-                          <span className="truncate text-[12px]">
-                            {roster.teamName}
+                          {p.icon ? (
+                            <img
+                              src={p.icon}
+                              alt={p.name}
+                              className="w-6 h-6 rounded-sm"
+                            />
+                          ) : (
+                            <div className="w-6 h-6 rounded-sm bg-neutral-800 flex items-center justify-center text-[11px] font-bold text-neutral-400">
+                              {p.name.charAt(0)}
+                            </div>
+                          )}
+                          <span className="text-[11px] font-semibold text-white truncate">
+                            {p.name}
                           </span>
                         </div>
-                      </th>
-                      <th className="px-2 py-3 text-center">ACS</th>
-                      <th className="px-2 py-3 text-center">K</th>
-                      <th className="px-2 py-3 text-center">D</th>
-                      <th className="px-2 py-3 text-center">+/-</th>
-                      <th className="px-2 py-3 text-center">ADR</th>
-                      <th className="px-2 py-3 text-center">HS%</th>
-                      <th className="px-2 py-3 text-center">FK</th>
-                      <th className="px-2 py-3 text-center">FD</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roster.players.map((p) => (
-                      <tr
-                        key={p.name}
-                        className="border-b border-border/20 last:border-0 hover:bg-secondary/40 transition-colors"
-                      >
-                        <td className="sticky left-0 z-10 bg-card px-4 py-2.5 border-r border-border/20">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {p.icon ? (
-                              <img
-                                src={p.icon}
-                                alt={p.name}
-                                className="w-6 h-6 rounded"
-                              />
-                            ) : (
-                              <div className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-[11px] font-bold text-[#EEEEEE]">
-                                {p.name.charAt(0)}
-                              </div>
-                            )}
-                            <span className="text-[11px] font-semibold text-foreground truncate">
-                              {p.name}
-                            </span>
-                          </div>
-                        </td>
+                      </td>
 
-                        <td className="px-2 py-2.5 text-[11px] text-foreground text-center tabular-nums">
-                          {p.acs ?? "-"}
-                        </td>
-                        <td className="px-2 py-2.5 text-[11px] text-foreground text-center tabular-nums">
-                          {p.kills ?? "-"}
-                        </td>
-                        <td className="px-2 py-2.5 text-[11px] text-foreground text-center tabular-nums">
-                          {p.deaths ?? "-"}
-                        </td>
-                        <td
-                          className={`px-2 py-2.5 text-[11px] font-bold text-center tabular-nums ${
-                            (p.plusMinus ?? 0) > 0
-                              ? "text-primary"
-                              : (p.plusMinus ?? 0) < 0
-                                ? "text-destructive"
-                                : "text-muted-foreground"
-                          }`}
-                        >
-                          {(p.plusMinus ?? 0) > 0
-                            ? `+${p.plusMinus}`
-                            : (p.plusMinus ?? "-")}
-                        </td>
-                        <td className="px-2 py-2.5 text-[11px] text-foreground text-center tabular-nums">
-                          {p.adr ?? "-"}
-                        </td>
-                        <td className="px-2 py-2.5 text-[11px] text-foreground text-center tabular-nums">
-                          {p.hsPercent ?? "-"}
-                        </td>
-                        <td className="px-2 py-2.5 text-[11px] text-foreground text-center tabular-nums">
-                          {p.firstKills ?? "-"}
-                        </td>
-                        <td className="px-2 py-2.5 text-[11px] text-foreground text-center tabular-nums">
-                          {p.firstDeaths ?? "-"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                      <td className={MATCH_STAT_TD}>{p.acs ?? "-"}</td>
+                      <td className={MATCH_STAT_TD}>{p.kills ?? "-"}</td>
+                      <td className={MATCH_STAT_TD}>{p.deaths ?? "-"}</td>
+                      <td
+                        className={`${MATCH_STAT_TD} font-bold ${
+                          (p.plusMinus ?? 0) > 0
+                            ? "text-emerald-400"
+                            : (p.plusMinus ?? 0) < 0
+                              ? "text-rose-400"
+                              : "text-neutral-500"
+                        }`}
+                      >
+                        {(p.plusMinus ?? 0) > 0
+                          ? `+${p.plusMinus}`
+                          : (p.plusMinus ?? "-")}
+                      </td>
+                      <td className={MATCH_STAT_TD}>{p.adr ?? "-"}</td>
+                      <td className={MATCH_STAT_TD}>{p.hsPercent ?? "-"}</td>
+                      <td className={MATCH_STAT_TD}>{p.firstKills ?? "-"}</td>
+                      <td className={MATCH_STAT_TD}>{p.firstDeaths ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/* ── AOV Stat Table ── */
+const AOVStatTable = ({ match }: { match: MatchDetail }) => {
+  const games = match.aovGameRosters ?? [];
+  const [activeTab, setActiveTab] = useState(0);
+  const currentGame = games[activeTab] ?? games[0];
+
+  if (!currentGame) return null;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center flex-wrap gap-4 justify-between">
+        <div>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+            Match Stats
+          </h3>
+          <p className="text-xs text-[#EEEEEE] mt-0.5">
+            Thống kê chi tiết từng người chơi (AOV / Liên Quân)
+          </p>
+        </div>
+        {games.length > 1 ? (
+          <div className="flex gap-2 flex-wrap">
+            {games.map((game, i) => (
+              <button
+                key={game.label}
+                type="button"
+                onClick={() => setActiveTab(i)}
+                className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
+                  activeTab === i
+                    ? "bg-foreground text-background border-foreground"
+                    : "bg-transparent border-border text-[#EEEEEE] hover:text-foreground"
+                }`}
+              >
+                {game.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {[currentGame.team1Roster, currentGame.team2Roster].map((roster) => (
+          <div key={roster.teamTag} className={MATCH_STAT_PANEL}>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] border-collapse table-fixed">
+                <colgroup>
+                  <col />
+                  <col className="w-10" />
+                  <col className="w-10" />
+                  <col className="w-10" />
+                  <col className="w-14" />
+                  <col className="w-[4.5rem]" />
+                </colgroup>
+                <thead>
+                  <tr className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
+                    <th className={MATCH_STAT_TH_NAME}>
+                      <div className="flex items-center gap-2 min-w-0 normal-case">
+                        <img
+                          src={roster.teamLogo}
+                          alt={roster.teamTag}
+                          className="w-5 h-5 shrink-0 rounded-sm"
+                        />
+                        <span className="truncate text-sm font-extrabold uppercase tracking-wide">
+                          {roster.teamName}
+                        </span>
+                      </div>
+                    </th>
+                    <th className={MATCH_STAT_TH}>K</th>
+                    <th className={MATCH_STAT_TH}>D</th>
+                    <th className={MATCH_STAT_TH}>A</th>
+                    <th className={MATCH_STAT_TH}>Điểm</th>
+                    <th className={MATCH_STAT_TH}>Vàng</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roster.players.map((p, playerIndex) => (
+                    <tr
+                      key={`${roster.teamTag}-${p.name}-${playerIndex}`}
+                      className={MATCH_STAT_TR}
+                    >
+                      <td className={MATCH_STAT_TD_NAME}>
+                        <span className="block truncate text-[11px] font-semibold text-white">
+                          {p.name}
+                        </span>
+                      </td>
+                      <td className={MATCH_STAT_TD}>{p.kills}</td>
+                      <td className={MATCH_STAT_TD}>{p.deaths}</td>
+                      <td className={MATCH_STAT_TD}>{p.assists}</td>
+                      <td className={MATCH_STAT_TD}>
+                        {p.performanceScore ?? "-"}
+                      </td>
+                      <td className={MATCH_STAT_TD}>{p.gold ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         ))}
@@ -2276,7 +2465,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center  flex-wrap gap-4">
+      <div className="flex items-center flex-wrap gap-4 justify-between">
         <div>
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
             Match Stats
@@ -2285,7 +2474,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
             Thống kê chi tiết từng người chơi
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {tabs.map((tab, i) => (
             <button
               key={tab}
@@ -2303,69 +2492,67 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {[match.team1Roster, match.team2Roster].map((roster) => (
-          <div
-            key={roster.teamTag}
-            className="bg-card border border-border rounded-xl overflow-hidden"
-          >
+          <div key={roster.teamTag} className={MATCH_STAT_PANEL}>
             <div className="overflow-x-auto">
-              <div className="min-w-[560px]">
-                <div
-                  className="grid gap-0 px-4 py-3 border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-[#EEEEEE]"
-                  style={{
-                    gridTemplateColumns: "1fr 2.5rem 2.5rem 2.5rem 3.5rem 4rem",
-                  }}
-                >
-                  <span className="sticky left-0 z-20 bg-card flex items-center gap-2 text-foreground normal-case text-base font-bold truncate pr-4 border-r border-border/40">
-                    <img
-                      src={roster.teamLogo}
-                      alt={roster.teamTag}
-                      className="w-5 h-5 rounded"
-                    />
-                    {roster.teamName}
-                  </span>
-                  <span className="text-center">K</span>
-                  <span className="text-center">D</span>
-                  <span className="text-center">A</span>
-                  <span className="text-center">CS</span>
-                  <span className="text-center">DMG</span>
-                </div>
-                {roster.players.map((p) => (
-                  <div
-                    key={p.name}
-                    className="grid gap-0 px-4 py-2.5 items-center border-b border-border/20 last:border-0 hover:bg-secondary/40 transition-colors"
-                    style={{
-                      gridTemplateColumns:
-                        "1fr 2.5rem 2.5rem 2.5rem 3.5rem 4rem",
-                    }}
-                  >
-                    <div className="sticky left-0 z-10 bg-card flex items-center gap-2 min-w-0 pr-4 border-r border-border/20">
-                      <span className="text-[11px] font-semibold text-foreground truncate">
-                        {p.name}
-                      </span>
-                      {p.role && (
-                        <span className="text-[11px] text-[#EEEEEE] bg-secondary px-1.5 py-0.5 rounded">
-                          {p.role}
+              <table className="w-full min-w-[520px] border-collapse table-fixed">
+                <colgroup>
+                  <col />
+                  <col className="w-10" />
+                  <col className="w-10" />
+                  <col className="w-10" />
+                  <col className="w-12" />
+                  <col className="w-14" />
+                </colgroup>
+                <thead>
+                  <tr className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
+                    <th className={MATCH_STAT_TH_NAME}>
+                      <div className="flex items-center gap-2 min-w-0 normal-case">
+                        <img
+                          src={roster.teamLogo}
+                          alt={roster.teamTag}
+                          className="w-5 h-5 shrink-0 rounded-sm"
+                        />
+                        <span className="truncate text-sm font-extrabold uppercase tracking-wide">
+                          {roster.teamName}
                         </span>
-                      )}
-                    </div>
-                    <span className="text-[11px] text-foreground text-center tabular-nums">
-                      {p.kills}
-                    </span>
-                    <span className="text-[11px] text-foreground text-center tabular-nums">
-                      {p.deaths}
-                    </span>
-                    <span className="text-[11px] text-foreground text-center tabular-nums">
-                      {p.assists}
-                    </span>
-                    <span className="text-[11px] text-foreground text-center tabular-nums">
-                      {p.cs}
-                    </span>
-                    <span className="text-[11px] text-foreground text-center tabular-nums">
-                      {((p.damage ?? 0) / 1000).toFixed(1)}k
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      </div>
+                    </th>
+                    <th className={MATCH_STAT_TH}>K</th>
+                    <th className={MATCH_STAT_TH}>D</th>
+                    <th className={MATCH_STAT_TH}>A</th>
+                    <th className={MATCH_STAT_TH}>CS</th>
+                    <th className={MATCH_STAT_TH}>DMG</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roster.players.map((p, playerIndex) => (
+                    <tr
+                      key={`${roster.teamTag}-${p.name}-${playerIndex}`}
+                      className={MATCH_STAT_TR}
+                    >
+                      <td className={MATCH_STAT_TD_NAME}>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-[11px] font-semibold text-white">
+                            {p.name}
+                          </span>
+                          {p.role ? (
+                            <span className="shrink-0 rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">
+                              {p.role}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className={MATCH_STAT_TD}>{p.kills}</td>
+                      <td className={MATCH_STAT_TD}>{p.deaths}</td>
+                      <td className={MATCH_STAT_TD}>{p.assists}</td>
+                      <td className={MATCH_STAT_TD}>{p.cs}</td>
+                      <td className={MATCH_STAT_TD}>
+                        {((p.damage ?? 0) / 1000).toFixed(1)}k
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         ))}
@@ -2387,11 +2574,8 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
     </div>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {[match.team1Roster, match.team2Roster].map((roster) => (
-        <div
-          key={roster.teamTag}
-          className="bg-card border border-border rounded-xl overflow-hidden"
-        >
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+        <div key={roster.teamTag} className={MATCH_STAT_PANEL}>
+          <div className="flex items-center gap-3 px-4 py-3">
             <img
               src={roster.teamLogo}
               alt={roster.teamTag}
@@ -2404,19 +2588,19 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
           <div className="overflow-x-auto">
             <div className="min-w-[320px]">
               <div
-                className="grid gap-0 px-4 py-2 border-b border-border/40 text-[11px] font-bold uppercase tracking-wider text-[#EEEEEE]"
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} grid gap-0 px-4 py-1.5 text-[11px]`}
                 style={{ gridTemplateColumns: "1fr 4rem" }}
               >
-                <span className="sticky left-0 z-20 bg-card pr-4 border-r border-border/40"></span>
+                <span className="text-left">Người chơi</span>
                 <span className="text-center">Hạng TB</span>
               </div>
-              {roster.players.map((p) => (
+              {roster.players.map((p, playerIndex) => (
                 <div
-                  key={p.name}
-                  className="grid gap-0 px-4 py-2.5 items-center border-b border-border/20 last:border-0 hover:bg-secondary/40 transition-colors"
+                  key={`${roster.teamTag}-${p.name}-${playerIndex}`}
+                  className={`grid gap-0 items-center ${MATCH_STAT_TR}`}
                   style={{ gridTemplateColumns: "1fr 4rem" }}
                 >
-                  <div className="sticky left-0 z-10 bg-card pr-4 border-r border-border/20 flex items-center gap-2">
+                  <div className={`${MATCH_STAT_TD_NAME} flex items-center gap-2`}>
                     {p.icon ? (
                       <img
                         src={p.icon}
@@ -2433,7 +2617,7 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
                     </span>
                   </div>
                   <span
-                    className={`text-[11px] font-bold text-center ${
+                    className={`${MATCH_STAT_TD} font-bold ${
                       (p.placement ?? 8) <= 2
                         ? "text-primary"
                         : (p.placement ?? 8) <= 4
@@ -2462,9 +2646,9 @@ const RosterSection = ({ match }: { match: MatchDetail }) => (
           {roster.teamName} Roster
         </h3>
         <div className="grid gap-2 justify-start grid-cols-5 w-full">
-          {roster.players.map((p) => (
+          {roster.players.map((p, playerIndex) => (
             <div
-              key={p.name}
+              key={`${roster.teamTag}-${p.name}-${playerIndex}`}
               className="min-h-[120px] flex flex-col items-center justify-start gap-2 px-2 py-3"
             >
               <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-base font-bold text-[#EEEEEE]">
@@ -2523,13 +2707,25 @@ const MatchDetailPage = () => {
   const numId = id && /^\d+$/.test(id) ? Number(id) : null;
   const tournamentId = toNumber(tournament?.id);
 
+  const resolveLiveMatchPollInterval = (matches: Match[] | undefined) => {
+    if (!numId || !matches?.length) return false;
+
+    const current = matches.find((item) => toNumber(item.id) === numId);
+    if (!current || isCompletedMatchStatus(current.status)) return false;
+
+    return isLobbyRoute ? 10000 : 30000;
+  };
+
   const { data: tournamentMatchBundle, isLoading: isMatchListLoading } =
     useQuery({
       queryKey: ["tournament-match-list-all-brackets", tournamentId],
       enabled: Boolean(tournamentId),
       staleTime: 1000 * 60,
       refetchOnWindowFocus: false,
-      refetchInterval: 5000,
+      refetchInterval: (query) =>
+        resolveLiveMatchPollInterval(
+          (query.state.data as { matches?: Match[] } | undefined)?.matches,
+        ),
       queryFn: async () => {
         const bracketsResponse = await getBracketsByTournamentId(tournamentId!);
         const bracketIds = (bracketsResponse.data?.data ?? [])
@@ -2580,6 +2776,11 @@ const MatchDetailPage = () => {
     if (!numId) return null;
     return sortedMatches.find((item) => toNumber(item.id) === numId) ?? null;
   }, [numId, sortedMatches]);
+
+  const liveMatchPollInterval = useMemo(
+    () => resolveLiveMatchPollInterval(sortedMatches),
+    [sortedMatches, numId, isLobbyRoute],
+  );
 
   const currentMatchTeamIds = useMemo(() => {
     const leftTeamId =
@@ -2771,6 +2972,10 @@ const MatchDetailPage = () => {
     matchId: numId,
     format: requestedBanPickFormat,
     token,
+    pollEnabled:
+      isLobbyRoute &&
+      normalizedRouteGame === "val" &&
+      !isCompletedMatchStatus(currentMatchRow?.status),
   });
 
   const baseMatch = useMemo(() => {
@@ -2787,7 +2992,7 @@ const MatchDetailPage = () => {
     enabled: Boolean(numId),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
-    refetchInterval: 5000,
+    refetchInterval: liveMatchPollInterval,
     queryFn: async () => {
       const response = await getMatchGameIds(numId!);
       return response.data?.data ?? [];
@@ -2805,6 +3010,10 @@ const MatchDetailPage = () => {
     if (baseMatch?.gameType === "valorant" && valIds.length > 0) return "val";
     if (baseMatch?.gameType === "tft" && tftIds.length > 0) return "tft";
     if (baseMatch?.gameType === "lol" && lolIds.length > 0) return "lol";
+    if (baseMatch?.gameType === "aov" && getProviderMatchIds(ids, "aov").length > 0)
+      return "aov";
+
+    if (getProviderMatchIds(ids, "aov").length > 0) return "aov";
 
     if (tftIds.length > 0) return "tft";
     if (valIds.length > 0) return "val";
@@ -2814,9 +3023,28 @@ const MatchDetailPage = () => {
     if (baseMatch?.gameType === "tft") return "tft";
     if (baseMatch?.gameType === "lol" || baseMatch?.gameType === "wildrift")
       return "lol";
+    if (baseMatch?.gameType === "aov") return "aov";
 
     return null;
   }, [baseMatch?.gameType, matchGameIds]);
+
+  const shouldFetchAovStats = useMemo(() => {
+    if (!numId) return false;
+    if (baseMatch?.gameType === "aov") return true;
+    if (normalizedRouteGame === "aov") return true;
+    return getProviderMatchIds(matchGameIds ?? [], "aov").length > 0;
+  }, [baseMatch?.gameType, matchGameIds, normalizedRouteGame, numId]);
+
+  const { data: aovApiData, isLoading: isAovStatsLoading } = useQuery({
+    queryKey: ["aov-match-detail", numId],
+    enabled: shouldFetchAovStats,
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const response = await getAovMatchStats(numId!);
+      return response.data?.data ?? [];
+    },
+  });
 
   const valorantApiMatchIds = useMemo(() => {
     const idsFromMatchGames = getProviderMatchIds(matchGameIds ?? [], "val")
@@ -2907,6 +3135,14 @@ const MatchDetailPage = () => {
       );
     }
 
+    if (
+      (hydratedBaseMatch.gameType === "aov" || shouldFetchAovStats) &&
+      aovApiData &&
+      aovApiData.length > 0
+    ) {
+      return mergeAovStatsIntoMatch(hydratedBaseMatch, aovApiData);
+    }
+
     return hydratedBaseMatch;
   }, [
     baseMatch,
@@ -2914,6 +3150,8 @@ const MatchDetailPage = () => {
     preferredProvider,
     tftApiData,
     valorantApiData,
+    aovApiData,
+    shouldFetchAovStats,
   ]);
 
   if (!match) {
@@ -2963,9 +3201,11 @@ const MatchDetailPage = () => {
     bracketCurrentIndex >= 0 && bracketCurrentIndex < bracketMatches.length - 1
       ? bracketMatches[bracketCurrentIndex + 1]
       : null;
+  const hasAovData = Boolean(match.aovGameRosters?.length);
   const hasRosterData =
     match.team1Roster.players.length > 0 ||
-    match.team2Roster.players.length > 0;
+    match.team2Roster.players.length > 0 ||
+    hasAovData;
   const hasMapData = Boolean(match.maps?.length);
   const hasBanPickTimeline = banPickTimeline.length > 0;
   const isValorantMatch = match.gameType === "valorant";
@@ -2988,13 +3228,13 @@ const MatchDetailPage = () => {
   const shouldShowLobbyUnsupportedNotice = isLobbyRoute && !isValorantMatch;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="border-b border-border/70 bg-[#140a16] text-foreground">
+    <div className={`min-h-screen ${TOURNAMENT_PAGE_BG_CLASS}`}>
+      <div className="border-b border-neutral-700 bg-[#141414] text-white">
         <div className="mx-auto px-4 md:px-8 py-3 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-2 md:gap-3">
           <div className="order-2 md:order-1 flex items-center gap-2 min-w-0">
             <Link
               to={backTo}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/60 px-2.5text-[#EEEEEE] hover:text-foreground hover:border-border transition-colors text-xs font-semibold"
+              className="inline-flex h-8 items-center gap-1.5 rounded border border-neutral-600 px-2.5 text-neutral-300 hover:text-white hover:border-neutral-500 transition-colors text-xs font-semibold"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Nhánh đấu</span>
@@ -3002,7 +3242,7 @@ const MatchDetailPage = () => {
             {prevDetail ? (
               <div className="inline-flex items-center gap-2 min-w-0">
                 <div className="text-right leading-tight">
-                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#EEEEEE]">
+                  <p className="text-[10px] font-extrabold uppercase  text-[#EEEEEE]">
                     Prev
                   </p>
                   <p className="text-[10px] text-[#EEEEEE]">
@@ -3043,10 +3283,10 @@ const MatchDetailPage = () => {
           </div>
 
           <div className="order-1 md:order-2 text-center">
-            <p className="text-xs md:text-[11px] lg:text-[14px] font-black uppercase tracking-[0.14em] text-primary">
+            <p className={`${TOURNAMENT_PAGE_TITLE_CLASS} text-sm md:text-base`}>
               {match.tournamentName}
             </p>
-            <p className="text-[11px] lg:text-[12px] text-[#EEEEEE] mt-0.5">
+            <p className="text-[11px] text-neutral-400 mt-0.5">
               {match.roundName} · {match.format}
             </p>
           </div>
@@ -3084,7 +3324,7 @@ const MatchDetailPage = () => {
                   />
                 </Link>
                 <div className="text-left leading-tight">
-                  <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#EEEEEE]">
+                  <p className="text-[10px] font-extrabold uppercase  text-[#EEEEEE]">
                     Next
                   </p>
                   <p className="text-[10px] text-[#EEEEEE]">
@@ -3097,52 +3337,56 @@ const MatchDetailPage = () => {
         </div>
       </div>
 
-      <div className="">
-        <div className="mx-auto px-4 md:px-8 py-2 grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
-          <div className="justify-end rounded-md border border-rose-500/20 bg-gradient-to-r from-rose-950/50 to-rose-900/20 px-4 py-3 flex items-center  gap-4">
+      <div className="bg-[#0f0f0f]">
+        <div className="mx-auto px-4 md:px-8 py-3 grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
+          <div className="justify-end px-4 py-3 flex items-center gap-4">
             <div className="min-w-0 text-right">
-              <span className="hidden lg:block text-base text-[15px] font-black uppercase tracking-wide">
+              <span className="hidden lg:block text-[15px] font-bold uppercase tracking-wide text-white">
                 {match.team1.name}
               </span>
-              <span className="block lg:hidden text-[11px] font-black uppercase tracking-wide">
+              <span
+                className={`block lg:hidden ${TOURNAMENT_TEAM_TAG_BADGE_CLASS}`}
+              >
                 {match.team1.tag}
               </span>
             </div>
             <img
               src={match.team1.logo}
               alt={match.team1.tag}
-              className="w-10 h-10"
+              className="w-10 h-10 rounded-sm"
             />
           </div>
 
-          <div className="rounded-md border border-border/80 /25 px-4 py-2.5 flex items-center gap-5 md:gap-3 justify-center">
-            <span className="text-2xl md:text-4xl font-black tabular-nums text-rose-400">
+          <div className="px-4 py-2.5 flex items-center gap-5 md:gap-3 justify-center min-w-[140px]">
+            <span className="text-2xl md:text-4xl font-black tabular-nums text-white">
               {match.team1.score}
             </span>
             <div className="text-center leading-tight min-w-[76px] lg:block hidden">
-              <p className="text-[20px] font-black">
+              <p className="text-[18px] font-bold text-[#D1D5DB]">
                 {isMatchCompleted ? "FIN" : "LIVE"}
               </p>
-              <p className="text-[11px] text-[#EEEEEE]">
-                {isMatchCompleted ? formatDate(match.date) : "MATCH LOBBY"}
+              <p className="text-[11px] text-neutral-500">
+                {isMatchCompleted ? formatDate(match.date) : "ĐANG DIỄN RA"}
               </p>
             </div>
-            <span className="text-2xl md:text-4xl font-black tabular-nums text-emerald-400">
+            <span className="text-2xl md:text-4xl font-black tabular-nums text-white">
               {match.team2.score}
             </span>
           </div>
 
-          <div className="rounded-md border border-emerald-500/20 bg-gradient-to-r from-emerald-900/20 to-emerald-950/50 px-4 py-3 flex items-center  gap-4">
+          <div className="px-4 py-3 flex items-center gap-4">
             <img
               src={match.team2.logo}
               alt={match.team2.tag}
-              className="w-10 h-10 "
+              className="w-10 h-10 rounded-sm"
             />
             <div className="min-w-0 text-left">
-              <span className="hidden lg:block text-base text-[15px] font-black uppercase tracking-wide">
+              <span className="hidden lg:block text-[15px] font-bold uppercase tracking-wide text-white">
                 {match.team2.name}
               </span>
-              <span className="block lg:hidden text-[11px] font-black uppercase tracking-wide">
+              <span
+                className={`block lg:hidden ${TOURNAMENT_TEAM_TAG_BADGE_CLASS}`}
+              >
                 {match.team2.tag}
               </span>
             </div>
@@ -3152,7 +3396,7 @@ const MatchDetailPage = () => {
 
       {shouldShowMatchDetailBlockedNotice ? (
         <section className="mx-auto px-4 md:px-8 py-6">
-          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-5 space-y-2">
+          <div className="space-y-2">
             <p className="text-sm font-semibold">
               Trang này chỉ hiển thị dữ liệu sau trận khi match đã completed.
             </p>
@@ -3163,7 +3407,7 @@ const MatchDetailPage = () => {
             {numId ? (
               <Link
                 to={buildLobbyLink(numId)}
-                className="inline-flex h-9 items-center rounded-md border border-primary/60 px-3 text-xs font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10"
+                className="inline-flex h-9 items-center rounded-md border border-primary/60 px-3 text-xs font-bold uppercase  text-primary hover:bg-primary/10"
               >
                 Mở Lobby Page
               </Link>
@@ -3174,7 +3418,7 @@ const MatchDetailPage = () => {
 
       {shouldShowLobbyCompletedNotice ? (
         <section className="mx-auto px-4 md:px-8 py-6">
-          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-5 space-y-2">
+          <div className="space-y-2">
             <p className="text-sm font-semibold">
               Match đã completed.
             </p>
@@ -3185,7 +3429,7 @@ const MatchDetailPage = () => {
             {numId ? (
               <Link
                 to={buildMatchLink(numId)}
-                className="inline-flex h-9 items-center rounded-md border border-primary/60 px-3 text-xs font-bold uppercase tracking-[0.12em] text-primary hover:bg-primary/10"
+                className="inline-flex h-9 items-center rounded-md border border-primary/60 px-3 text-xs font-bold uppercase  text-primary hover:bg-primary/10"
               >
                 Mở Match Detail
               </Link>
@@ -3196,7 +3440,7 @@ const MatchDetailPage = () => {
 
       {shouldShowLobbyUnsupportedNotice ? (
         <section className="mx-auto px-4 md:px-8 py-6">
-          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-5 text-sm text-muted-foreground">
+          <div className="text-sm text-neutral-400">
             Lobby page hiện chỉ áp dụng cho Valorant.
           </div>
         </section>
@@ -3228,8 +3472,8 @@ const MatchDetailPage = () => {
       !shouldShowEmbeddedBanPick &&
       !shouldShowPendingMatchOverview ? (
         <section className="mx-auto px-4 md:px-8 py-6">
-          <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-6 space-y-2">
-            <p className="text-sm">Đang chờ setup ban/pick cho lobby trận này.</p>
+          <div className="space-y-2">
+            <p className="text-sm text-white">Đang chờ setup ban/pick cho lobby trận này.</p>
             {lobbyBanPickError ? (
               <p className="text-xs text-rose-300">{lobbyBanPickError}</p>
             ) : (
@@ -3244,39 +3488,37 @@ const MatchDetailPage = () => {
       {shouldShowPostMatchData ? (
         <>
           {(hasMapData || hasBanPickTimeline) && (
-            <div className="">
-              <div className="mx-auto px-4 md:px-8 py-6">
-                <div
-                  className={`grid gap-4 ${
-                    hasBanPickTimeline
-                      ? "grid-cols-1 xl:grid-cols-[minmax(280px,1fr)_minmax(0,1.6fr)]"
-                      : "grid-cols-1"
-                  }`}
-                >
-                  {hasBanPickTimeline && (
-                    <BanPickTimelinePanel
-                      timeline={banPickTimeline}
+            <div className="mx-auto px-4 md:px-8 py-6">
+              <div
+                className={`grid gap-4 ${
+                  hasBanPickTimeline
+                    ? "grid-cols-1 xl:grid-cols-[minmax(280px,1fr)_minmax(0,1.6fr)]"
+                    : "grid-cols-1"
+                }`}
+              >
+                {hasBanPickTimeline && (
+                  <BanPickTimelinePanel
+                    timeline={banPickTimeline}
+                    team1={match.team1}
+                    team2={match.team2}
+                  />
+                )}
+
+                <div className="space-y-2.5">
+                  {match.maps?.map((map, i) => (
+                    <MapScoreRow
+                      key={i}
+                      map={map}
                       team1={match.team1}
                       team2={match.team2}
                     />
+                  ))}
+
+                  {!hasMapData && (
+                    <div className="px-4 py-3 text-xs text-muted-foreground">
+                      Chưa có dữ liệu tỉ số từng map.
+                    </div>
                   )}
-
-                  <div className="space-y-2.5">
-                    {match.maps?.map((map, i) => (
-                      <MapScoreRow
-                        key={i}
-                        map={map}
-                        team1={match.team1}
-                        team2={match.team2}
-                      />
-                    ))}
-
-                    {!hasMapData && (
-                      <div className="rounded-xl border border-border/60 bg-card/30 px-4 py-3 text-xs text-muted-foreground">
-                        Chưa có dữ liệu tỉ số từng map.
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             </div>
@@ -3284,30 +3526,41 @@ const MatchDetailPage = () => {
 
           <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
             {!hasRosterData && !hasMapData && !hasBanPickTimeline ? (
-              <section className="rounded-xl border border-border/70 bg-card/40 p-6 text-sm text-[#EEEEEE]">
-                Chua co du lieu chi tiet cho tran dau nay.
+              <section className="text-sm text-neutral-300">
+                {isAovStatsLoading
+                  ? "Đang tải dữ liệu sau trận..."
+                  : shouldFetchAovStats
+                    ? "Chưa có dữ liệu chi tiết. Hãy generate match_id ở trang AOV import, rồi dán vào Score Control (info_game_id) cho trận này."
+                    : "Chưa có dữ liệu chi tiết cho trận đấu này."}
               </section>
             ) : (
               <>
-                <section className="">
-                  <RosterSection match={match} />
-                </section>
+                {!(match.gameType === "aov" && hasAovData) ? (
+                  <section className="">
+                    <RosterSection match={match} />
+                  </section>
+                ) : null}
 
                 {(match.gameType === "cs2" ||
                   match.gameType === "valorant") && (
-                  <section className="rounded-2xl ">
+                  <section>
                     <FPSStatTable match={match} />
                   </section>
                 )}
                 {(match.gameType === "lol" ||
                   match.gameType === "wildrift") && (
-                  <section className="rounded-2xl ">
+                  <section>
                     <MOBAStatTable match={match} />
                   </section>
                 )}
                 {match.gameType === "tft" && (
-                  <section className="rounded-2xl ">
+                  <section>
                     <TFTStatTable match={match} />
+                  </section>
+                )}
+                {match.gameType === "aov" && hasAovData && (
+                  <section>
+                    <AOVStatTable match={match} />
                   </section>
                 )}
               </>

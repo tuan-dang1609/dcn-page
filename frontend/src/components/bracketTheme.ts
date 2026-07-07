@@ -127,3 +127,23 @@ export const getSwissStageRoundTitle = (
 
   return label;
 };
+
+export const formatBracketSideScore = (
+  score: number | null,
+  otherScore: number | null,
+): string => {
+  if (score === null) return "-";
+  if (score === 0 && otherScore === 0) return "-";
+  return String(score);
+};
+
+export const formatBracketMatchScores = (
+  s1: number | null,
+  s2: number | null,
+): { left: string; right: string } => {
+  if (s1 === 0 && s2 === 0) return { left: "-", right: "-" };
+  return {
+    left: s1 !== null ? String(s1) : "-",
+    right: s2 !== null ? String(s2) : "-",
+  };
+};

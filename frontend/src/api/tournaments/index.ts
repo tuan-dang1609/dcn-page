@@ -12,7 +12,7 @@ import type {
 
 let token: string | null = null;
 
-const getAuthConfig = () =>
+export const getAuthConfig = () =>
   token
     ? {
         headers: {

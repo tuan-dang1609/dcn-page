@@ -11,6 +11,8 @@ interface UseRoundBanPickSocketParams {
   matchId?: number | null;
   format?: string;
   token?: string | null;
+  /** When false, only fetch once on mount — no 2s polling. */
+  pollEnabled?: boolean;
 }
 
 const resolveErrorMessage = (error: unknown, fallback: string) => {
@@ -39,6 +41,7 @@ export const useRoundBanPickSocket = ({
   matchId,
   format,
   token,
+  pollEnabled = true,
 }: UseRoundBanPickSocketParams) => {
   const [session, setSession] = useState<RoundBanPickPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -107,7 +110,13 @@ export const useRoundBanPickSocket = ({
   }, [roundSlug, syncSessionFromHttp]);
 
   useEffect(() => {
-    if (!roundSlug) return;
+    if (!roundSlug || !pollEnabled) return;
+    if (
+      session?.phase === "complete" ||
+      session?.state?.phase === "complete"
+    ) {
+      return;
+    }
 
     let disposed = false;
     let inFlight = false;
@@ -117,7 +126,13 @@ export const useRoundBanPickSocket = ({
       inFlight = true;
 
       try {
-        await syncSessionFromHttp();
+        const payload = await syncSessionFromHttp();
+        if (
+          payload?.phase === "complete" ||
+          payload?.state?.phase === "complete"
+        ) {
+          disposed = true;
+        }
       } catch {
         // Ignore transient polling failures; next tick can recover.
       } finally {
@@ -150,7 +165,7 @@ export const useRoundBanPickSocket = ({
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [roundSlug, syncSessionFromHttp]);
+  }, [roundSlug, pollEnabled, session?.phase, session?.state?.phase, syncSessionFromHttp]);
 
   const emitWithAck = useCallback(
     async (

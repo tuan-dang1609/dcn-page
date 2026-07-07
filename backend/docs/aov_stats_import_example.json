@@ -1,0 +1,106 @@
+{
+  "match_id": null,
+  "game": {
+    "blue_kills": 19,
+    "red_kills": 1,
+    "duration_sec": 474,
+    "duration_mmss": "07:54",
+    "winner_side": "blue"
+  },
+  "players": {
+    "blue": [
+      {
+        "slot": 1,
+        "ign": "Hứa không win",
+        "performance_score": 14.8,
+        "kills": 10,
+        "deaths": 0,
+        "assists": 4,
+        "gold": 6947
+      },
+      {
+        "slot": 2,
+        "ign": "AnhBaChàCú",
+        "performance_score": 5.5,
+        "kills": 2,
+        "deaths": 1,
+        "assists": 0,
+        "gold": 3821
+      },
+      {
+        "slot": 3,
+        "ign": "\"Empé\"",
+        "performance_score": 4.9,
+        "kills": 0,
+        "deaths": 0,
+        "assists": 0,
+        "gold": 4737
+      },
+      {
+        "slot": 4,
+        "ign": "HOÀNGHOASÚNG",
+        "performance_score": 9.0,
+        "kills": 1,
+        "deaths": 1,
+        "assists": 13,
+        "gold": 4741
+      },
+      {
+        "slot": 5,
+        "ign": "cRuShOf",
+        "performance_score": 13.3,
+        "kills": 6,
+        "deaths": 0,
+        "assists": 5,
+        "gold": 5497
+      }
+    ],
+    "red": [
+      {
+        "slot": 1,
+        "ign": "slayqueen0",
+        "performance_score": 5.6,
+        "kills": 0,
+        "deaths": 2,
+        "assists": 1,
+        "gold": 4079
+      },
+      {
+        "slot": 2,
+        "ign": "Dark10002",
+        "performance_score": 4.1,
+        "kills": 1,
+        "deaths": 4,
+        "assists": 0,
+        "gold": 3453
+      },
+      {
+        "slot": 3,
+        "ign": "TânTân99999",
+        "performance_score": 3.9,
+        "kills": 0,
+        "deaths": 8,
+        "assists": 0,
+        "gold": 2570
+      },
+      {
+        "slot": 4,
+        "ign": "GT.Namsẽgãy",
+        "performance_score": 4.0,
+        "kills": 0,
+        "deaths": 4,
+        "assists": 1,
+        "gold": 2929
+      },
+      {
+        "slot": 5,
+        "ign": "Hellstrom",
+        "performance_score": 4.4,
+        "kills": 0,
+        "deaths": 1,
+        "assists": 0,
+        "gold": 3369
+      }
+    ]
+  }
+}

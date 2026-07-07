@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Calendar,
@@ -41,6 +41,7 @@ const providerOptions = [
   { value: "valorant", label: "Valorant" },
   { value: "lol", label: "LoL" },
   { value: "tft", label: "TFT" },
+  { value: "aov", label: "AOV / Liên Quân" },
 ];
 
 const gameNoOptions = Array.from({ length: 7 }, (_, index) => index + 1);
@@ -121,6 +122,10 @@ const getInfoGameIdPlaceholder = (provider?: string) => {
 
   if (normalizedProvider === "tft") {
     return "Dán link/ID TFT match";
+  }
+
+  if (normalizedProvider === "aov" || normalizedProvider === "lienquan") {
+    return "Dán match_id từ trang AOV import (vd: aov:abc123)";
   }
 
   return "Dán link match hoặc nhập ID";
@@ -326,7 +331,10 @@ const createEditGameIdDraft = (item: MatchGameIdRecord): EditGameIdDraft => ({
 
 const ScoreControlPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, token, isLoading } = useAuth();
+  const deepLinkHandledRef = useRef(false);
+  const focusMatchIdRef = useRef<number | null>(null);
 
   const [tournamentIdInput, setTournamentIdInput] = useState("");
   const [brackets, setBrackets] = useState<Bracket[]>([]);
@@ -385,6 +393,69 @@ const ScoreControlPage = () => {
     }
   }, [isLoading, navigate, token, user]);
 
+  useEffect(() => {
+    if (isLoading || !hasAccess || deepLinkHandledRef.current) return;
+
+    const tournamentId = toNumber(searchParams.get("tournamentId"));
+    const bracketId = toNumber(searchParams.get("bracketId"));
+    const matchId = toNumber(searchParams.get("matchId"));
+    const infoGameId = String(searchParams.get("infoGameId") ?? "").trim();
+    const gameNo = String(searchParams.get("gameNo") ?? "").trim();
+
+    if (!tournamentId && !matchId && !infoGameId) return;
+
+    deepLinkHandledRef.current = true;
+
+    if (!tournamentId && infoGameId) {
+      void navigator.clipboard.writeText(infoGameId).catch(() => undefined);
+      toast({
+        title: "Match ID AOV sẵn sàng",
+        description: `Dán "${infoGameId}" vào ô info_game_id của trận cần gán.`,
+      });
+      return;
+    }
+
+    if (tournamentId) setTournamentIdInput(String(tournamentId));
+    if (matchId) focusMatchIdRef.current = matchId;
+
+    const run = async () => {
+      if (!tournamentId) return;
+
+      try {
+        const response = await getBracketsByTournamentId(tournamentId);
+        const nextBrackets = response.data?.data ?? [];
+        setBrackets(nextBrackets);
+
+        if (!nextBrackets.length) return;
+
+        const preferredBracket =
+          nextBrackets.find((item) => Number(item.id) === bracketId) ??
+          nextBrackets.find(
+            (item) => String(item.stage || "").toLowerCase() === "main",
+          ) ??
+          nextBrackets[0];
+
+        setSelectedBracketId(String(preferredBracket.id));
+        await loadMatches(Number(preferredBracket.id), matchId);
+
+        if (matchId && (infoGameId || gameNo)) {
+          setNewGameIdDraftByMatch((prev) => ({
+            ...prev,
+            [matchId]: {
+              ...(prev[matchId] ?? createEmptyNewGameIdDraft()),
+              infoGameId: infoGameId || prev[matchId]?.infoGameId || "",
+              gameNo: gameNo || prev[matchId]?.gameNo || "",
+            },
+          }));
+        }
+      } catch {
+        // ignore deep-link load errors
+      }
+    };
+
+    void run();
+  }, [hasAccess, isLoading, searchParams]);
+
   const selectedBracket = useMemo(
     () => brackets.find((bracket) => String(bracket.id) === selectedBracketId),
     [brackets, selectedBracketId],
@@ -393,7 +464,7 @@ const ScoreControlPage = () => {
   const isSwissBracket =
     String(selectedBracket?.format_type || "").toLowerCase() === "swiss";
 
-  const loadMatches = async (bracketId: number) => {
+  const loadMatches = async (bracketId: number, focusMatchId?: number | null) => {
     setLoadingMatches(true);
 
     try {
@@ -408,6 +479,15 @@ const ScoreControlPage = () => {
       setSettingUpBanPickByMatch({});
       setDeletingBanPickByMatch({});
       setBanPickCountdownByMatch({});
+
+      const targetMatchId = focusMatchId ?? focusMatchIdRef.current;
+      if (targetMatchId) {
+        window.setTimeout(() => {
+          document
+            .getElementById(`score-control-match-${targetMatchId}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 120);
+      }
     } catch (error: any) {
       toast({
         title: "Không thể tải danh sách trận",
@@ -525,11 +605,17 @@ const ScoreControlPage = () => {
       const normalizedProvider = normalizeProviderKey(draft.provider);
       if (normalizedProvider) payload.external_provider = normalizedProvider;
 
-      await createMatchGameId(matchId, payload);
+      const response = await createMatchGameId(matchId, payload);
+      const applied = Boolean(response.data?.data?.aov_stats_applied);
+      const aovError = response.data?.data?.aov_stats_error;
 
       toast({
-        title: "Đã thêm info_game_id",
-        description: `Match #${matchId} đã thêm ID game mới.`,
+        title: applied ? "Đã gắn stats AOV" : "Đã thêm info_game_id",
+        description: applied
+          ? `Match #${matchId} — stats từ ${infoGameId} đã áp vào ván.`
+          : aovError
+            ? `Đã thêm ID nhưng chưa áp stats: ${aovError}`
+            : `Match #${matchId} đã thêm ID game mới.`,
       });
 
       setNewGameIdDraftByMatch((prev) => ({
@@ -973,10 +1059,16 @@ const ScoreControlPage = () => {
     setSavingForMatch(match.id, true);
 
     try {
-      await updateMatchScore(match.id, payload);
+      const response = await updateMatchScore(match.id, payload);
+      const rankingScheduled = Boolean(
+        response?.data?.data?.ranking_sync?.scheduled,
+      );
+
       toast({
         title: "Cập nhật điểm thành công",
-        description: `Match #${match.id} đã được cập nhật.`,
+        description: rankingScheduled
+          ? `Match #${match.id} đã lưu. BXH đang được cập nhật tự động.`
+          : `Match #${match.id} đã được cập nhật.`,
       });
 
       const bracketId = toNumber(selectedBracketId);
@@ -1158,6 +1250,14 @@ const ScoreControlPage = () => {
                 round.
               </p>
             </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="ml-auto"
+              onClick={() => navigate("/ops/aov-import")}
+            >
+              Tạo match_id AOV / Liên Quân
+            </Button>
           </div>
 
           <div className="grid gap-3 md:grid-cols-[220px_1fr_auto]">
@@ -1266,7 +1366,12 @@ const ScoreControlPage = () => {
                 return (
                   <div
                     key={match.id}
-                    className="rounded-lg border border-border p-4 space-y-3"
+                    id={`score-control-match-${match.id}`}
+                    className={`rounded-lg border p-4 space-y-3 ${
+                      focusMatchIdRef.current === match.id
+                        ? "border-primary ring-2 ring-primary/30"
+                        : "border-border"
+                    }`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="text-smtext-[#EEEEEE]">

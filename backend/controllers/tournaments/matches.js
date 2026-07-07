@@ -3,14 +3,32 @@ import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
 import logger from "../../utils/logger.js";
 import { deleteBanPickSession } from "../../utils/banPick.js";
-import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
+import { scheduleTournamentResultsRecalculate } from "../../utils/tournamentRanking.js";
 import {
   applyMatchProgression,
 } from "../../utils/bracketProgression.js";
+import { tryApplyStagedAovStats } from "../../utils/aovStagingDb.js";
 
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Matches";
 const allowedRoleIds = new Set([1, 2, 3]);
+
+const triggerRankingRecalculate = (tournamentId, context = {}) => {
+  const normalizedTournamentId = Number(tournamentId);
+  if (!Number.isFinite(normalizedTournamentId) || normalizedTournamentId <= 0) {
+    return;
+  }
+
+  void scheduleTournamentResultsRecalculate(normalizedTournamentId).catch(
+    (error) => {
+      logger.error("[ranking-sync] Failed to recalculate tournament results", {
+        tournament_id: normalizedTournamentId,
+        ...context,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
+  );
+};
 const providerAliases = {
   val: "valorant",
   valorant: "valorant",
@@ -21,6 +39,10 @@ const providerAliases = {
   tft: "tft",
   teamfighttactics: "tft",
   teamfight_tactics: "tft",
+  aov: "aov",
+  arenaofvalor: "aov",
+  arena_of_valor: "aov",
+  lienquan: "aov",
 };
 
 const gameProviderRouteTemplates = {
@@ -28,6 +50,7 @@ const gameProviderRouteTemplates = {
     "https://bigtournament-1.onrender.com/api/auth/valorant/matchdata/valorant/match/:matchId",
   lol: "https://bigtournament-1.onrender.com/api/lol/match/:matchId",
   tft: "https://bigtournament-1.onrender.com/api/tft/match/:matchId",
+  aov: "/api/tournaments/matches/games/:matchGameId/stats",
 };
 
 let matchGamesInfoIdColumnCache = null;
@@ -588,12 +611,22 @@ matchRouter.post(
       }
     }
 
+    const stagedApply = await tryApplyStagedAovStats({
+      infoGameId,
+      matchGameId: createdId,
+      tournamentMatchId: matchId,
+    });
+
     set.status = 201;
     return {
-      message: "Thêm info_game_id thành công",
+      message: stagedApply?.ok
+        ? "Thêm info_game_id và đã áp stats AOV từ staging"
+        : "Thêm info_game_id thành công",
       data: {
         ...formatGameIdRowResponse(item, fallbackProvider),
         room_id: effectiveRoomId,
+        aov_stats_applied: Boolean(stagedApply?.ok),
+        aov_stats_error: stagedApply?.ok ? null : stagedApply?.error ?? null,
       },
     };
   },
@@ -754,12 +787,28 @@ matchRouter.patch(
     );
     const currentRoomId = roomRows[0]?.room_id ?? null;
 
+    const effectiveInfoGameId = String(
+      body?.match_id_info ?? body?.info_game_id ?? body?.external_match_id ?? item?.info_game_id ?? "",
+    ).trim();
+
+    const stagedApply = effectiveInfoGameId
+      ? await tryApplyStagedAovStats({
+          infoGameId: effectiveInfoGameId,
+          matchGameId: updatedId,
+          tournamentMatchId: matchId,
+        })
+      : null;
+
     set.status = 200;
     return {
-      message: "Cập nhật info_game_id thành công",
+      message: stagedApply?.ok
+        ? "Cập nhật info_game_id và đã áp stats AOV từ staging"
+        : "Cập nhật info_game_id thành công",
       data: {
         ...formatGameIdRowResponse(item, fallbackProvider),
         room_id: currentRoomId,
+        aov_stats_applied: Boolean(stagedApply?.ok),
+        aov_stats_error: stagedApply?.ok ? null : stagedApply?.error ?? null,
       },
     };
   },
@@ -1141,21 +1190,11 @@ matchRouter.patch(
       propagateLoser: shouldPropagateLoser,
     });
 
-    let rankingSync = { ok: true };
-    try {
-      await recalculateTournamentResults(Number(match.tournament_id));
-    } catch (error) {
-      logger.error("[ranking-sync] Failed to recalculate tournament results", {
-        tournament_id: Number(match.tournament_id),
-        match_id: matchId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      rankingSync = {
-        ok: false,
-        error:
-          "Score da cap nhat, nhung khong dong bo duoc bang xep hang tu dong",
-      };
-    }
+    let rankingSync = { ok: true, scheduled: true };
+    triggerRankingRecalculate(Number(match.tournament_id), {
+      match_id: matchId,
+      source: "patch_match_score",
+    });
 
     set.status = 200;
     return {
@@ -1368,6 +1407,11 @@ matchRouter.post(
       loserNextMatch = progression.loserNextMatch;
     }
 
+    triggerRankingRecalculate(Number(match.tournament_id), {
+      match_id: matchId,
+      source: "post_match_games",
+    });
+
     set.status = 201;
     return {
       message: "Thêm game cho match thành công",
@@ -1376,6 +1420,7 @@ matchRouter.post(
         match: updatedMatch,
         next_match: nextMatch,
         loser_next_match: loserNextMatch,
+        ranking_sync: { ok: true, scheduled: true },
       },
     };
   },

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { API_BASE } from "@/lib/apiBase";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   ArrowLeft,
@@ -32,6 +32,7 @@ import {
 } from "@/api/teamInvites";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
 import TeamRosterDialog from "@/components/TeamRosterDialog";
+import { isRiotGameSlug } from "@/components/tournamentTheme";
 
 interface HeroBannerProps {
   tournament?: {
@@ -43,6 +44,7 @@ interface HeroBannerProps {
     register_start?: string;
     register_end?: string;
     name?: string;
+    short_name?: string;
   } | null;
 }
 
@@ -51,6 +53,8 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { game } = useParams();
+  const showRiotId = isRiotGameSlug(game ?? tournament?.short_name);
   const [regOpen, setRegOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<"manage" | "roster">("manage");
   const [rosterOpen, setRosterOpen] = useState(false);
@@ -489,6 +493,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
         teamName={user?.team?.name ?? null}
         teamShortName={user?.team?.short_name ?? null}
         teamLogoUrl={user?.team?.logo_url ?? null}
+        showRiotId={showRiotId}
       />
 
       <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>

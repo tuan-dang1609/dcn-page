@@ -33,6 +33,7 @@ import {
 import {
   BRACKET_MATCH_TITLE_H,
   BRACKET_ROW_BASE_CLASS,
+  formatBracketSideScore,
   getBracketMatchCardHeight,
   getMatchCardConnectorY,
   getBracketRowStateClass,
@@ -415,6 +416,7 @@ const PlayerRow = ({
   logoUrl,
   name,
   score,
+  otherScore,
   isWinner,
   isSelected,
   pickState,
@@ -430,6 +432,7 @@ const PlayerRow = ({
   logoUrl?: string | null;
   name: string;
   score: number | null;
+  otherScore: number | null;
   isWinner: boolean;
   isSelected?: boolean;
   pickState?: PickVisualState | null;
@@ -474,7 +477,7 @@ const PlayerRow = ({
         {name}
       </span>
       <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
-        {score !== null ? score : "-"}
+        {formatBracketSideScore(score, otherScore)}
       </span>
     </div>
   );
@@ -554,6 +557,7 @@ const MatchCard = ({
         logoUrl={match.p1Logo}
         name={match.p1}
         score={match.s1}
+        otherScore={match.s2}
         isWinner={match.winner === match.p1}
         isSelected={selectedTeamId === match.teamAId}
         pickState={resolvePickState(match.teamAId)}
@@ -570,6 +574,7 @@ const MatchCard = ({
         logoUrl={match.p2Logo}
         name={match.p2}
         score={match.s2}
+        otherScore={match.s1}
         isWinner={match.winner === match.p2}
         isSelected={selectedTeamId === match.teamBId}
         pickState={resolvePickState(match.teamBId)}

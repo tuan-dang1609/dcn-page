@@ -1,4 +1,4 @@
-export type GameType = "cs2" | "valorant" | "lol" | "wildrift" | "tft";
+export type GameType = "cs2" | "valorant" | "lol" | "wildrift" | "tft" | "aov";
 
 export interface MapScore {
   mapName: string;
@@ -31,6 +31,8 @@ export interface PlayerStat {
   damage?: number;
   placement?: number;
   role?: string;
+  performanceScore?: number;
+  gold?: number;
   firstDeaths?: number;
   firstKills?: number;
   multiKills?: number;
@@ -46,6 +48,14 @@ export interface TeamRoster {
 
 export interface FPSMapRoster {
   label: string;
+  team1Roster: TeamRoster;
+  team2Roster: TeamRoster;
+}
+
+export interface AovGameRoster {
+  label: string;
+  team1Kills: number;
+  team2Kills: number;
   team1Roster: TeamRoster;
   team2Roster: TeamRoster;
 }
@@ -78,4 +88,5 @@ export interface MatchDetail {
   team2Roster: TeamRoster;
   statTabs?: string[];
   fpsMapRosters?: FPSMapRoster[];
+  aovGameRosters?: AovGameRoster[];
 }

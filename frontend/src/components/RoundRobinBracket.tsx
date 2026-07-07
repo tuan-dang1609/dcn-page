@@ -11,6 +11,7 @@ import {
   BRACKET_CARD_CLASS,
   BRACKET_HEADER_CLASS,
   BRACKET_ROW_WINNER_CLASS,
+  formatBracketMatchScores,
 } from "@/components/bracketTheme";
 
 type RoundRobinBracketProps = {
@@ -227,6 +228,7 @@ const MatchRow = ({ match, legSplit }: { match: DisplayMatch; legSplit: number }
   );
 
   const boLabel = match.bestOf ? `BO${match.bestOf}` : "BO1";
+  const scores = formatBracketMatchScores(match.s1, match.s2);
 
   const content = (
     <div className="flex min-h-14 items-center gap-3 px-3 py-2">
@@ -243,11 +245,11 @@ const MatchRow = ({ match, legSplit }: { match: DisplayMatch; legSplit: number }
 
       <div className="flex shrink-0 items-center gap-2 border border-white/10 /30 px-3 py-1">
         <span className="w-8 text-right text-sm font-bold text-[#EEEEEE] tabular-nums">
-          {match.s1 !== null ? match.s1 : "-"}
+          {scores.left}
         </span>
         <span className="text-xs text-muted-foreground">-</span>
         <span className="w-8 text-left text-sm font-bold text-[#EEEEEE] tabular-nums">
-          {match.s2 !== null ? match.s2 : "-"}
+          {scores.right}
         </span>
       </div>
 
