@@ -419,7 +419,7 @@ usersRouter.get(
     }
 
     const { rows: user_info } = await pool.query(
-      `SELECT id, nickname, profile_picture, riot_account, role_id, team_id
+      `SELECT id, username, nickname, profile_picture, riot_account, role_id, team_id
      FROM users
      WHERE id = $1`,
       [id],

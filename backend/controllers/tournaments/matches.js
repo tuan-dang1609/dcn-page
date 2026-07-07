@@ -8,6 +8,10 @@ import {
   applyMatchProgression,
 } from "../../utils/bracketProgression.js";
 import { tryApplyStagedAovStats } from "../../utils/aovStagingDb.js";
+import {
+  fetchTftMatchData,
+  fetchValorantMatchData,
+} from "../../utils/bigtournamentClient.js";
 
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Matches";
@@ -338,6 +342,64 @@ const getMatchGameRowById = async ({
 };
 
 matchRouter.get(
+  "/external/valorant/:match_id",
+  async ({ params, set }) => {
+    const matchId = String(params.match_id ?? "").trim();
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id is required" };
+    }
+
+    try {
+      const payload = await fetchValorantMatchData(matchId);
+      set.status = 200;
+      return payload;
+    } catch (error) {
+      set.status = 502;
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch Valorant match data",
+      };
+    }
+  },
+  {
+    tags: [TAG],
+    summary: "Fetch Valorant match data via server-side BigTournament proxy",
+  },
+);
+
+matchRouter.get(
+  "/external/tft/:match_id",
+  async ({ params, set }) => {
+    const matchId = String(params.match_id ?? "").trim();
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id is required" };
+    }
+
+    try {
+      const payload = await fetchTftMatchData(matchId);
+      set.status = 200;
+      return payload;
+    } catch (error) {
+      set.status = 502;
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch TFT match data",
+      };
+    }
+  },
+  {
+    tags: [TAG],
+    summary: "Fetch TFT match data via server-side BigTournament proxy",
+  },
+);
+
+matchRouter.get(
   "/brackets/:bracket_id/matches",
   async ({ params, set }) => {
     const bracketId = toNumber(params.bracket_id);
@@ -403,6 +465,146 @@ matchRouter.get(
   {
     tags: [TAG],
     summary: "List matches by bracket",
+  },
+);
+
+matchRouter.get(
+  "/matches/:match_id/linked-players",
+  async ({ params, set }) => {
+    const matchId = toNumber(params.match_id);
+
+    if (!matchId) {
+      set.status = 400;
+      return { error: "match_id không hợp lệ" };
+    }
+
+    const { rows: matchRows } = await pool.query(
+      `
+      SELECT m.team_a_id, m.team_b_id, b.tournament_id
+      FROM matches m
+      JOIN brackets b ON b.id = m.bracket_id
+      WHERE m.id = $1
+      `,
+      [matchId],
+    );
+
+    if (!matchRows.length) {
+      set.status = 404;
+      return { error: "Match not found" };
+    }
+
+    const { team_a_id: teamAId, team_b_id: teamBId, tournament_id: tournamentId } =
+      matchRows[0];
+
+    const linkedPlayerSelect = `
+      u.id AS user_id,
+      u.username,
+      u.nickname,
+      u.profile_picture,
+      u.riot_account
+    `;
+
+    const fetchPlayersForTeam = async (teamId) => {
+      if (!teamId || !tournamentId) return [];
+
+      const { rows } = await pool.query(
+        `
+        SELECT user_id, username, nickname, profile_picture, riot_account
+        FROM (
+          SELECT ${linkedPlayerSelect}
+          FROM tournament_teams tt
+          INNER JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+          INNER JOIN users u ON u.id = ttp.user_id
+          WHERE tt.tournament_id = $1 AND tt.team_id = $2
+
+          UNION
+
+          SELECT ${linkedPlayerSelect}
+          FROM users u
+          WHERE u.team_id = $2
+
+          UNION
+
+          SELECT ${linkedPlayerSelect}
+          FROM teams t
+          INNER JOIN users u ON u.id = t.created_by
+          WHERE t.id = $2 AND t.created_by IS NOT NULL
+        ) team_players
+        ORDER BY user_id ASC
+        `,
+        [tournamentId, teamId],
+      );
+
+      return rows;
+    };
+
+    const fetchAllTournamentPlayers = async () => {
+      if (!tournamentId) return [];
+
+      const { rows } = await pool.query(
+        `
+        SELECT user_id, username, nickname, profile_picture, riot_account
+        FROM (
+          SELECT ${linkedPlayerSelect}
+          FROM tournament_teams tt
+          INNER JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+          INNER JOIN users u ON u.id = ttp.user_id
+          WHERE tt.tournament_id = $1
+
+          UNION
+
+          SELECT ${linkedPlayerSelect}
+          FROM tournament_teams tt
+          INNER JOIN users u ON u.team_id = tt.team_id
+          WHERE tt.tournament_id = $1
+
+          UNION
+
+          SELECT ${linkedPlayerSelect}
+          FROM tournament_teams tt
+          INNER JOIN teams t ON t.id = tt.team_id
+          INNER JOIN users u ON u.id = t.created_by
+          WHERE tt.tournament_id = $1 AND t.created_by IS NOT NULL
+
+          UNION
+
+          SELECT ${linkedPlayerSelect}
+          FROM users u
+          WHERE u.riot_account IS NOT NULL AND TRIM(u.riot_account) <> ''
+        ) tournament_players
+        ORDER BY user_id ASC
+        `,
+        [tournamentId],
+      );
+
+      return rows;
+    };
+
+    const [team1Players, team2Players, allPlayers] = await Promise.all([
+      fetchPlayersForTeam(teamAId),
+      fetchPlayersForTeam(teamBId),
+      fetchAllTournamentPlayers(),
+    ]);
+
+    set.status = 200;
+    return {
+      data: {
+        tournament_id: tournamentId,
+        team1: {
+          team_id: teamAId,
+          players: team1Players,
+        },
+        team2: {
+          team_id: teamBId,
+          players: team2Players,
+        },
+        all_players: allPlayers,
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "List linked user profiles for both teams in a match",
   },
 );
 

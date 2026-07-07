@@ -2,11 +2,9 @@ import { useParams, Link, useOutletContext, useLocation } from "react-router-dom
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
-import axios from "axios";
 import type { MatchDetail, RoundHistoryEntry, AovGameRoster } from "@/types/matchDetail";
-import { useAuth, type User as AuthUser } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import type { RoundBanPickPayload } from "@/api/banpick";
-import { API_BASE } from "@/lib/apiBase";
 import { MapCard } from "@/components/MapCard";
 import { SideSelectModal } from "@/components/SideSelectModal";
 import { useRoundBanPickSocket } from "@/hooks/useRoundBanPickSocket";
@@ -28,14 +26,18 @@ import {
 import {
   getBracketsByTournamentId,
   getMatchGameIds,
+  getMatchLinkedPlayers,
   getMatchesByBracketId,
-  getTournamentTeamPlayers,
   type Match,
   type MatchGameIdRecord,
   type TournamentBySlugResponse,
 } from "@/api/tournaments";
 import type { TournamentTeamPlayersResponse } from "@/api/tournaments/types";
 import {
+  MATCH_ROSTER_AVATAR_CLASS,
+  MATCH_ROSTER_HEADER_CLASS,
+  MATCH_ROSTER_PANEL_CLASS,
+  MATCH_SCOREBOARD_WRAPPER_CLASS,
   TOURNAMENT_PAGE_BG_CLASS,
   TOURNAMENT_PAGE_TITLE_CLASS,
   TOURNAMENT_TABLE_HEADER_CLASS,
@@ -94,7 +96,12 @@ const mapImages: Record<string, string> = {
 
 type RoundWinReason = NonNullable<RoundHistoryEntry["winReason"]>;
 type TeamSide = "team1" | "team2";
-type LinkedUserProfile = AuthUser;
+type LinkedProfileRecord = {
+  nickname: string;
+  avatar: string;
+  username: string;
+  riot_account: string;
+};
 
 type LinkedTeamContext = {
   team1Players: TournamentTeamPlayersResponse["players"];
@@ -103,6 +110,9 @@ type LinkedTeamContext = {
   team2RiotAccounts: Set<string>;
   nicknameByRiotAccount: Map<string, string>;
   avatarByRiotAccount: Map<string, string>;
+  nicknameByUsername: Map<string, string>;
+  avatarByUsername: Map<string, string>;
+  profileByKey: Map<string, LinkedProfileRecord>;
 };
 
 type ValorantSideMapping = {
@@ -161,6 +171,9 @@ const normalizeRiotAccount = (value?: string | null) => {
   return `${gameName}#${tagLine}`.toLowerCase();
 };
 
+const normalizeUsernameKey = (value?: string | null) =>
+  String(value ?? "").trim().toLowerCase();
+
 const buildRiotAccount = (gameName?: string, tagLine?: string) => {
   const normalizedGameName = sanitizeRiotSegment(gameName);
   const normalizedTagLine = sanitizeRiotSegment(
@@ -193,7 +206,271 @@ const createEmptyLinkedTeamContext = (): LinkedTeamContext => ({
   team2RiotAccounts: new Set(),
   nicknameByRiotAccount: new Map(),
   avatarByRiotAccount: new Map(),
+  nicknameByUsername: new Map(),
+  avatarByUsername: new Map(),
+  profileByKey: new Map(),
 });
+
+const collectProfileKeys = (value?: string | null): string[] => {
+  const keys = new Set<string>();
+  const usernameKey = normalizeUsernameKey(value);
+  if (usernameKey) keys.add(usernameKey);
+
+  const riotKey = normalizeRiotAccount(value);
+  if (riotKey) {
+    keys.add(riotKey);
+    const [gameNamePart] = riotKey.split("#");
+    if (gameNamePart) keys.add(gameNamePart);
+  }
+
+  return Array.from(keys);
+};
+
+const buildLinkedProfileIndex = (
+  players: TournamentTeamPlayersResponse["players"] | undefined,
+): Map<string, LinkedProfileRecord> => {
+  const index = new Map<string, LinkedProfileRecord>();
+
+  players?.forEach((player) => {
+    const record: LinkedProfileRecord = {
+      nickname: String(player?.nickname ?? "").trim(),
+      avatar: String(player?.profile_picture ?? "").trim(),
+      username: String(player?.username ?? "").trim(),
+      riot_account: String(player?.riot_account ?? "").trim(),
+    };
+
+    if (!record.avatar && !record.nickname && !record.username) {
+      return;
+    }
+
+    const aliasKeys = [
+      ...collectProfileKeys(record.username),
+      ...collectProfileKeys(record.nickname),
+      ...collectProfileKeys(record.riot_account),
+    ];
+
+    aliasKeys.forEach((key) => {
+      if (!index.has(key)) {
+        index.set(key, record);
+      }
+    });
+  });
+
+  return index;
+};
+
+const registerPlayerProfileAliases = (
+  context: LinkedTeamContext,
+  aliases: Array<string | undefined | null>,
+  nickname: string,
+  avatar: string,
+) => {
+  const keys = new Set<string>();
+
+  aliases.forEach((alias) => {
+    const usernameKey = normalizeUsernameKey(alias);
+    if (usernameKey) keys.add(usernameKey);
+
+    const riotAccount = normalizeRiotAccount(alias);
+    if (riotAccount) {
+      keys.add(riotAccount);
+      const [gameNamePart] = riotAccount.split("#");
+      if (gameNamePart) keys.add(gameNamePart);
+    }
+  });
+
+  keys.forEach((key) => {
+    if (nickname && !context.nicknameByUsername.has(key)) {
+      context.nicknameByUsername.set(key, nickname);
+    }
+    if (avatar && !context.avatarByUsername.has(key)) {
+      context.avatarByUsername.set(key, avatar);
+    }
+
+    const riotAccount = normalizeRiotAccount(key);
+    if (!riotAccount) return;
+
+    if (nickname && !context.nicknameByRiotAccount.has(riotAccount)) {
+      context.nicknameByRiotAccount.set(riotAccount, nickname);
+    }
+    if (avatar && !context.avatarByRiotAccount.has(riotAccount)) {
+      context.avatarByRiotAccount.set(riotAccount, avatar);
+    }
+  });
+};
+
+const lookupLinkedProfile = (
+  linkedContext: LinkedTeamContext,
+  candidates: Array<string | undefined | null>,
+): { nickname?: string; avatar?: string } => {
+  const lookupKeys = new Set<string>();
+  candidates.forEach((candidate) => {
+    collectProfileKeys(candidate).forEach((key) => lookupKeys.add(key));
+  });
+
+  for (const key of lookupKeys) {
+    const hit = linkedContext.profileByKey.get(key);
+    if (hit?.avatar || hit?.nickname) {
+      return {
+        nickname: hit.nickname || undefined,
+        avatar: hit.avatar || undefined,
+      };
+    }
+  }
+
+  for (const key of lookupKeys) {
+    const nickname = linkedContext.nicknameByUsername.get(key);
+    const avatar = linkedContext.avatarByUsername.get(key);
+    if (nickname || avatar) {
+      return { nickname, avatar };
+    }
+
+    const riotNickname = linkedContext.nicknameByRiotAccount.get(key);
+    const riotAvatar = linkedContext.avatarByRiotAccount.get(key);
+    if (riotNickname || riotAvatar) {
+      return { nickname: riotNickname, avatar: riotAvatar };
+    }
+  }
+
+  const normalizedPlayerRiots = candidates
+    .map((candidate) => normalizeRiotAccount(candidate))
+    .filter(Boolean);
+
+  if (normalizedPlayerRiots.length > 0) {
+    for (const record of linkedContext.profileByKey.values()) {
+      const recordRiot = normalizeRiotAccount(record.riot_account);
+      if (recordRiot && normalizedPlayerRiots.includes(recordRiot)) {
+        return {
+          nickname: record.nickname || undefined,
+          avatar: record.avatar || undefined,
+        };
+      }
+    }
+  }
+
+  return {};
+};
+
+const findLinkedProfileForRosterPlayer = (
+  player: MatchDetail["team1Roster"]["players"][number],
+  linkedContext: LinkedTeamContext,
+): { nickname?: string; avatar?: string } => {
+  const riotAccount = String(player.riotAccount ?? "").trim();
+  const displayName = String(player.name ?? "").trim();
+
+  if (riotAccount.includes("#")) {
+    const [gameName, ...tagParts] = riotAccount.split("#");
+    const tagLine = tagParts.join("#");
+    const fromRiotId = lookupLinkedProfile(linkedContext, [
+      riotAccount,
+      buildRiotAccount(gameName, tagLine),
+      gameName,
+      tagLine,
+      displayName,
+    ]);
+    if (fromRiotId.avatar || fromRiotId.nickname) {
+      return fromRiotId;
+    }
+  }
+
+  return lookupLinkedProfile(linkedContext, [
+    riotAccount,
+    displayName,
+    buildRiotAccount(displayName, undefined),
+  ]);
+};
+
+const findLinkedProfileFromValorantPlayer = (
+  player: ValorantApiPlayer,
+  linkedContext: LinkedTeamContext,
+): { nickname?: string; avatar?: string } =>
+  lookupLinkedProfile(linkedContext, [
+    buildRiotAccount(player.gameName, player.tagLine),
+    player.gameName,
+    player.tagLine,
+  ]);
+
+const enrichRosterWithLinkedProfiles = (
+  roster: MatchDetail["team1Roster"],
+  linkedContext: LinkedTeamContext,
+): MatchDetail["team1Roster"] => ({
+  ...roster,
+  players: roster.players.map((player) => {
+    const linked = findLinkedProfileForRosterPlayer(player, linkedContext);
+    const avatar = linked.avatar || player.avatar;
+    const name = linked.nickname || player.name;
+
+    return {
+      ...player,
+      name,
+      avatar: avatar || undefined,
+    };
+  }),
+});
+
+const enrichMatchWithLinkedProfiles = (
+  sourceMatch: MatchDetail,
+  linkedContext: LinkedTeamContext,
+): MatchDetail => {
+  const hasLinkedPlayers =
+    (linkedContext.team1Players?.length ?? 0) > 0 ||
+    (linkedContext.team2Players?.length ?? 0) > 0;
+
+  if (!hasLinkedPlayers) {
+    return sourceMatch;
+  }
+
+  return {
+    ...sourceMatch,
+    team1Roster: enrichRosterWithLinkedProfiles(
+      sourceMatch.team1Roster,
+      linkedContext,
+    ),
+    team2Roster: enrichRosterWithLinkedProfiles(
+      sourceMatch.team2Roster,
+      linkedContext,
+    ),
+    fpsMapRosters: sourceMatch.fpsMapRosters?.map((mapRoster) => ({
+      ...mapRoster,
+      team1Roster: enrichRosterWithLinkedProfiles(
+        mapRoster.team1Roster,
+        linkedContext,
+      ),
+      team2Roster: enrichRosterWithLinkedProfiles(
+        mapRoster.team2Roster,
+        linkedContext,
+      ),
+    })),
+  };
+};
+
+const getRosterPlayerPortrait = (
+  player: MatchDetail["team1Roster"]["players"][number],
+  linkedContext?: LinkedTeamContext,
+  preferUserAvatar = true,
+): string | undefined => {
+  const linked = linkedContext
+    ? findLinkedProfileForRosterPlayer(player, linkedContext)
+    : {};
+  const userAvatar = linked.avatar || player.avatar;
+
+  if (preferUserAvatar && userAvatar) {
+    return userAvatar;
+  }
+
+  return player.icon || userAvatar;
+};
+
+const resolveLinkedProfileFromMatchRiotId = (
+  gameName: string | undefined,
+  tagLine: string | undefined,
+  linkedContext: LinkedTeamContext,
+): { nickname?: string; avatar?: string } =>
+  lookupLinkedProfile(linkedContext, [
+    buildRiotAccount(gameName, tagLine),
+    gameName,
+    tagLine,
+  ]);
 
 const isLinkedTournamentPlayer = (
   value: unknown,
@@ -202,6 +479,9 @@ const isLinkedTournamentPlayer = (
 
   const candidate = value as Record<string, unknown>;
   return (
+    typeof candidate.user_id === "number" ||
+    typeof candidate.user_id === "string" ||
+    typeof candidate.username === "string" ||
     typeof candidate.nickname === "string" ||
     typeof candidate.profile_picture === "string" ||
     typeof candidate.riot_account === "string"
@@ -240,71 +520,6 @@ const extractTournamentTeamPlayers = (
   }
 
   return [];
-};
-
-const hydrateLinkedPlayersWithUserProfiles = async (
-  players: TournamentTeamPlayersResponse["players"],
-): Promise<TournamentTeamPlayersResponse["players"]> => {
-  const safePlayers = players ?? [];
-
-  if (safePlayers.length === 0) {
-    return [];
-  }
-
-  const userIds = Array.from(
-    new Set(
-      safePlayers
-        .map((player) => toNumber(player?.user_id))
-        .filter((id): id is number => id !== null),
-    ),
-  );
-
-  if (userIds.length === 0) {
-    return safePlayers;
-  }
-
-  const profileResults = await Promise.all(
-    userIds.map(async (userId) => {
-      try {
-        const response = await axios.get<LinkedUserProfile>(
-          `${API_BASE}/api/users/${userId}`,
-        );
-        return [userId, response.data] as const;
-      } catch {
-        return null;
-      }
-    }),
-  );
-
-  const userProfileById = new Map<number, LinkedUserProfile>();
-  profileResults.forEach((entry) => {
-    if (!entry) return;
-    userProfileById.set(entry[0], entry[1]);
-  });
-
-  return safePlayers.map((player) => {
-    const userId = toNumber(player?.user_id);
-    const linkedUser =
-      userId !== null ? (userProfileById.get(userId) ?? null) : null;
-
-    const nickname = String(
-      linkedUser?.nickname ?? player?.nickname ?? "",
-    ).trim();
-    const profilePicture = String(
-      linkedUser?.profile_picture ?? player?.profile_picture ?? "",
-    ).trim();
-    const riotAccount = String(
-      linkedUser?.riot_account ?? player?.riot_account ?? "",
-    ).trim();
-
-    return {
-      ...player,
-      user_id: linkedUser?.id ?? player?.user_id,
-      nickname: nickname || undefined,
-      profile_picture: profilePicture || undefined,
-      riot_account: riotAccount || null,
-    };
-  });
 };
 
 type BanPickTimelineItem = {
@@ -1061,8 +1276,7 @@ const buildRoundHistoryFromApi = (
 const buildValorantRosterFromApi = (
   baseRoster: MatchDetail["team1Roster"],
   players: ValorantApiPlayer[],
-  nicknameByRiotAccount?: Map<string, string>,
-  avatarByRiotAccount?: Map<string, string>,
+  linkedContext: LinkedTeamContext,
 ): MatchDetail["team1Roster"] => ({
   ...baseRoster,
   players: Array.from(
@@ -1079,12 +1293,12 @@ const buildValorantRosterFromApi = (
             `${String(player.gameName ?? "")}-${String(player.tagLine ?? "")}-${String(player.characterName ?? "")}`
               .toLowerCase()
               .trim();
-          const linkedNickname = riotAccount
-            ? nicknameByRiotAccount?.get(riotAccount)
-            : undefined;
-          const linkedAvatar = riotAccount
-            ? avatarByRiotAccount?.get(riotAccount)
-            : undefined;
+          const linkedProfile = findLinkedProfileFromValorantPlayer(
+            player,
+            linkedContext,
+          );
+          const linkedNickname = linkedProfile.nickname;
+          const linkedAvatar = linkedProfile.avatar;
           const stats = player.stats ?? {};
           const current = acc.get(key) ?? {
             name:
@@ -1318,8 +1532,7 @@ const mergeValorantApiIntoMatch = (
           ? buildValorantRosterFromApi(
               baseMatch.team1Roster,
               mapTeam1Players,
-              linkedContext.nicknameByRiotAccount,
-              linkedContext.avatarByRiotAccount,
+              linkedContext,
             )
           : baseMatch.team1Roster,
       team2Roster:
@@ -1327,8 +1540,7 @@ const mergeValorantApiIntoMatch = (
           ? buildValorantRosterFromApi(
               baseMatch.team2Roster,
               mapTeam2Players,
-              linkedContext.nicknameByRiotAccount,
-              linkedContext.avatarByRiotAccount,
+              linkedContext,
             )
           : baseMatch.team2Roster,
     };
@@ -1375,8 +1587,7 @@ const mergeValorantApiIntoMatch = (
         ? buildValorantRosterFromApi(
             baseMatch.team1Roster,
             team1Players,
-            linkedContext.nicknameByRiotAccount,
-            linkedContext.avatarByRiotAccount,
+            linkedContext,
           )
         : baseMatch.team1Roster,
     team2Roster:
@@ -1384,8 +1595,7 @@ const mergeValorantApiIntoMatch = (
         ? buildValorantRosterFromApi(
             baseMatch.team2Roster,
             team2Players,
-            linkedContext.nicknameByRiotAccount,
-            linkedContext.avatarByRiotAccount,
+            linkedContext,
           )
         : baseMatch.team2Roster,
   };
@@ -1553,95 +1763,325 @@ const getPickedMapIdsFromSession = (
   return Array.from(new Set([...fromActionLog, ...fromState]));
 };
 
+const MatchRosterPlayerChip = ({
+  player,
+  index,
+  teamTag,
+  showRiotMeta = false,
+  linkedContext,
+}: {
+  player: MatchDetail["team1Roster"]["players"][number];
+  index: number;
+  teamTag: string;
+  showRiotMeta?: boolean;
+  linkedContext?: LinkedTeamContext;
+}) => {
+  const displayName = String(player.name ?? "").trim();
+  const riotAccount = String(player.riotAccount ?? "").trim();
+  const shouldShowRiot =
+    showRiotMeta &&
+    Boolean(riotAccount) &&
+    riotAccount.toLowerCase() !== displayName.toLowerCase();
+  const portrait = getRosterPlayerPortrait(player, linkedContext, true);
+
+  return (
+    <div
+      key={`${teamTag}-${player.name}-${index}`}
+      className="mx-auto flex w-full min-w-0 flex-col items-center gap-1.5 text-center"
+      title={shouldShowRiot ? riotAccount : displayName}
+    >
+      <div className={`${MATCH_ROSTER_AVATAR_CLASS} h-10 w-10 sm:h-11 sm:w-11`}>
+        {portrait ? (
+          <img
+            src={portrait}
+            alt={displayName || "player"}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <span>{(displayName || "P").charAt(0).toUpperCase()}</span>
+        )}
+      </div>
+      <p className="w-full text-[10px] font-bold leading-snug text-white break-words [overflow-wrap:anywhere]">
+        {displayName || `P${index + 1}`}
+      </p>
+      {player.role ? (
+        <p className="w-full text-[9px] font-semibold uppercase leading-snug tracking-wide text-neutral-500 break-words [overflow-wrap:anywhere]">
+          {player.role}
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
+const MatchRosterLineupGrid = ({
+  players,
+  teamTag,
+  showRiotMeta = false,
+  slotCount,
+  linkedContext,
+}: {
+  players: MatchDetail["team1Roster"]["players"];
+  teamTag: string;
+  showRiotMeta?: boolean;
+  slotCount?: number;
+  linkedContext?: LinkedTeamContext;
+}) => {
+  const lineup =
+    slotCount === undefined ? players : players.slice(0, slotCount);
+
+  if (lineup.length === 0) {
+    return (
+      <p className="px-3 py-4 text-xs text-neutral-500">Chưa có roster</p>
+    );
+  }
+
+  const desktopGridClass =
+    slotCount === undefined
+      ? "md:grid md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+      : "md:grid md:grid-cols-5";
+
+  return (
+    <div className="px-2 py-3">
+      <div
+        className={`flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${desktopGridClass} md:gap-2 md:overflow-visible`}
+      >
+        {lineup.map((player, index) => (
+          <div
+            key={`${teamTag}-${player.name}-${index}`}
+            className="w-[5.5rem] shrink-0 snap-start md:w-auto md:shrink"
+          >
+            <MatchRosterPlayerChip
+              player={player}
+              index={index}
+              teamTag={teamTag}
+              showRiotMeta={showRiotMeta}
+              linkedContext={linkedContext}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const MatchTeamRosterMobileHeader = ({
+  team,
+  playerCount,
+  showAllParticipants,
+  align = "left",
+}: {
+  team: MatchDetail["team1"];
+  playerCount: number;
+  showAllParticipants: boolean;
+  align?: "left" | "right";
+}) => (
+  <div
+    className={`flex items-center gap-2.5 bg-[#1a1a1a] px-3 py-2.5 ${
+      align === "right" ? "flex-row-reverse text-right" : ""
+    }`}
+  >
+    {team.logo ? (
+      <img
+        src={team.logo}
+        alt={team.tag}
+        className="h-7 w-7 shrink-0 object-cover"
+        onError={(event) => {
+          event.currentTarget.style.display = "none";
+        }}
+      />
+    ) : (
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-[10px] font-bold text-white">
+        {team.tag.slice(0, 2)}
+      </div>
+    )}
+    <div className="min-w-0">
+      <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
+        {team.name}
+      </p>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+        {team.tag}
+        {showAllParticipants && playerCount > 0 ? ` · ${playerCount} người` : ""}
+      </p>
+    </div>
+  </div>
+);
+
+const MatchDualRosterStrip = ({
+  team1,
+  team2,
+  team1Players,
+  team2Players,
+  showRiotMeta = false,
+  showAllParticipants = false,
+  linkedContext,
+}: {
+  team1: MatchDetail["team1"];
+  team2: MatchDetail["team2"];
+  team1Players: MatchDetail["team1Roster"]["players"];
+  team2Players: MatchDetail["team2Roster"]["players"];
+  showRiotMeta?: boolean;
+  showAllParticipants?: boolean;
+  linkedContext?: LinkedTeamContext;
+}) => {
+  const slotCount = showAllParticipants ? undefined : 5;
+
+  return (
+    <div className={MATCH_ROSTER_PANEL_CLASS}>
+      <div className="hidden border-b border-neutral-700 bg-[#1a1a1a] md:grid md:grid-cols-2">
+        <div className="flex items-center gap-2.5 border-r border-neutral-700 px-3 py-2.5">
+          {team1.logo ? (
+            <img
+              src={team1.logo}
+              alt={team1.tag}
+              className="h-7 w-7 shrink-0 object-cover"
+            />
+          ) : (
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-[10px] font-bold text-white">
+              {team1.tag.slice(0, 2)}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
+              {team1.name}
+            </p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+              {team1.tag}
+              {showAllParticipants && team1Players.length > 0
+                ? ` · ${team1Players.length} người`
+                : ""}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-row-reverse items-center gap-2.5 px-3 py-2.5 text-right">
+          {team2.logo ? (
+            <img
+              src={team2.logo}
+              alt={team2.tag}
+              className="h-7 w-7 shrink-0 object-cover"
+            />
+          ) : (
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-[10px] font-bold text-white">
+              {team2.tag.slice(0, 2)}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
+              {team2.name}
+            </p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+              {team2.tag}
+              {showAllParticipants && team2Players.length > 0
+                ? ` · ${team2Players.length} người`
+                : ""}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col md:grid md:grid-cols-2">
+        <div className="border-b border-neutral-800 md:border-b-0 md:border-r">
+          <div className="md:hidden">
+            <MatchTeamRosterMobileHeader
+              team={team1}
+              playerCount={team1Players.length}
+              showAllParticipants={showAllParticipants}
+            />
+          </div>
+          <MatchRosterLineupGrid
+            players={team1Players}
+            teamTag={team1.tag}
+            showRiotMeta={showRiotMeta}
+            slotCount={slotCount}
+            linkedContext={linkedContext}
+          />
+        </div>
+        <div>
+          <div className="md:hidden">
+            <MatchTeamRosterMobileHeader
+              team={team2}
+              playerCount={team2Players.length}
+              showAllParticipants={showAllParticipants}
+              align="right"
+            />
+          </div>
+          <MatchRosterLineupGrid
+            players={team2Players}
+            teamTag={team2.tag}
+            showRiotMeta={showRiotMeta}
+            slotCount={slotCount}
+            linkedContext={linkedContext}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MatchTeamRosterPanel = ({
+  team,
+  players,
+  align = "left",
+  showRiotMeta = false,
+  linkedContext,
+}: {
+  team: MatchDetail["team1"];
+  players: MatchDetail["team1Roster"]["players"];
+  align?: "left" | "right";
+  showRiotMeta?: boolean;
+  linkedContext?: LinkedTeamContext;
+}) => {
+  const safePlayers = players.slice(0, 5);
+
+  return (
+    <div className={MATCH_ROSTER_PANEL_CLASS}>
+      <div
+        className={`${MATCH_ROSTER_HEADER_CLASS} ${
+          align === "right" ? "flex-row-reverse text-right" : ""
+        }`}
+      >
+        <img src={team.logo} alt={team.tag} className="h-7 w-7 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
+            {team.name}
+          </p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+            {team.tag}
+          </p>
+        </div>
+      </div>
+
+      <MatchRosterLineupGrid
+        players={safePlayers}
+        teamTag={team.tag}
+        showRiotMeta={showRiotMeta}
+        slotCount={5}
+        linkedContext={linkedContext}
+      />
+    </div>
+  );
+};
+
 const TeamLobbyRoster = ({
   team,
   players,
   align,
   showRiotMeta,
+  linkedContext,
 }: {
   team: MatchDetail["team1"];
   players: MatchDetail["team1Roster"]["players"];
   align: "left" | "right";
   showRiotMeta: boolean;
-}) => {
-  const safePlayers = players.slice(0, 5);
-
-  return (
-    <div className="rounded-xl border border-border/70 bg-card/30 p-3 space-y-3">
-      <div
-        className={`flex items-center gap-2 ${align === "right" ? "justify-end" : "justify-start"}`}
-      >
-        {align === "right" ? null : (
-          <img src={team.logo} alt={team.tag} className="w-8 h-8 rounded" />
-        )}
-        <div className={align === "right" ? "text-right" : "text-left"}>
-          <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
-            Team
-          </p>
-          <p className="text-sm font-black uppercase tracking-wide">{team.name}</p>
-        </div>
-        {align === "right" ? (
-          <img src={team.logo} alt={team.tag} className="w-8 h-8 rounded" />
-        ) : null}
-      </div>
-
-      <div className="space-y-1.5">
-        {safePlayers.length > 0 ? (
-          safePlayers.map((player, index) => {
-            const displayName = String(player.name ?? "").trim();
-            const riotAccount = String(player.riotAccount ?? "").trim();
-            const shouldShowRiot =
-              showRiotMeta &&
-              Boolean(riotAccount) &&
-              riotAccount.toLowerCase() !== displayName.toLowerCase();
-
-            return (
-              <div
-                key={`${team.tag}-${player.name}-${index}`}
-                className={`rounded-md border border-border/50 /20 px-2 py-1.5 text-xs ${
-                  align === "right" ? "text-right" : "text-left"
-                }`}
-              >
-                <div
-                  className={`flex items-center gap-2 ${
-                    align === "right" ? "flex-row-reverse" : ""
-                  }`}
-                >
-                  {player.avatar ? (
-                    <img
-                      src={player.avatar}
-                      alt={displayName || "player"}
-                      className="w-7 h-7 rounded object-cover shrink-0"
-                    />
-                  ) : (
-                    <div className="w-7 h-7 rounded bg-muted/30 flex items-center justify-center text-[10px] font-bold shrink-0">
-                      {(displayName || "P").charAt(0).toUpperCase()}
-                    </div>
-                  )}
-
-                  <div className="min-w-0">
-                    <p className="truncate text-foreground font-semibold">
-                      {displayName || `Player ${index + 1}`}
-                    </p>
-                    {shouldShowRiot ? (
-                      <p className="truncate text-[10px] text-muted-foreground">
-                        {riotAccount}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        ) : (
-          <div className="rounded-md border border-dashed border-border/50 /10 px-2 py-2 text-xs text-muted-foreground">
-            Chưa có roster
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+  linkedContext?: LinkedTeamContext;
+}) => (
+  <MatchTeamRosterPanel
+    team={team}
+    players={players}
+    align={align}
+    showRiotMeta={showRiotMeta}
+    linkedContext={linkedContext}
+  />
+);
 
 const BanPickLobbyPanel = ({
   match,
@@ -1653,6 +2093,7 @@ const BanPickLobbyPanel = ({
   selectMap,
   confirmAction,
   selectSide,
+  linkedContext,
 }: {
   match: MatchDetail;
   session: RoundBanPickPayload | null;
@@ -1663,6 +2104,7 @@ const BanPickLobbyPanel = ({
   selectMap: (mapId: string) => void | Promise<void>;
   confirmAction: () => void | Promise<void>;
   selectSide: (side: "ATK" | "DEF") => void | Promise<void>;
+  linkedContext: LinkedTeamContext;
 }) => {
   if (isLoading && !session) {
     return (
@@ -1827,6 +2269,7 @@ const BanPickLobbyPanel = ({
             players={match.team1Roster.players}
             align="left"
             showRiotMeta={isRiotGame}
+            linkedContext={linkedContext}
           />
 
           <div className="space-y-3">
@@ -1968,6 +2411,7 @@ const BanPickLobbyPanel = ({
             players={match.team2Roster.players}
             align="right"
             showRiotMeta={isRiotGame}
+            linkedContext={linkedContext}
           />
         </div>
 
@@ -1998,10 +2442,12 @@ const PendingMatchOverviewPanel = ({
   match,
   session,
   matchGameIds,
+  linkedContext,
 }: {
   match: MatchDetail;
   session: RoundBanPickPayload | null;
   matchGameIds: MatchGameIdRecord[];
+  linkedContext: LinkedTeamContext;
 }) => {
   const mapNameByCode = new Map(
     (session?.map_pool ?? []).map((item) => [item.map_code, item.map_name]),
@@ -2064,6 +2510,7 @@ const PendingMatchOverviewPanel = ({
             players={match.team1Roster.players}
             align="left"
             showRiotMeta={isRiotGame}
+            linkedContext={linkedContext}
           />
 
           <div className="space-y-3">
@@ -2120,6 +2567,7 @@ const PendingMatchOverviewPanel = ({
             players={match.team2Roster.players}
             align="right"
             showRiotMeta={isRiotGame}
+            linkedContext={linkedContext}
           />
         </div>
       </div>
@@ -2128,7 +2576,13 @@ const PendingMatchOverviewPanel = ({
 };
 
 /* ── FPS Stat Table ── */
-const FPSStatTable = ({ match }: { match: MatchDetail }) => {
+const FPSStatTable = ({
+  match,
+  linkedContext,
+}: {
+  match: MatchDetail;
+  linkedContext: LinkedTeamContext;
+}) => {
   const [activeTab, setActiveTab] = useState(0);
   const mapRosterTabs = match.fpsMapRosters ?? [];
   const tabs =
@@ -2180,6 +2634,16 @@ const FPSStatTable = ({ match }: { match: MatchDetail }) => {
           ))}
         </div>
       </div>
+
+      <MatchDualRosterStrip
+        team1={match.team1}
+        team2={match.team2}
+        team1Players={activeRosters[0]?.players ?? []}
+        team2Players={activeRosters[1]?.players ?? []}
+        showRiotMeta
+        showAllParticipants={currentTab === 0}
+        linkedContext={linkedContext}
+      />
 
       {selectedMapForRounds && selectedRoundHistory.length > 0 && (
         <div className="w-full px-3 py-2">
@@ -2638,49 +3102,29 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
 );
 
 /* ── Roster Section ── */
-const RosterSection = ({ match }: { match: MatchDetail }) => (
-  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    {[match.team1Roster, match.team2Roster].map((roster) => (
-      <div key={roster.teamTag} className="space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-[0.15em] text-[#EEEEEE]">
-          {roster.teamName} Roster
-        </h3>
-        <div className="grid gap-2 justify-start grid-cols-5 w-full">
-          {roster.players.map((p, playerIndex) => (
-            <div
-              key={`${roster.teamTag}-${p.name}-${playerIndex}`}
-              className="min-h-[120px] flex flex-col items-center justify-start gap-2 px-2 py-3"
-            >
-              <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center text-base font-bold text-[#EEEEEE]">
-                {p.avatar || p.icon ? (
-                  <img
-                    src={p.avatar || p.icon}
-                    alt={p.name}
-                    className="h-full w-full rounded-lg object-cover"
-                  />
-                ) : (
-                  <span>{p.name.charAt(0)}</span>
-                )}
-              </div>
-              <div className="text-center w-full">
-                <div className="flex items-center justify-center gap-1">
-                  <span className="text-[11px] font-bold text-foreground truncate max-w-[72px]">
-                    {p.name}
-                  </span>
-                </div>
-                {p.role && (
-                  <span className="text-[9px] text-[#EEEEEE] truncate block">
-                    {p.role}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    ))}
-  </div>
-);
+const RosterSection = ({
+  match,
+  linkedContext,
+}: {
+  match: MatchDetail;
+  linkedContext: LinkedTeamContext;
+}) => {
+  const isRiotGame = ["valorant", "lol", "wildrift", "tft"].includes(
+    match.gameType,
+  );
+
+  return (
+    <MatchDualRosterStrip
+      team1={match.team1}
+      team2={match.team2}
+      team1Players={match.team1Roster.players}
+      team2Players={match.team2Roster.players}
+      showRiotMeta={isRiotGame}
+      showAllParticipants
+      linkedContext={linkedContext}
+    />
+  );
+};
 
 /* ── Main Page ── */
 const MatchDetailPage = () => {
@@ -2782,87 +3226,19 @@ const MatchDetailPage = () => {
     [sortedMatches, numId, isLobbyRoute],
   );
 
-  const currentMatchTeamIds = useMemo(() => {
-    const leftTeamId =
-      toNumber(currentMatchRow?.team_a?.id) ??
-      toNumber(currentMatchRow?.team_a_id);
-    const rightTeamId =
-      toNumber(currentMatchRow?.team_b?.id) ??
-      toNumber(currentMatchRow?.team_b_id);
-
-    return {
-      team1TeamId: leftTeamId,
-      team2TeamId: rightTeamId,
-    };
-  }, [currentMatchRow]);
-
-  const tournamentTeamIdByTeamId = useMemo(() => {
-    const map = new Map<number, number>();
-
-    (tournament?.registered ?? []).forEach((entry) => {
-      const teamId = toNumber(entry.team_id);
-      const tournamentTeamId = toNumber(entry.id);
-
-      if (teamId === null || tournamentTeamId === null) return;
-      map.set(teamId, tournamentTeamId);
-    });
-
-    return map;
-  }, [tournament?.registered]);
-
-  const linkedTournamentTeamIds = useMemo(
-    () => ({
-      team1TournamentTeamId:
-        currentMatchTeamIds.team1TeamId !== null
-          ? (tournamentTeamIdByTeamId.get(currentMatchTeamIds.team1TeamId) ??
-            null)
-          : null,
-      team2TournamentTeamId:
-        currentMatchTeamIds.team2TeamId !== null
-          ? (tournamentTeamIdByTeamId.get(currentMatchTeamIds.team2TeamId) ??
-            null)
-          : null,
-    }),
-    [currentMatchTeamIds, tournamentTeamIdByTeamId],
-  );
-
   const { data: linkedTeamPlayers } = useQuery({
-    queryKey: [
-      "match-linked-team-players",
-      linkedTournamentTeamIds.team1TournamentTeamId,
-      linkedTournamentTeamIds.team2TournamentTeamId,
-    ],
-    enabled: Boolean(
-      linkedTournamentTeamIds.team1TournamentTeamId ||
-      linkedTournamentTeamIds.team2TournamentTeamId,
-    ),
+    queryKey: ["match-linked-players", numId],
+    enabled: Boolean(numId),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
     queryFn: async () => {
-      const [team1Response, team2Response] = await Promise.all([
-        linkedTournamentTeamIds.team1TournamentTeamId
-          ? getTournamentTeamPlayers(
-              linkedTournamentTeamIds.team1TournamentTeamId,
-            )
-          : Promise.resolve(null),
-        linkedTournamentTeamIds.team2TournamentTeamId
-          ? getTournamentTeamPlayers(
-              linkedTournamentTeamIds.team2TournamentTeamId,
-            )
-          : Promise.resolve(null),
-      ]);
-
-      const team1PlayersRaw = extractTournamentTeamPlayers(team1Response?.data);
-      const team2PlayersRaw = extractTournamentTeamPlayers(team2Response?.data);
-
-      const [team1Players, team2Players] = await Promise.all([
-        hydrateLinkedPlayersWithUserProfiles(team1PlayersRaw),
-        hydrateLinkedPlayersWithUserProfiles(team2PlayersRaw),
-      ]);
+      const response = await getMatchLinkedPlayers(numId!);
+      const payload = response.data?.data;
 
       return {
-        team1Players,
-        team2Players,
+        team1Players: payload?.team1?.players ?? [],
+        team2Players: payload?.team2?.players ?? [],
+        allPlayers: payload?.all_players ?? [],
       };
     },
   });
@@ -2872,12 +3248,24 @@ const MatchDetailPage = () => {
     context.team1Players = linkedTeamPlayers?.team1Players ?? [];
     context.team2Players = linkedTeamPlayers?.team2Players ?? [];
 
-    const collectRiotAccounts = (
+    const collectPlayerProfiles = (
       players: TournamentTeamPlayersResponse["players"],
       side: TeamSide,
     ) => {
       players?.forEach((player) => {
-        const riotAccount = normalizeRiotAccount(player?.riot_account);
+        const nickname = String(player?.nickname ?? "").trim();
+        const avatar = String(player?.profile_picture ?? "").trim();
+        const username = String(player?.username ?? "").trim();
+        const riotRaw = String(player?.riot_account ?? "").trim();
+        const riotAccount = normalizeRiotAccount(riotRaw);
+
+        registerPlayerProfileAliases(
+          context,
+          [username, nickname, riotRaw, riotAccount],
+          nickname,
+          avatar,
+        );
+
         if (!riotAccount) return;
 
         if (side === "team1") {
@@ -2885,60 +3273,20 @@ const MatchDetailPage = () => {
         } else {
           context.team2RiotAccounts.add(riotAccount);
         }
-
-        const nickname = String(player?.nickname ?? "").trim();
-        if (nickname && !context.nicknameByRiotAccount.has(riotAccount)) {
-          context.nicknameByRiotAccount.set(riotAccount, nickname);
-        }
-
-        const avatar = String(player?.profile_picture ?? "").trim();
-        if (avatar && !context.avatarByRiotAccount.has(riotAccount)) {
-          context.avatarByRiotAccount.set(riotAccount, avatar);
-        }
       });
     };
 
-    collectRiotAccounts(context.team1Players, "team1");
-    collectRiotAccounts(context.team2Players, "team2");
+    collectPlayerProfiles(context.team1Players, "team1");
+    collectPlayerProfiles(context.team2Players, "team2");
 
-    const currentUserRiotAccount = normalizeRiotAccount(user?.riot_account);
-    if (currentUserRiotAccount) {
-      const currentUserNickname = String(user?.nickname ?? "").trim();
-      const currentUserAvatar = String(user?.profile_picture ?? "").trim();
-      const currentUserTeamId = toNumber(user?.team_id);
-
-      const inferredSide: TeamSide | null =
-        currentUserTeamId !== null &&
-        currentUserTeamId === currentMatchTeamIds.team1TeamId
-          ? "team1"
-          : currentUserTeamId !== null &&
-              currentUserTeamId === currentMatchTeamIds.team2TeamId
-            ? "team2"
-            : null;
-
-      if (inferredSide === "team1") {
-        context.team1RiotAccounts.add(currentUserRiotAccount);
-      } else if (inferredSide === "team2") {
-        context.team2RiotAccounts.add(currentUserRiotAccount);
-      }
-
-      if (currentUserNickname) {
-        context.nicknameByRiotAccount.set(
-          currentUserRiotAccount,
-          currentUserNickname,
-        );
-      }
-
-      if (currentUserAvatar) {
-        context.avatarByRiotAccount.set(
-          currentUserRiotAccount,
-          currentUserAvatar,
-        );
-      }
-    }
+    context.profileByKey = new Map([
+      ...buildLinkedProfileIndex(context.team1Players),
+      ...buildLinkedProfileIndex(context.team2Players),
+      ...buildLinkedProfileIndex(linkedTeamPlayers?.allPlayers),
+    ]);
 
     return context;
-  }, [currentMatchTeamIds, linkedTeamPlayers, user]);
+  }, [linkedTeamPlayers]);
 
   const roundSlug = buildRoundSlug({
     tournamentSlug: slug,
@@ -3111,39 +3459,35 @@ const MatchDetailPage = () => {
       linkedTeamContext,
     );
 
+    let resolvedMatch: MatchDetail = hydratedBaseMatch;
+
     if (preferredProvider === "tft" && tftApiData && tftApiData.length > 0) {
-      return mergeTftApiIntoMatch(
+      resolvedMatch = mergeTftApiIntoMatch(
         hydratedBaseMatch,
         tftApiData[0],
         linkedTeamContext,
       );
-    }
-
-    if (baseMatch.gameType === "valorant" && valorantApiData) {
-      return mergeValorantApiIntoMatch(
+    } else if (baseMatch.gameType === "valorant" && valorantApiData) {
+      resolvedMatch = mergeValorantApiIntoMatch(
         hydratedBaseMatch,
         valorantApiData,
         linkedTeamContext,
       );
-    }
-
-    if (preferredProvider === "val" && valorantApiData) {
-      return mergeValorantApiIntoMatch(
+    } else if (preferredProvider === "val" && valorantApiData) {
+      resolvedMatch = mergeValorantApiIntoMatch(
         hydratedBaseMatch,
         valorantApiData,
         linkedTeamContext,
       );
-    }
-
-    if (
+    } else if (
       (hydratedBaseMatch.gameType === "aov" || shouldFetchAovStats) &&
       aovApiData &&
       aovApiData.length > 0
     ) {
-      return mergeAovStatsIntoMatch(hydratedBaseMatch, aovApiData);
+      resolvedMatch = mergeAovStatsIntoMatch(hydratedBaseMatch, aovApiData);
     }
 
-    return hydratedBaseMatch;
+    return enrichMatchWithLinkedProfiles(resolvedMatch, linkedTeamContext);
   }, [
     baseMatch,
     linkedTeamContext,
@@ -3337,11 +3681,12 @@ const MatchDetailPage = () => {
         </div>
       </div>
 
-      <div className="bg-[#0f0f0f]">
-        <div className="mx-auto px-4 md:px-8 py-3 grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch">
-          <div className="justify-end px-4 py-3 flex items-center gap-4">
+      <div className="border-b border-neutral-800 bg-[#0f0f0f]">
+        <div className={MATCH_SCOREBOARD_WRAPPER_CLASS}>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 py-3 md:gap-5">
+          <div className="flex items-center justify-end gap-3 px-1 py-1">
             <div className="min-w-0 text-right">
-              <span className="hidden lg:block text-[15px] font-bold uppercase tracking-wide text-white">
+              <span className="hidden text-sm font-extrabold uppercase tracking-wide text-white lg:block">
                 {match.team1.name}
               </span>
               <span
@@ -3353,35 +3698,35 @@ const MatchDetailPage = () => {
             <img
               src={match.team1.logo}
               alt={match.team1.tag}
-              className="w-10 h-10 rounded-sm"
+              className="h-9 w-9 shrink-0"
             />
           </div>
 
-          <div className="px-4 py-2.5 flex items-center gap-5 md:gap-3 justify-center min-w-[140px]">
-            <span className="text-2xl md:text-4xl font-black tabular-nums text-white">
+          <div className="flex min-w-[120px] items-center justify-center gap-4 px-2 py-1 md:gap-5">
+            <span className="text-3xl font-black tabular-nums text-white md:text-4xl">
               {match.team1.score}
             </span>
-            <div className="text-center leading-tight min-w-[76px] lg:block hidden">
-              <p className="text-[18px] font-bold text-[#D1D5DB]">
+            <div className="hidden min-w-[68px] text-center leading-tight lg:block">
+              <p className="text-base font-extrabold uppercase text-neutral-300">
                 {isMatchCompleted ? "FIN" : "LIVE"}
               </p>
-              <p className="text-[11px] text-neutral-500">
+              <p className="text-[10px] text-neutral-500">
                 {isMatchCompleted ? formatDate(match.date) : "ĐANG DIỄN RA"}
               </p>
             </div>
-            <span className="text-2xl md:text-4xl font-black tabular-nums text-white">
+            <span className="text-3xl font-black tabular-nums text-white md:text-4xl">
               {match.team2.score}
             </span>
           </div>
 
-          <div className="px-4 py-3 flex items-center gap-4">
+          <div className="flex items-center gap-3 px-1 py-1">
             <img
               src={match.team2.logo}
               alt={match.team2.tag}
-              className="w-10 h-10 rounded-sm"
+              className="h-9 w-9 shrink-0"
             />
             <div className="min-w-0 text-left">
-              <span className="hidden lg:block text-[15px] font-bold uppercase tracking-wide text-white">
+              <span className="hidden text-sm font-extrabold uppercase tracking-wide text-white lg:block">
                 {match.team2.name}
               </span>
               <span
@@ -3390,6 +3735,7 @@ const MatchDetailPage = () => {
                 {match.team2.tag}
               </span>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -3457,6 +3803,7 @@ const MatchDetailPage = () => {
           selectMap={selectMap}
           confirmAction={confirmAction}
           selectSide={selectSide}
+          linkedContext={linkedTeamContext}
         />
       ) : null}
 
@@ -3465,6 +3812,7 @@ const MatchDetailPage = () => {
           match={match}
           session={liveBanPickSession}
           matchGameIds={matchGameIds ?? []}
+          linkedContext={linkedTeamContext}
         />
       ) : null}
 
@@ -3535,16 +3883,26 @@ const MatchDetailPage = () => {
               </section>
             ) : (
               <>
-                {!(match.gameType === "aov" && hasAovData) ? (
+                {!(
+                  match.gameType === "aov" && hasAovData
+                ) &&
+                match.gameType !== "valorant" &&
+                match.gameType !== "cs2" ? (
                   <section className="">
-                    <RosterSection match={match} />
+                    <RosterSection
+                      match={match}
+                      linkedContext={linkedTeamContext}
+                    />
                   </section>
                 ) : null}
 
                 {(match.gameType === "cs2" ||
                   match.gameType === "valorant") && (
                   <section>
-                    <FPSStatTable match={match} />
+                    <FPSStatTable
+                      match={match}
+                      linkedContext={linkedTeamContext}
+                    />
                   </section>
                 )}
                 {(match.gameType === "lol" ||

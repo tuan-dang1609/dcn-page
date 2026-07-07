@@ -119,3 +119,16 @@ export const TOURNAMENT_STAT_CARD_CLASS =
 
 export const TOURNAMENT_STAT_ICON_CLASS =
   "flex h-10 w-10 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] sm:h-11 sm:w-11";
+
+/** Match detail scoreboard — fixed width on large screens so teams stay grouped. */
+export const MATCH_SCOREBOARD_WRAPPER_CLASS =
+  "mx-auto w-full max-w-2xl px-4 md:px-6";
+
+export const MATCH_ROSTER_PANEL_CLASS = TOURNAMENT_PANEL_CLASS;
+
+export const MATCH_ROSTER_HEADER_CLASS =
+  "flex items-center gap-2.5 border-b border-neutral-700 bg-[#1a1a1a] px-3 py-2.5";
+
+export const MATCH_ROSTER_PLAYER_ROW_CLASS = TOURNAMENT_MEMBER_ROW_CLASS;
+
+export const MATCH_ROSTER_AVATAR_CLASS = TOURNAMENT_MEMBER_AVATAR_CLASS;

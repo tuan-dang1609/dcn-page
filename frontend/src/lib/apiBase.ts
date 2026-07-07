@@ -47,5 +47,13 @@ export const API_BASE =
 
 export const apiUrl = (path: string) => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+      return normalizedPath;
+    }
+  }
+
   return `${API_BASE}${normalizedPath}`;
 };

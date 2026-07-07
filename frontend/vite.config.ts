@@ -1,4 +1,4 @@
-﻿import { defineConfig } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
@@ -13,10 +13,9 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
     proxy: {
-      "/ext-api/bigtournament": {
-        target: "https://bigtournament-1.onrender.com",
+      "/api": {
+        target: "http://localhost:3000",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/ext-api\/bigtournament/, ""),
       },
     },
   },

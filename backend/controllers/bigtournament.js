@@ -14,11 +14,29 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
+const STRIP_RESPONSE_HEADERS = new Set([
+  ...HOP_BY_HOP_HEADERS,
+  "content-encoding",
+  "content-length",
+]);
+
+const sanitizeProxyResponseHeaders = (headers) => {
+  const outgoing = new Headers();
+
+  headers.forEach((value, key) => {
+    if (STRIP_RESPONSE_HEADERS.has(key.toLowerCase())) return;
+    outgoing.set(key, value);
+  });
+
+  return outgoing;
+};
+
 const getBigTournamentApiKey = () => {
   const rawKey =
     process.env.BIGTOURNAMENT_API_KEY ??
     process.env.BIGTOURNAMENT_KEY ??
     process.env.BIG_TOURNAMENT_API_KEY ??
+    process.env.API_KEY_DCN ??
     null;
 
   const normalized = typeof rawKey === "string" ? rawKey.trim() : "";
@@ -71,6 +89,14 @@ const bigTournamentRouter = new Elysia({ name: "BigTournamentProxy" }).all(
   async ({ request, set }) => {
     try {
       const apiKey = getBigTournamentApiKey();
+      if (!apiKey) {
+        set.status = 503;
+        return {
+          error:
+            "BigTournament proxy is not configured. Set BIGTOURNAMENT_API_KEY on the server.",
+        };
+      }
+
       const upstreamUrl = buildUpstreamUrl(request.url);
       const headers = buildUpstreamHeaders(request.headers, apiKey);
 
@@ -84,11 +110,11 @@ const bigTournamentRouter = new Elysia({ name: "BigTournamentProxy" }).all(
         body: body && body.byteLength ? body : undefined,
       });
 
-      const responseHeaders = new Headers(upstreamResponse.headers);
+      const responseBody = await upstreamResponse.arrayBuffer();
 
-      return new Response(upstreamResponse.body, {
+      return new Response(responseBody, {
         status: upstreamResponse.status,
-        headers: responseHeaders,
+        headers: sanitizeProxyResponseHeaders(upstreamResponse.headers),
       });
     } catch (error) {
       set.status = 502;

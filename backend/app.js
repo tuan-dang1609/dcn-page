@@ -22,6 +22,8 @@ import aovStatsRouter from "./controllers/tournaments/aovMatchStats.js";
 import bracketRouter from "./controllers/tournaments/brackets.js";
 import seriesRouter from "./controllers/series.js";
 import pickemRouter from "./controllers/pickem.js";
+import bigTournamentRouter from "./controllers/bigtournament.js";
+import uploadRouter from "./controllers/uploads.js";
 
 const serializeQuery = (query = {}) => {
   const params = new URLSearchParams();
@@ -101,7 +103,7 @@ const buildCorsHeaders = (origin) => ({
   "access-control-allow-credentials": "true",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers":
-    "Content-Type, Authorization, X-API-Key, X-User-Id",
+    "Content-Type, Authorization, X-User-Id",
   vary: "Origin",
 });
 
@@ -204,6 +206,8 @@ const app = new Elysia()
   .group("/api/tournaments/matches", (app) =>
     app.use(matchRouter).use(aovStatsRouter),
   )
+  .group("/api/ext/bigtournament", (app) => app.use(bigTournamentRouter))
+  .group("/api/uploads", (app) => app.use(uploadRouter))
   .use(middleware.unknownEndpoint)
   .use(middleware.errorHandler);
 

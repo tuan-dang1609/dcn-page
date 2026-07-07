@@ -122,6 +122,7 @@ export interface DataEnvelope<T> {
 
 export interface TournamentTeamPlayer {
   user_id?: number | string;
+  username?: string;
   nickname?: string;
   profile_picture?: string;
   riot_account?: string | null;
@@ -134,4 +135,26 @@ export interface TournamentTeamPlayersResponse {
   logo_url?: string;
   team_color_hex?: string;
   players?: TournamentTeamPlayer[];
+}
+
+export interface MatchLinkedPlayer {
+  user_id?: number | string;
+  username?: string;
+  nickname?: string;
+  profile_picture?: string | null;
+  riot_account?: string | null;
+  tournament_team_id?: number | string;
+}
+
+export interface MatchLinkedPlayersResponse {
+  tournament_id?: number | string;
+  team1: {
+    team_id?: number | string | null;
+    players: MatchLinkedPlayer[];
+  };
+  team2: {
+    team_id?: number | string | null;
+    players: MatchLinkedPlayer[];
+  };
+  all_players?: MatchLinkedPlayer[];
 }
