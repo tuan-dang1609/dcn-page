@@ -22,6 +22,7 @@ import {
   TOURNAMENT_PAGE_BG_CLASS,
   TOURNAMENT_TAB_ROW_CLASS,
 } from "@/components/tournamentTheme";
+import PageLoader from "@/components/PageLoader";
 
 type BracketOutletContext = {
   tournament?: {
@@ -127,7 +128,7 @@ const BracketPage = () => {
   return (
     <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
       {isLoading ? (
-        <p className="text-sm text-neutral-400">Đang tải danh sách bracket...</p>
+        <PageLoader label="Đang tải danh sách bracket..." fullScreen={false} />
       ) : null}
 
       {isError ? (

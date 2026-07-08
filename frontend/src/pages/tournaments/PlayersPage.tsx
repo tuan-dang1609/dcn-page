@@ -23,6 +23,7 @@ import {
   isRiotGameSlug,
 } from "@/components/tournamentTheme";
 import TeamRosterDialog from "@/components/TeamRosterDialog";
+import PageLoader from "@/components/PageLoader";
 
 type RegisteredTeam = {
   id?: number | string;
@@ -108,7 +109,7 @@ const PlayersPage = () => {
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-neutral-400">Đang tải danh sách đội...</p>
+        <PageLoader label="Đang tải danh sách đội..." fullScreen={false} />
       ) : null}
 
       {!isLoading && apiPlayersRaw.length === 0 ? (

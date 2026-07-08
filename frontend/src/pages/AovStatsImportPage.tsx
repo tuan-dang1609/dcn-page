@@ -16,6 +16,7 @@ import {
   type AovStagingResult,
 } from "@/api/aovStats";
 import { useAuth } from "@/contexts/AuthContext";
+import PageLoader from "@/components/PageLoader";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -299,12 +300,7 @@ const AovStatsImportPage = () => {
   };
 
   if (isLoading || !user || !token) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Đang kiểm tra quyền...
-      </div>
-    );
+    return <PageLoader label="Đang kiểm tra quyền..." />;
   }
 
   if (!hasAccess) return null;

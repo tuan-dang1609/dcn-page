@@ -56,6 +56,7 @@ export interface TournamentBySlugResponse {
       rank_max?: string;
       device?: string[] | string;
       discord?: boolean;
+      pner_only?: boolean;
     };
     milestones?: unknown[];
     rule?: unknown[];

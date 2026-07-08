@@ -11,6 +11,8 @@ const ensureRequirementsSchema = async () => {
     ensureRequirementsSchemaPromise = pool.query(`
       ALTER TABLE requirements ALTER COLUMN rank_min DROP NOT NULL;
       ALTER TABLE requirements ALTER COLUMN rank_max DROP NOT NULL;
+      ALTER TABLE requirements
+        ADD COLUMN IF NOT EXISTS pner_only BOOLEAN NOT NULL DEFAULT false;
     `);
   }
 
@@ -56,7 +58,7 @@ function toPgTextArray(arr) {
   return `{${quoted.join(",")}}`;
 }
 
-const normalizeDiscordBoolean = (value) => {
+const normalizeBoolean = (value) => {
   if (value === undefined) return { hasValue: false, value: undefined };
   if (typeof value === "boolean") return { hasValue: true, value };
   if (value === null || value === "") return { hasValue: true, value: false };
@@ -73,6 +75,9 @@ const normalizeDiscordBoolean = (value) => {
 
   return { hasValue: true, value: null };
 };
+
+const normalizeDiscordBoolean = normalizeBoolean;
+const normalizePnerOnlyBoolean = normalizeBoolean;
 
 const normalizeRankId = (value) => {
   if (value === null || value === undefined || value === "") return null;
@@ -124,12 +129,18 @@ requirementRouter.post(
       };
     }
 
-    const { rank_min, rank_max, devices, discord } = body ?? {};
+    const { rank_min, rank_max, devices, discord, pner_only } = body ?? {};
     const parsedDiscord = normalizeDiscordBoolean(discord);
+    const parsedPnerOnly = normalizePnerOnlyBoolean(pner_only);
 
     if (parsedDiscord.hasValue && parsedDiscord.value === null) {
       set.status = 400;
       return { error: "discord phải là boolean true/false" };
+    }
+
+    if (parsedPnerOnly.hasValue && parsedPnerOnly.value === null) {
+      set.status = 400;
+      return { error: "pner_only phải là boolean true/false" };
     }
 
     const all_devices = Array.isArray(devices)
@@ -143,14 +154,15 @@ requirementRouter.post(
     const normalizedRankMax = normalizeRankId(rank_max);
 
     const { rows } = await pool.query(
-      `INSERT INTO requirements (rank_min, rank_max, device, discord, tournament_id)
-     VALUES ($1, $2, $3::text[], $4, $5)
+      `INSERT INTO requirements (rank_min, rank_max, device, discord, pner_only, tournament_id)
+     VALUES ($1, $2, $3::text[], $4, $5, $6)
      RETURNING *`,
       [
         normalizedRankMin,
         normalizedRankMax,
         deviceLiteral,
         parsedDiscord.value ?? false,
+        parsedPnerOnly.value ?? false,
         id,
       ],
     );
@@ -263,13 +275,23 @@ requirementRouter.patch(
       body ?? {},
       "rank_max",
     );
+    const hasPnerOnlyField = Object.prototype.hasOwnProperty.call(
+      body ?? {},
+      "pner_only",
+    );
 
-    const { rank_min, rank_max, devices, discord } = body ?? {};
+    const { rank_min, rank_max, devices, discord, pner_only } = body ?? {};
     const parsedDiscord = normalizeDiscordBoolean(discord);
+    const parsedPnerOnly = normalizePnerOnlyBoolean(pner_only);
 
     if (parsedDiscord.hasValue && parsedDiscord.value === null) {
       set.status = 400;
       return { error: "discord phải là boolean true/false" };
+    }
+
+    if (parsedPnerOnly.hasValue && parsedPnerOnly.value === null) {
+      set.status = 400;
+      return { error: "pner_only phải là boolean true/false" };
     }
 
     const { rows: existingRows } = await pool.query(
@@ -290,8 +312,8 @@ requirementRouter.patch(
 
       const { rows } = await pool.query(
         `
-        INSERT INTO requirements (rank_min, rank_max, device, discord, tournament_id)
-        VALUES ($1, $2, $3::text[], $4, $5)
+        INSERT INTO requirements (rank_min, rank_max, device, discord, pner_only, tournament_id)
+        VALUES ($1, $2, $3::text[], $4, $5, $6)
         RETURNING *
         `,
         [
@@ -299,6 +321,7 @@ requirementRouter.patch(
           hasRankMaxField ? normalizeRankId(rank_max) : null,
           deviceLiteral,
           parsedDiscord.value ?? false,
+          parsedPnerOnly.value ?? false,
           tournamentId,
         ],
       );
@@ -331,17 +354,29 @@ requirementRouter.patch(
       ? (parsedDiscord.value ?? false)
       : existing.discord;
 
+    const nextPnerOnly = hasPnerOnlyField
+      ? (parsedPnerOnly.value ?? false)
+      : (existing.pner_only ?? false);
+
     const { rows } = await pool.query(
       `
       UPDATE requirements
       SET rank_min = $1,
           rank_max = $2,
           device = $3::text[],
-          discord = $4
-      WHERE id = $5
+          discord = $4,
+          pner_only = $5
+      WHERE id = $6
       RETURNING *
       `,
-      [nextRankMin, nextRankMax, nextDeviceLiteral, nextDiscord, existing.id],
+      [
+        nextRankMin,
+        nextRankMax,
+        nextDeviceLiteral,
+        nextDiscord,
+        nextPnerOnly,
+        existing.id,
+      ],
     );
 
     set.status = 200;

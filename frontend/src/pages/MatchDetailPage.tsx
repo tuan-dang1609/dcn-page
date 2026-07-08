@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import type { RoundBanPickPayload } from "@/api/banpick";
 import { MapCard } from "@/components/MapCard";
 import { SideSelectModal } from "@/components/SideSelectModal";
+import PageLoader from "@/components/PageLoader";
 import { useRoundBanPickSocket } from "@/hooks/useRoundBanPickSocket";
 import {
   getValorantMatchData,
@@ -3499,18 +3500,16 @@ const MatchDetailPage = () => {
   ]);
 
   if (!match) {
+    if (isMatchListLoading) {
+      return <PageLoader label="Đang tải trận đấu..." />;
+    }
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
-          {isMatchListLoading ? (
-            <h2 className="text-2xl font-bold text-foreground">
-              Đang tải dữ liệu trận đấu...
-            </h2>
-          ) : (
-            <h2 className="text-2xl font-bold text-foreground">
-              Không tìm thấy trận đấu
-            </h2>
-          )}
+          <h2 className="text-2xl font-bold text-foreground">
+            Không tìm thấy trận đấu
+          </h2>
 
           <Link
             to={backTo}

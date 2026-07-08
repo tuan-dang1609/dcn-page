@@ -8,6 +8,7 @@ import {
   tournamentLeaderboardQueryKey,
   tournamentTeamPlayersQueryKey,
 } from "@/api/tournaments/queryFns";
+import { getMatchesByBracketId } from "@/api/tournaments/index";
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -17,7 +18,12 @@ const toNumber = (value: unknown): number | null => {
 
 type RegisteredTeamRef = { id?: number | string };
 
-/** Prefetch BXH, brackets, and all team rosters when tournament loads. */
+/**
+ * Warm every tournament sub-resource in parallel the moment the tournament
+ * loads: leaderboard, brackets, all team rosters, and every bracket's matches.
+ * Bracket matches are fetched once per bracket and seeded into all the query
+ * keys the bracket views read from, so navigating between tabs is instant.
+ */
 export const useTournamentPrefetch = (
   tournamentId?: number | string | null,
   registeredTeams?: RegisteredTeamRef[] | null,
@@ -44,17 +50,45 @@ export const useTournamentPrefetch = (
 
     const id = tournamentId;
 
+    const prefetchBracketMatches = async () => {
+      const brackets = await queryClient.fetchQuery({
+        queryKey: tournamentBracketsQueryKey(id),
+        queryFn: () => fetchNormalizedTournamentBrackets(id),
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+
+      await Promise.all(
+        brackets.map(async (bracket) => {
+          const bracketId = bracket.id;
+          if (!bracketId) return;
+
+          const response = await getMatchesByBracketId(bracketId);
+          const matches = response.data?.data ?? [];
+
+          // Seed every key variant the bracket views consume.
+          queryClient.setQueryData(["bracket-matches", bracketId], {
+            bracketId,
+            matches,
+          });
+          queryClient.setQueryData(
+            ["swiss-bracket-matches", bracketId],
+            matches,
+          );
+          queryClient.setQueryData(
+            ["round-robin-bracket-matches", bracketId],
+            matches,
+          );
+        }),
+      );
+    };
+
     void Promise.all([
       queryClient.prefetchQuery({
         queryKey: tournamentLeaderboardQueryKey(id),
         queryFn: () => fetchTournamentLeaderboardEnvelope(id),
         staleTime: 60_000,
       }),
-      queryClient.prefetchQuery({
-        queryKey: tournamentBracketsQueryKey(id),
-        queryFn: () => fetchNormalizedTournamentBrackets(id),
-        staleTime: Number.POSITIVE_INFINITY,
-      }),
+      prefetchBracketMatches(),
       ...registeredTeamIds.map((teamId) =>
         queryClient.prefetchQuery({
           queryKey: tournamentTeamPlayersQueryKey(teamId),

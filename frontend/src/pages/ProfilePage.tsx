@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, Link2, Loader2, Save, Upload } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import PageLoader from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -301,12 +302,7 @@ const ProfilePage = () => {
   };
 
   if (isLoading || !user) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-centertext-[#EEEEEE] gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span>Đang tải hồ sơ...</span>
-      </div>
-    );
+    return <PageLoader label="Đang tải hồ sơ..." />;
   }
 
   return (

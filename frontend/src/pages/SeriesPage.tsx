@@ -20,6 +20,7 @@ import {
   tournamentIds,
   Tournament as UiTournament,
 } from "@/data/series";
+import PageLoader from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
@@ -309,11 +310,7 @@ const SeriesPage = () => {
   });
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <p className="text-smtext-[#EEEEEE]">Dang tai du lieu series...</p>
-      </div>
-    );
+    return <PageLoader label="Đang tải dữ liệu series..." />;
   }
 
   if (error) {
