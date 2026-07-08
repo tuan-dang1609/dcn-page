@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { MapCard } from "@/components/MapCard";
 import { SideSelectModal } from "@/components/SideSelectModal";
+import PageLoader from "@/components/PageLoader";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRoundBanPickSocket } from "@/hooks/useRoundBanPickSocket";
 
@@ -282,16 +283,7 @@ export default function BanPickPage() {
   }
 
   if (isLoading && !banPick) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="text-center space-y-3">
-          <h1 className="font-display text-3xl text-foreground">
-            Đang tải ban/pick
-          </h1>
-          <p className="text-muted-foreground text-sm">Round: {roundSlug}</p>
-        </div>
-      </div>
-    );
+    return <PageLoader label="Đang tải ban/pick..." />;
   }
 
   if (!banPick || !session) {

@@ -13,6 +13,7 @@ import {
   type Bracket,
 } from "@/api/tournaments/index";
 import AutoFitContent from "@/components/AutoFitContent";
+import PageLoader from "@/components/PageLoader";
 import SingleElimBracket from "@/components/BracketView";
 import DoubleElimBracket from "@/components/DoubleElimBracket";
 import SwissBracket from "@/components/SwissBracket";
@@ -430,13 +431,7 @@ const SeriesPickemPage = () => {
   const backSeriesSlug = series?.slug ?? seriesSlug;
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <p className="text-sm text-muted-foreground">
-          Dang tai du lieu series...
-        </p>
-      </div>
-    );
+    return <PageLoader label="Đang tải dữ liệu series..." />;
   }
 
   if (error) {

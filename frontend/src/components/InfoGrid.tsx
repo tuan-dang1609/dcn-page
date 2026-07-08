@@ -139,8 +139,8 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
                 className="h-10 w-10 shrink-0 object-contain sm:h-11 sm:w-11"
               />
             ) : (
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] sm:h-9 sm:w-9">
-                <item.icon className="h-4 w-4 text-neutral-200 sm:h-5 sm:w-5" />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center sm:h-11 sm:w-11">
+                <item.icon className="h-6 w-6 text-neutral-200 sm:h-7 sm:w-7" />
               </div>
             )}
 

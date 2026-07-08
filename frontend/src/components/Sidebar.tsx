@@ -17,6 +17,7 @@ type SidebarProps = {
       rank_max?: string;
       device?: string | string[];
       discord?: boolean;
+      pner_only?: boolean;
     };
     prizes?: Array<{
       id?: number | string;
@@ -111,7 +112,9 @@ const Sidebar = ({ tournament, isLoading = false }: SidebarProps) => {
           </div>
           <div className={TOURNAMENT_INFO_ROW_CLASS}>
             <span className={TOURNAMENT_INFO_LABEL_CLASS}>Trường</span>
-            <span className={TOURNAMENT_INFO_VALUE_CLASS}>Tất cả</span>
+            <span className={TOURNAMENT_INFO_VALUE_CLASS}>
+              {requirement?.pner_only ? "Phú Nhuận" : "Tất cả"}
+            </span>
           </div>
           <div className={TOURNAMENT_INFO_ROW_CLASS}>
             <span className={TOURNAMENT_INFO_LABEL_CLASS}>Thiết bị</span>

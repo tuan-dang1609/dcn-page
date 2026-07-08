@@ -119,7 +119,9 @@ const loadTournamentInfo = async (tournamentId) => {
     [tournament.id],
   );
   const { rows: requirementRows } = await pool.query(
-    `SELECT r.device, r.discord, rg1.name AS rank_min, rg2.name AS rank_max
+    `SELECT r.device, r.discord,
+       COALESCE((to_jsonb(r)->>'pner_only')::boolean, false) AS pner_only,
+       rg1.name AS rank_min, rg2.name AS rank_max
    FROM requirements r
    LEFT JOIN rank_game rg1 ON rg1.id = r.rank_min
    LEFT JOIN rank_game rg2 ON rg2.id = r.rank_max

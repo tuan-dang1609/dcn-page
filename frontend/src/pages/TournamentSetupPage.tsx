@@ -24,6 +24,7 @@ import {
   type TournamentPayload,
 } from "@/api/tournaments";
 import { useAuth } from "@/contexts/AuthContext";
+import PageLoader from "@/components/PageLoader";
 import { uploadImageToSupabase } from "@/lib/supabaseUpload";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -124,6 +125,7 @@ type TournamentRequirementApi = {
   rank_max?: string;
   device?: string[] | string | null;
   discord?: boolean | null;
+  pner_only?: boolean | null;
 } | null;
 
 type TournamentMilestoneApi = {
@@ -276,6 +278,7 @@ const TournamentSetupPage = () => {
     rank_max: "",
     devices_csv: "",
     discord_required: "false",
+    pner_only: "false",
   });
   const [gameOptions, setGameOptions] = useState<GameOption[]>([]);
   const [tournamentOptions, setTournamentOptions] = useState<
@@ -430,6 +433,7 @@ const TournamentSetupPage = () => {
         rank_max: "",
         devices_csv: "",
         discord_required: "false",
+        pner_only: "false",
       });
       setPendingRequirement(null);
       return;
@@ -449,6 +453,7 @@ const TournamentSetupPage = () => {
       rank_max: rankMaxId ?? "",
       devices_csv: devicesCsv,
       discord_required: requirement.discord ? "true" : "false",
+      pner_only: requirement.pner_only ? "true" : "false",
     });
     setPendingRequirement(null);
   };
@@ -907,6 +912,7 @@ const TournamentSetupPage = () => {
       rank_max: rankMax,
       devices,
       discord: requirements.discord_required === "true",
+      pner_only: requirements.pner_only === "true",
     };
 
     setSubmitting(true);
@@ -937,12 +943,7 @@ const TournamentSetupPage = () => {
   };
 
   if (isLoading || !user || !token) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-centertext-[#EEEEEE] gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span>Đang kiểm tra quyền truy cập...</span>
-      </div>
-    );
+    return <PageLoader label="Đang kiểm tra quyền truy cập..." />;
   }
 
   if (!hasAccess) return null;
@@ -1812,6 +1813,22 @@ const TournamentSetupPage = () => {
                 >
                   <option value="false">false - Không bắt buộc</option>
                   <option value="true">true - Bắt buộc vào Discord</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xstext-[#EEEEEE]">Trường</label>
+                <select
+                  value={requirements.pner_only}
+                  onChange={(event) =>
+                    setRequirements((prev) => ({
+                      ...prev,
+                      pner_only: event.target.value,
+                    }))
+                  }
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="false">false - Tất cả</option>
+                  <option value="true">true - Phú Nhuận</option>
                 </select>
               </div>
             </div>

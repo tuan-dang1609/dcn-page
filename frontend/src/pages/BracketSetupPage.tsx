@@ -22,6 +22,7 @@ import {
 } from "@/api/tournaments";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
+import PageLoader from "@/components/PageLoader";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -382,12 +383,7 @@ const BracketSetupPage = () => {
   };
 
   if (isLoading || !user || !token) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-centertext-[#EEEEEE] gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span>Đang kiểm tra quyền truy cập...</span>
-      </div>
-    );
+    return <PageLoader label="Đang kiểm tra quyền truy cập..." />;
   }
 
   if (!hasAccess) return null;

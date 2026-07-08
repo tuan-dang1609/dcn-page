@@ -5,6 +5,7 @@ import {
   tournamentLeaderboardQueryKey,
 } from "@/api/tournaments/queryFns";
 import type { TournamentTeamResult } from "@/api/tournaments";
+import PageLoader from "@/components/PageLoader";
 import {
   Table,
   TableHeader,
@@ -63,7 +64,7 @@ const LeaderboardPage = () => {
       <h2 className={TOURNAMENT_PAGE_TITLE_CLASS}>Bảng xếp hạng</h2>
 
       {isTournamentLoading || isLoading ? (
-        <p className="text-sm text-neutral-400">Đang tải bảng xếp hạng...</p>
+        <PageLoader label="Đang tải bảng xếp hạng..." fullScreen={false} />
       ) : null}
 
       {isError ? (

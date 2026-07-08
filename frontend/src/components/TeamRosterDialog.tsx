@@ -244,11 +244,11 @@ const TeamRosterDialog = ({
 
         <div className="z-20 shrink-0 border-b border-neutral-700 bg-[#141414] px-3 py-3.5 pr-11 sm:px-5 sm:py-4 sm:pr-12">
           <div className="flex items-center gap-3 sm:gap-3.5">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] sm:h-14 sm:w-14">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden sm:h-14 sm:w-14">
               <img
                 src={teamLogoUrl || TOURNAMENT_LOGO}
                 alt={teamName || "Team logo"}
-                className="h-9 w-9 object-contain sm:h-10 sm:w-10"
+                className="h-full w-full object-contain"
               />
             </div>
             <div className="min-w-0 flex-1">

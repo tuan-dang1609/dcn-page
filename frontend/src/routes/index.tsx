@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, type ReactNode } from "react";
 import { createBrowserRouter } from "react-router-dom";
+import PageLoader from "@/components/PageLoader";
 
 const BRAND_TITLE = "DCN Championship Series";
 
@@ -30,14 +31,8 @@ const TournamentSetupPage = lazy(() => import("@/pages/TournamentSetupPage"));
 const BracketSetupPage = lazy(() => import("@/pages/BracketSetupPage"));
 const MatchDetailPage = lazy(() => import("@/pages/MatchDetailPage"));
 const BanPickPage = lazy(() => import("@/pages/BanPickPage"));
-const PageFallback = () => (
-  <div className="min-h-screen flex items-center justify-centertext-[#EEEEEE]">
-    Đang tải...
-  </div>
-);
-
 const withSuspense = (element: ReactNode) => (
-  <Suspense fallback={<PageFallback />}>{element}</Suspense>
+  <Suspense fallback={<PageLoader />}>{element}</Suspense>
 );
 
 const withTitle = (element: ReactNode, title: string) => (

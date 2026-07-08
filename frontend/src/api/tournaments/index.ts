@@ -241,6 +241,7 @@ export interface RequirementPayload {
   rank_max?: number | null;
   devices?: string[];
   discord?: boolean;
+  pner_only?: boolean;
 }
 
 export interface RankGame {

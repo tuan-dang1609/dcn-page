@@ -4,6 +4,7 @@ import Navigation from "@/components/Navigation";
 import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
+import PageLoader from "@/components/PageLoader";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
 import { useTournamentPrefetch } from "@/hooks/useTournamentPrefetch";
 import { TOURNAMENT_PAGE_BG_CLASS } from "@/components/tournamentTheme";
@@ -84,6 +85,10 @@ const Layout = () => {
         <Outlet context={{ tournament, isLoading, refetch }} />
       </div>
     );
+  }
+
+  if (isTournamentHome && isLoading && !tournament) {
+    return <PageLoader />;
   }
 
   return (
