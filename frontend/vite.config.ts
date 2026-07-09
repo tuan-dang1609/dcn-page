@@ -28,4 +28,29 @@ export default defineConfig(({ mode }) => ({
       ms: path.resolve(__dirname, "./src/shims/ms.js"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            if (
+              id.includes("BracketView") ||
+              id.includes("DoubleElimBracket") ||
+              id.includes("SwissBracket") ||
+              id.includes("RoundRobinBracket")
+            ) {
+              return "brackets";
+            }
+            return;
+          }
+
+          if (id.includes("@tanstack/react-query")) return "vendor-query";
+          if (id.includes("react-router")) return "vendor-router";
+          if (id.includes("lucide-react")) return "vendor-icons";
+          if (id.includes("axios")) return "vendor-http";
+          return "vendor";
+        },
+      },
+    },
+  },
 }));

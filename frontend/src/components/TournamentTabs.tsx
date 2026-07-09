@@ -5,7 +5,7 @@ import {
   TOURNAMENT_NAV_WRAPPER_CLASS,
 } from "@/components/tournamentTheme";
 
-const tabs = ["Tổng quan", "Nhánh đấu", "Người chơi", "BXH", "Luật"];
+const tabs = ["Tổng quan", "Danh sách", "Nhánh đấu", "BXH", "Luật"];
 
 const TournamentTabs = ({
   activeTab,
