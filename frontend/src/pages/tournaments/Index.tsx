@@ -6,7 +6,7 @@ import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
 import PageLoader from "@/components/PageLoader";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
-import { useTournamentPrefetch } from "@/hooks/useTournamentPrefetch";
+import { useTournamentPrefetch, type TournamentTab } from "@/hooks/useTournamentPrefetch";
 import { TOURNAMENT_PAGE_BG_CLASS } from "@/components/tournamentTheme";
 import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
 
@@ -26,7 +26,18 @@ const Layout = () => {
   const isRulePage = Boolean(useMatch("/tournament/:game/:slug/rule"));
   const { game, slug } = useParams();
   const { tournament, isLoading, error, refetch } = useTournamentBySlug(game, slug);
-  useTournamentPrefetch(tournament?.id, tournament?.registered);
+
+  const activeTab: TournamentTab = isBracketPage
+    ? "bracket"
+    : isParticipantsPage
+      ? "participants"
+      : isLeaderboardPage
+        ? "leaderboard"
+        : isRulePage
+          ? "rule"
+          : "overview";
+
+  useTournamentPrefetch(tournament?.id, activeTab);
   const location = useLocation();
 
   const tournamentTitle = tournament?.name?.trim() || "Giải đấu";
@@ -88,7 +99,21 @@ const Layout = () => {
   }
 
   if (isTournamentHome && isLoading && !tournament) {
-    return <PageLoader />;
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="space-y-8">
+          <HeroBanner tournament={null} />
+          <div className="flex justify-center px-4 md:px-8">
+            <div className="w-full max-w-4xl">
+              <Navigation tournamentId={null} />
+            </div>
+          </div>
+          <div className="px-4 md:px-8 pb-10">
+            <PageLoader label="Đang tải giải đấu..." fullScreen={false} />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -97,7 +122,7 @@ const Layout = () => {
         <HeroBanner tournament={tournament} />
         <div className="flex justify-center px-4 md:px-8">
           <div className="w-full max-w-4xl">
-            <Navigation />
+            <Navigation tournamentId={tournament?.id} />
           </div>
         </div>
         <div className="px-4 md:px-8 pb-10">

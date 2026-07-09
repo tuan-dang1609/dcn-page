@@ -45,6 +45,11 @@ interface HeroBannerProps {
     register_end?: string;
     name?: string;
     short_name?: string;
+    registered?: Array<{
+      id?: number | string;
+      team_id?: number | string;
+      isCheckedIn?: boolean;
+    }>;
   } | null;
 }
 
@@ -110,34 +115,26 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   );
   const [myTeamCheckedIn, setMyTeamCheckedIn] = useState<boolean>(false);
 
-  const fetchRegisteredTeams = useCallback(async () => {
-    if (!tournament?.id || !user) return;
-
-    try {
-      const res = await axios.get(
-        `${API_BASE}/api/tournaments/teams/${tournament.id}`,
-      );
-      const teams = Array.isArray(res.data?.teams) ? res.data.teams : [];
-      const myTeam = teams.find(
-        (t: any) => Number(t.team_id) === Number(user?.team_id),
-      );
-      const nextRegisteredTeamId = myTeam
-        ? Number(myTeam.id ?? myTeam.team_id)
-        : null;
-
-      setMyRegisteredTeamId(nextRegisteredTeamId);
-      setMyTeamCheckedIn(Boolean(myTeam?.isCheckedIn));
-      setIsRegistered(Boolean(nextRegisteredTeamId));
-    } catch {
+  useEffect(() => {
+    if (!tournament?.id || !user) {
       setMyRegisteredTeamId(null);
       setMyTeamCheckedIn(false);
       setIsRegistered(false);
+      return;
     }
-  }, [tournament?.id, user, setIsRegistered]);
 
-  useEffect(() => {
-    void fetchRegisteredTeams();
-  }, [fetchRegisteredTeams]);
+    const registered = tournament?.registered ?? [];
+    const myTeam = registered.find(
+      (team) => Number(team.team_id) === Number(user?.team_id),
+    );
+    const nextRegisteredTeamId = myTeam
+      ? Number(myTeam.id ?? myTeam.team_id)
+      : null;
+
+    setMyRegisteredTeamId(nextRegisteredTeamId);
+    setMyTeamCheckedIn(Boolean(myTeam?.isCheckedIn));
+    setIsRegistered(Boolean(nextRegisteredTeamId));
+  }, [tournament?.id, tournament?.registered, user, setIsRegistered]);
 
   const checkInTournament = tournament as
     | { check_in_start?: string; check_in_end?: string }

@@ -1,5 +1,10 @@
 import { NavLink, useParams, useNavigate, useLocation } from "react-router-dom";
 import { useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  prefetchTournamentTab,
+  type TournamentTab,
+} from "@/hooks/useTournamentPrefetch";
 import {
   Select,
   SelectTrigger,
@@ -14,22 +19,45 @@ import {
   TOURNAMENT_NAV_WRAPPER_CLASS,
 } from "@/components/tournamentTheme";
 
-const Navigation = () => {
+interface NavigationProps {
+  tournamentId?: number | string | null;
+}
+
+const Navigation = ({ tournamentId }: NavigationProps) => {
   const { game, slug } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const basePath = game && slug ? `/tournament/${game}/${slug}` : "/tournament";
 
   const links = useMemo(
-    () => [
-      { to: basePath, label: "Tổng quan" },
-      { to: `${basePath}/bracket`, label: "Nhánh đấu" },
-      { to: `${basePath}/participants`, label: "Danh sách" },
-      { to: `${basePath}/leaderboard`, label: "BXH" },
-      { to: `${basePath}/rule`, label: "Luật" },
-    ],
+    () =>
+      [
+        { to: basePath, label: "Tổng quan", tab: "overview" as const },
+        {
+          to: `${basePath}/participants`,
+          label: "Danh sách",
+          tab: "participants" as const,
+        },
+        {
+          to: `${basePath}/bracket`,
+          label: "Nhánh đấu",
+          tab: "bracket" as const,
+        },
+        {
+          to: `${basePath}/leaderboard`,
+          label: "BXH",
+          tab: "leaderboard" as const,
+        },
+        { to: `${basePath}/rule`, label: "Luật", tab: "rule" as const },
+      ] as const,
     [basePath],
   );
+
+  const handlePrefetch = (tab: TournamentTab) => {
+    if (!tournamentId) return;
+    prefetchTournamentTab(queryClient, tournamentId, tab);
+  };
 
   const selectedValue = useMemo(() => {
     const sorted = [...links].sort((a, b) => b.to.length - a.to.length);
@@ -53,6 +81,7 @@ const Navigation = () => {
                 key={link.to}
                 value={link.to}
                 className="text-xs font-bold uppercase tracking-wide"
+                onFocus={() => handlePrefetch(link.tab)}
               >
                 {link.label}
               </SelectItem>
@@ -67,6 +96,8 @@ const Navigation = () => {
             key={link.to}
             to={link.to}
             end={link.to === basePath}
+            onMouseEnter={() => handlePrefetch(link.tab)}
+            onFocus={() => handlePrefetch(link.tab)}
             className={({ isActive }) =>
               `${TOURNAMENT_NAV_LINK_BASE} ${
                 isActive

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import {
@@ -6,10 +6,6 @@ import {
   tournamentBracketsQueryKey,
 } from "@/api/tournaments/queryFns";
 import { type Bracket } from "@/api/tournaments/index";
-import SingleElimBracket from "@/components/BracketView";
-import DoubleElimBracket from "@/components/DoubleElimBracket";
-import SwissBracket from "@/components/SwissBracket";
-import RoundRobinBracket from "@/components/RoundRobinBracket";
 import { TournamentTabCard } from "@/components/TournamentTabCard";
 import {
   Select,
@@ -23,6 +19,11 @@ import {
   TOURNAMENT_TAB_ROW_CLASS,
 } from "@/components/tournamentTheme";
 import PageLoader from "@/components/PageLoader";
+
+const SingleElimBracket = lazy(() => import("@/components/BracketView"));
+const DoubleElimBracket = lazy(() => import("@/components/DoubleElimBracket"));
+const SwissBracket = lazy(() => import("@/components/SwissBracket"));
+const RoundRobinBracket = lazy(() => import("@/components/RoundRobinBracket"));
 
 type BracketOutletContext = {
   tournament?: {
@@ -125,6 +126,34 @@ const BracketPage = () => {
 
   const resolvedActiveId = activeBracketId ?? brackets[0]?.id ?? null;
 
+  const bracketView = (() => {
+    if (!selectedBracket) return null;
+
+    if (selectedFormatId === 1) {
+      return <SingleElimBracket bracketId={selectedBracketId} />;
+    }
+
+    if (selectedFormatId === 2) {
+      return <DoubleElimBracket bracketId={selectedBracketId} />;
+    }
+
+    if (isSwissBracket) {
+      return <SwissBracket bracketId={selectedBracketId} />;
+    }
+
+    if (isRoundRobinBracket) {
+      return <RoundRobinBracket bracketId={selectedBracketId} />;
+    }
+
+    return (
+      <p className="text-sm text-neutral-400">
+        Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ hỗ
+        trợ hiển thị Single Elimination, Double Elimination, Round Robin và
+        Swiss.
+      </p>
+    );
+  })();
+
   return (
     <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
       {isLoading ? (
@@ -175,34 +204,17 @@ const BracketPage = () => {
           Hiện giải đấu chưa bắt đầu, vui lòng quay lại sau.
         </p>
       ) : (
-        <div className="overflow-x-auto  pt-2">
-          {selectedFormatId === 1 ? (
-            <SingleElimBracket bracketId={selectedBracketId} />
-          ) : null}
-
-          {selectedFormatId === 2 ? (
-            <DoubleElimBracket bracketId={selectedBracketId} />
-          ) : null}
-
-          {isSwissBracket ? (
-            <SwissBracket bracketId={selectedBracketId} />
-          ) : null}
-
-          {isRoundRobinBracket ? (
-            <RoundRobinBracket bracketId={selectedBracketId} />
-          ) : null}
-
-          {selectedBracket &&
-          selectedFormatId !== 1 &&
-          selectedFormatId !== 2 &&
-          !isRoundRobinBracket &&
-          !isSwissBracket ? (
-            <p className="text-sm text-neutral-400">
-              Bracket này có format_id = {selectedFormatId ?? "-"}. Hiện tại chỉ
-              hỗ trợ hiển thị Single Elimination, Double Elimination, Round
-              Robin và Swiss.
-            </p>
-          ) : null}
+        <div className="overflow-x-auto pt-2">
+          <Suspense
+            fallback={
+              <PageLoader
+                label="Đang tải nhánh đấu..."
+                fullScreen={false}
+              />
+            }
+          >
+            {bracketView}
+          </Suspense>
         </div>
       )}
     </div>
