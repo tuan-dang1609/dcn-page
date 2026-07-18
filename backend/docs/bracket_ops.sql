@@ -173,6 +173,10 @@ WHERE lb.bracket_id = :bracket_id
 -- Single Elim   : winner qua next_match_id khi PATCH score
 -- Double Elim   : winner qua next_match_id; loser qua propagateLoser (PATCH score / games)
 -- Swiss         : pair-next-round API, không có loser bracket
+-- Double Elimination:
+--   4/6/8 đội trong 1 bracket
+--   4 đội + teams_to_advance=2: shape 1:2,2:1,3:1,4:1 (không GF, 2 suất Advances)
+--   6 đội: compact layout 2-2-1-2-1-1-1
 -- Round Robin   : tạo sẵn tất cả trận, không auto-advance
 
 -- Khuyến nghị: sau khi sửa code backend, chạy script:

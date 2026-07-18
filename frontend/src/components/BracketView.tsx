@@ -101,6 +101,7 @@ type DisplayMatch = {
   id: number;
   routeMatchId: number;
   status: string;
+  dateScheduled?: string | null;
   round: number;
   matchNo: number;
   nextMatchId: number | null;
@@ -192,6 +193,7 @@ const toDisplayMatches = (
         id: matchId,
         routeMatchId: matchId,
         status: String(match.status ?? "").trim(),
+        dateScheduled: match.date_scheduled ?? null,
         round: Number(match.round_number ?? 0),
         matchNo: Number(match.match_no ?? 0),
         nextMatchId: toNumber(match.next_match_id),
@@ -538,6 +540,8 @@ const MatchCard = ({
     return (
       <BracketMatchCardShell
         title={roundTitle}
+        status={match.status}
+        dateScheduled={match.dateScheduled}
         className={`transition-opacity duration-150 ${cardHoverCls}`}
         style={{ width: CARD_W, height: CARD_H }}
       >
@@ -554,6 +558,8 @@ const MatchCard = ({
     >
       <BracketMatchCardShell
         title={roundTitle}
+        status={match.status}
+        dateScheduled={match.dateScheduled}
         style={{ width: CARD_W, height: CARD_H }}
       >
         {content}
@@ -826,6 +832,7 @@ const SingleElimBracket = ({
       s2: null,
       winner: null,
       status: "scheduled",
+      dateScheduled: null,
     };
   };
 
@@ -886,11 +893,11 @@ const SingleElimBracket = ({
                   >
                     <MatchCard
                       match={match}
-                      roundTitle={getSingleElimRoundTitle(
+                      roundTitle={`${getSingleElimRoundTitle(
                         colIndex + 1,
                         roundGroups.length,
                         match.round,
-                      )}
+                      )} #${match.matchNo || 1}`}
                       hoveredTeamId={hoveredTeamId}
                       onHoverTeam={setHover}
                       isInJourney={!journeySet || journeySet.has(match.id)}
@@ -1065,11 +1072,12 @@ const SingleElimBracket = ({
 
   const roundTitleForMatch = (match: DisplayMatch) => {
     const roundIndex = classicRounds.indexOf(match.round) + 1;
-    return getSingleElimRoundTitle(
+    const base = getSingleElimRoundTitle(
       roundIndex > 0 ? roundIndex : 1,
       classicRounds.length,
       match.round,
     );
+    return `${base} #${match.matchNo || 1}`;
   };
 
   if (isClassicFourTeam) {

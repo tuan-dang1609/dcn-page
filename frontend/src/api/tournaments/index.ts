@@ -1,5 +1,6 @@
 import axios from "axios";
 import { tournamentsBaseUrl } from "./client";
+import { resolveActiveBracketId } from "@/lib/resolveActiveBracket";
 import type {
   Bracket,
   DataEnvelope,
@@ -83,6 +84,13 @@ export const getTournamentTeams = (tournamentId: number | string) =>
     `${tournamentsBaseUrl}/teams/${tournamentId}`,
   );
 
+export const registerSoloToTournament = (tournamentId: number | string) =>
+  axios.post(
+    `${tournamentsBaseUrl}/teams/${tournamentId}/register-solo`,
+    {},
+    getAuthConfig(),
+  );
+
 export const getMatchesByTournamentId = async (
   tournamentId: number | string,
 ) => {
@@ -112,11 +120,7 @@ export const getPreferredBracketIdByTournamentId = async (
 
   if (!brackets.length) return null;
 
-  const mainBracket = brackets.find(
-    (bracket) => String(bracket.stage || "").toLowerCase() === "main",
-  );
-
-  return mainBracket?.id ?? brackets[0]?.id ?? null;
+  return resolveActiveBracketId(brackets);
 };
 
 export const getMatchesByTournamentSlug = async (
@@ -305,10 +309,27 @@ export interface GenerateBracketPayload {
   team_ids?: number[];
   best_of?: number;
   legs?: number;
+  teams_to_advance?: number;
   name?: string;
   stage?: string;
   status?: string;
+  date_start?: string | null;
 }
+
+export const updateBracketMeta = (
+  bracketId: number | string,
+  payload: {
+    name?: string | null;
+    stage?: string | null;
+    status?: string | null;
+    date_start?: string | null;
+  },
+) =>
+  axios.patch(
+    `${tournamentsBaseUrl}/brackets/${bracketId}/meta`,
+    payload,
+    getAuthConfig(),
+  );
 
 const bracketGeneratePathByType: Record<BracketType, string> = {
   "single-elimination": "single-elimination/generate",
@@ -473,6 +494,8 @@ export interface TournamentTeamResult {
   points: number;
   wins: number;
   losses: number;
+  elim_round?: number | null;
+  elim_label?: string | null;
   is_final: boolean;
   calculated_at: string;
   name?: string;

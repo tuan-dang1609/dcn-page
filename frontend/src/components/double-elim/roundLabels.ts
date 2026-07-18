@@ -1,9 +1,22 @@
+export const FOUR_TEAM_ADVANCE_ROUND_SHAPE = "1:2,2:1,3:1,4:1";
+
 export const getDoubleElimRoundTitle = (
   roundNumber: number,
   totalRounds: number,
   firstRoundMatchCount: number,
   teamCount: number,
+  options?: { isAdvanceMode?: boolean },
 ) => {
+  if (options?.isAdvanceMode || (teamCount === 4 && totalRounds === 4)) {
+    const labels: Record<number, string> = {
+      1: "TRẬN MỞ MÀN",
+      2: "NHÁNH THẮNG",
+      3: "NHÁNH THUA",
+      4: "TRẬN QUYẾT ĐỊNH",
+    };
+    return labels[roundNumber] ?? `VÒNG ${roundNumber}`;
+  }
+
   if (teamCount === 4 || totalRounds === 5) {
     const labels: Record<number, string> = {
       1: "BÁN KẾT NHÁNH TRÊN",
@@ -31,20 +44,20 @@ export const getDoubleElimRoundTitle = (
 
   if (teamCount === 6) {
     if (totalRounds === 7) {
-      const labels: Record<number, string> = {
-        1: "PLAY-IN NHÁNH TRÊN",
-        2: "BÁN KẾT NHÁNH TRÊN",
-        3: "CHUNG KẾT NHÁNH TRÊN",
-        4: "LOẠI 1",
-        5: "LOẠI 2",
-        6: "CHUNG KẾT NHÁNH THUA",
-        7: "CHUNG KẾT TỔNG",
-      };
+    const labels: Record<number, string> = {
+      1: "VÒNG LOẠI NHÁNH TRÊN",
+      2: "BÁN KẾT NHÁNH TRÊN",
+      3: "CHUNG KẾT NHÁNH TRÊN",
+      4: "LOẠI 1",
+      5: "LOẠI 2",
+      6: "CHUNG KẾT NHÁNH THUA",
+      7: "CHUNG KẾT TỔNG",
+    };
       return labels[roundNumber] ?? `VÒNG ${roundNumber}`;
     }
 
     const labels: Record<number, string> = {
-      1: "PLAY-IN NHÁNH TRÊN",
+      1: "VÒNG LOẠI NHÁNH TRÊN",
       2: "BÁN KẾT NHÁNH TRÊN",
       3: "CHUNG KẾT NHÁNH TRÊN",
       4: "LOẠI 1",
@@ -68,3 +81,8 @@ export const getDoubleElimRoundTitle = (
 
   return `VÒNG ${roundNumber}`;
 };
+
+export const formatDoubleElimMatchFooterTitle = (
+  roundTitle: string,
+  matchNo: number,
+) => `${roundTitle} #${matchNo}`;

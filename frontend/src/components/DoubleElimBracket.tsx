@@ -12,7 +12,11 @@ import {
   type Match as ApiMatch,
 } from "@/api/tournaments/index";
 import { BracketTeamIcon } from "@/components/BracketTeamIcon";
-import { getDoubleElimRoundTitle } from "@/components/double-elim/roundLabels";
+import {
+  FOUR_TEAM_ADVANCE_ROUND_SHAPE,
+  formatDoubleElimMatchFooterTitle,
+  getDoubleElimRoundTitle,
+} from "@/components/double-elim/roundLabels";
 import {
   BRACKET_CONN_ACTIVE_STROKE,
   BRACKET_CONN_BASE_STROKE,
@@ -24,6 +28,7 @@ import {
   getTeamJourneyMatchIds,
   isHoverableTeamId,
   isJourneyConnectorActive,
+  normalizeTeamColorHex,
 } from "@/components/bracketHover";
 import {
   buildBracketColumnLayout,
@@ -31,6 +36,7 @@ import {
   RoundConnector,
 } from "@/components/bracketConnectors";
 import {
+  BRACKET_CARD_CLASS,
   BRACKET_MATCH_TITLE_H,
   BRACKET_ROW_BASE_CLASS,
   formatBracketSideScore,
@@ -84,6 +90,7 @@ type DisplayMatch = {
   id: number;
   routeMatchId?: number;
   status?: string;
+  dateScheduled?: string | null;
   round: number;
   matchNo: number;
   nextMatchId: number | null;
@@ -94,6 +101,8 @@ type DisplayMatch = {
   p2: string;
   p1Logo?: string | null;
   p2Logo?: string | null;
+  p1Color?: string | null;
+  p2Color?: string | null;
   s1: number | null;
   s2: number | null;
   winner: string | null;
@@ -203,6 +212,23 @@ const getCompactSixLoserTarget = (match: DisplayMatch) => {
   return compactSixLoserMap[`${match.round}-${match.matchNo}`] ?? null;
 };
 
+const getFourTeamAdvanceLoserTarget = (
+  match: Pick<DisplayMatch, "round" | "matchNo">,
+) => {
+  const map: Record<
+    string,
+    { round: number; matchNo: number; slot: "A" | "B" }
+  > = {
+    // Opening losers → lower bracket
+    "1-1": { round: 3, matchNo: 1, slot: "A" },
+    "1-2": { round: 3, matchNo: 1, slot: "B" },
+    // Upper final loser → decider slot B (slot A = winner nhánh thua)
+    "2-1": { round: 4, matchNo: 1, slot: "B" },
+  };
+
+  return map[`${match.round}-${match.matchNo}`] ?? null;
+};
+
 const getCompactSingleLoserTarget = ({
   match,
   winnerRounds,
@@ -218,6 +244,10 @@ const getCompactSingleLoserTarget = ({
   const currentMatchNo = match.matchNo;
 
   if (!currentRound || !currentMatchNo) return null;
+
+  if (roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE) {
+    return getFourTeamAdvanceLoserTarget(match);
+  }
 
   const isCompactSixSingleBracket = roundShape === COMPACT_SIX_ROUND_SHAPE;
 
@@ -266,7 +296,7 @@ const projectDoubleElimMatches = ({
   const projectedById = new Map<number, DisplayMatch>();
   const teamInfoById = new Map<
     number,
-    { name: string; logoUrl: string | null }
+    { name: string; logoUrl: string | null; color: string | null }
   >();
 
   matches.forEach((match) => {
@@ -276,6 +306,7 @@ const projectDoubleElimMatches = ({
       teamInfoById.set(match.teamAId, {
         name: match.p1,
         logoUrl: match.p1Logo ?? null,
+        color: match.p1Color ?? null,
       });
     }
 
@@ -283,6 +314,7 @@ const projectDoubleElimMatches = ({
       teamInfoById.set(match.teamBId, {
         name: match.p2,
         logoUrl: match.p2Logo ?? null,
+        color: match.p2Color ?? null,
       });
     }
   });
@@ -303,14 +335,19 @@ const projectDoubleElimMatches = ({
   ).length;
   const roundShape = getRoundShape(projectedMatches);
   const isCompactSixSingleBracket = roundShape === COMPACT_SIX_ROUND_SHAPE;
+  const isFourTeamAdvance = roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE;
   const winnerRounds = isCompactSixSingleBracket
     ? 3
-    : roundOneMatchCount > 0
-      ? Math.max(1, Math.log2(roundOneMatchCount * 2))
-      : 1;
+    : isFourTeamAdvance
+      ? 2
+      : roundOneMatchCount > 0
+        ? Math.max(1, Math.log2(roundOneMatchCount * 2))
+        : 1;
   const loserMainRounds = isCompactSixSingleBracket
     ? 4
-    : Math.max(1, 2 * (winnerRounds - 1));
+    : isFourTeamAdvance
+      ? 2
+      : Math.max(1, 2 * (winnerRounds - 1));
 
   const applyTeamToSlot = (
     target: DisplayMatch,
@@ -336,14 +373,16 @@ const projectDoubleElimMatches = ({
 
     if (slot === "A") {
       target.teamAId = teamId;
-      target.p1 = winnerInfo?.name ?? `Team #${teamId}`;
+      target.p1 = winnerInfo?.name ?? `Đội #${teamId}`;
       target.p1Logo = winnerInfo?.logoUrl ?? null;
+      target.p1Color = winnerInfo?.color ?? null;
       return;
     }
 
     target.teamBId = teamId;
-    target.p2 = winnerInfo?.name ?? `Team #${teamId}`;
+    target.p2 = winnerInfo?.name ?? `Đội #${teamId}`;
     target.p2Logo = winnerInfo?.logoUrl ?? null;
+    target.p2Color = winnerInfo?.color ?? null;
   };
 
   projectedMatches.forEach((source) => {
@@ -353,8 +392,9 @@ const projectDoubleElimMatches = ({
     const winnerInfo = teamInfoById.get(winnerTeamId);
     if (!winnerInfo) {
       teamInfoById.set(winnerTeamId, {
-        name: `Team #${winnerTeamId}`,
+        name: `Đội #${winnerTeamId}`,
         logoUrl: null,
+        color: null,
       });
     }
 
@@ -483,6 +523,55 @@ const PlayerRow = ({
   );
 };
 
+const AdvancesSlot = ({
+  teamName,
+  logoUrl,
+  teamId,
+  hoveredTeamId,
+  onHoverTeam,
+}: {
+  teamName: string;
+  logoUrl?: string | null;
+  teamId?: number | null;
+  hoveredTeamId: number | null;
+  onHoverTeam: (hover: BracketHover | null) => void;
+}) => {
+  const hasHover = hoveredTeamId !== null;
+  const isHovered = Boolean(teamId && hoveredTeamId === teamId);
+  const hoverCls = bracketRowHoverClass(hasHover, isHovered);
+
+  return (
+    <div
+      className={`${BRACKET_CARD_CLASS} flex flex-col overflow-hidden`}
+      style={{ width: CARD_W, height: BRACKET_MATCH_TITLE_H + ROW_H }}
+    >
+      <div
+        className="flex shrink-0 items-center justify-center bg-[#D1D5DB] px-2.5 text-[10px] font-extrabold leading-tight tracking-wider text-neutral-900"
+        style={{ height: BRACKET_MATCH_TITLE_H }}
+      >
+        Đi tiếp
+      </div>
+      <div
+        className={`${BRACKET_ROW_BASE_CLASS} ${isHoverableTeamId(teamId) ? "cursor-pointer" : "cursor-default"} bg-[#141414] text-neutral-100 ${hoverCls}`}
+        style={{ height: ROW_H }}
+        onMouseEnter={() =>
+          onHoverTeam(
+            isHoverableTeamId(teamId)
+              ? { teamId: teamId!, matchId: -1, round: 99 }
+              : null,
+          )
+        }
+        onMouseLeave={() => onHoverTeam(null)}
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-sm font-semibold">
+          <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
+          {teamName || "TBD"}
+        </span>
+      </div>
+    </div>
+  );
+};
+
 const MatchCard = ({
   match,
   roundTitle,
@@ -592,6 +681,8 @@ const MatchCard = ({
     return (
       <BracketMatchCardShell
         title={roundTitle}
+        status={match.status}
+        dateScheduled={match.dateScheduled}
         className={`transition-opacity duration-150 ${cardHoverCls}`}
         style={{ width: CARD_W, height: CARD_H }}
       >
@@ -608,6 +699,8 @@ const MatchCard = ({
     >
       <BracketMatchCardShell
         title={roundTitle}
+        status={match.status}
+        dateScheduled={match.dateScheduled}
         style={{ width: CARD_W, height: CARD_H }}
       >
         {content}
@@ -623,6 +716,7 @@ const ElbowConnector = ({
   toY,
   hasHover,
   active,
+  activeStroke,
 }: {
   fromX: number;
   fromY: number;
@@ -630,45 +724,55 @@ const ElbowConnector = ({
   toY: number;
   hasHover: boolean;
   active: boolean;
+  /** Khi hover hành trình: ưu tiên màu đội nếu có */
+  activeStroke?: string | null;
 }) => {
+  const strokePad = 4;
   const left = Math.min(fromX, toX);
   const right = Math.max(fromX, toX);
   const top = Math.min(fromY, toY);
   const bottom = Math.max(fromY, toY);
 
-  const width = right - left + 2;
-  const height = bottom - top + 2;
+  const width = right - left + strokePad * 2;
+  const height = bottom - top + strokePad * 2;
 
-  const sX = fromX - left + 1;
-  const sY = fromY - top + 1;
-  const eX = toX - left + 1;
-  const eY = toY - top + 1;
+  const sX = fromX - left + strokePad;
+  const sY = fromY - top + strokePad;
+  const eX = toX - left + strokePad;
+  const eY = toY - top + strokePad;
   const midX = (sX + eX) / 2;
 
-  const path = `M ${sX} ${sY} H ${midX} V ${eY} H ${eX}`;
+  // Đường ngang thuần: tránh V=0 làm stroke bị clip / trông nhạt
+  const path =
+    Math.abs(fromY - toY) < 0.5
+      ? `M ${sX} ${sY} H ${eX}`
+      : `M ${sX} ${sY} H ${midX} V ${eY} H ${eX}`;
+  const hiStroke = activeStroke || BRACKET_CONN_ACTIVE_STROKE;
 
   return (
     <svg
       width={width}
       height={height}
-      className="pointer-events-none absolute"
-      style={{ left, top }}
+      className="pointer-events-none absolute overflow-visible"
+      style={{ left: left - strokePad, top: top - strokePad }}
     >
-      <path
-        d={path}
-        fill="none"
-        stroke={BRACKET_CONN_BASE_STROKE}
-        strokeWidth={2}
-        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-      />
-      {active ? (
+      {/* Base chỉ hiện khi chưa active — tránh gạch xám nằm dưới path xanh */}
+      {!active ? (
         <path
           d={path}
           fill="none"
-          stroke={BRACKET_CONN_ACTIVE_STROKE}
+          stroke={BRACKET_CONN_BASE_STROKE}
+          strokeWidth={2}
+          opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
+        />
+      ) : (
+        <path
+          d={path}
+          fill="none"
+          stroke={hiStroke}
           strokeWidth={3}
         />
-      ) : null}
+      )}
     </svg>
   );
 };
@@ -692,61 +796,72 @@ const MergeConnector = ({
 }) => {
   if (!fromYs.length) return null;
 
+  const strokePad = 4;
   const allYs = [...fromYs, toY];
   const left = Math.min(fromX, toX);
   const right = Math.max(fromX, toX);
   const top = Math.min(...allYs);
   const bottom = Math.max(...allYs);
 
-  const width = right - left + 2;
-  const height = bottom - top + 2;
+  const width = right - left + strokePad * 2;
+  const height = bottom - top + strokePad * 2;
 
-  const sX = fromX - left + 1;
-  const eX = toX - left + 1;
+  const sX = fromX - left + strokePad;
+  const eX = toX - left + strokePad;
   const midX = (sX + eX) / 2;
-  const normFromYs = fromYs.map((y) => y - top + 1);
-  const normToY = toY - top + 1;
+  const normFromYs = fromYs.map((y) => y - top + strokePad);
+  const normToY = toY - top + strokePad;
 
+  const baseOpacity = hasHover ? BRACKET_CONN_DIM_OPACITY : 1;
   const activeYs = normFromYs.filter((_, index) => activeFrom[index]);
+  const trunkMin = Math.min(...normFromYs, normToY);
+  const trunkMax = Math.max(...normFromYs, normToY);
 
   return (
     <svg
       width={width}
       height={height}
-      className="pointer-events-none absolute"
-      style={{ left, top }}
+      className="pointer-events-none absolute overflow-visible"
+      style={{ left: left - strokePad, top: top - strokePad }}
     >
-      {normFromYs.map((y, index) => (
-        <line
-          key={`base-merge-in-${index}`}
-          x1={sX}
-          y1={y}
-          x2={midX}
-          y2={y}
-          stroke={BRACKET_CONN_BASE_STROKE}
-          strokeWidth={2}
-          opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-        />
-      ))}
+      {/* Luôn vẽ đủ khung: nhánh inactive + trunk — tránh mất nhánh khi hover */}
+      {normFromYs.map((y, index) =>
+        activeFrom[index] ? null : (
+          <line
+            key={`base-merge-in-${index}`}
+            x1={sX}
+            y1={y}
+            x2={midX}
+            y2={y}
+            stroke={BRACKET_CONN_BASE_STROKE}
+            strokeWidth={2}
+            opacity={baseOpacity}
+          />
+        ),
+      )}
 
       <line
         x1={midX}
-        y1={Math.min(...normFromYs, normToY)}
+        y1={trunkMin}
         x2={midX}
-        y2={Math.max(...normFromYs, normToY)}
+        y2={trunkMax}
         stroke={BRACKET_CONN_BASE_STROKE}
         strokeWidth={2}
-        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
+        opacity={baseOpacity}
       />
-      <line
-        x1={midX}
-        y1={normToY}
-        x2={eX}
-        y2={normToY}
-        stroke={BRACKET_CONN_BASE_STROKE}
-        strokeWidth={2}
-        opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
-      />
+
+      {/* Đoạn ngang vào card: bỏ base khi active để không bị gạch xám dưới xanh */}
+      {!activeOutput ? (
+        <line
+          x1={midX}
+          y1={normToY}
+          x2={eX}
+          y2={normToY}
+          stroke={BRACKET_CONN_BASE_STROKE}
+          strokeWidth={2}
+          opacity={baseOpacity}
+        />
+      ) : null}
 
       {activeYs.length ? (
         <>
@@ -880,6 +995,7 @@ const DoubleElimBracket = ({
           id: Number(match.id),
           routeMatchId: Number(match.id),
           status: String(match.status ?? "").trim(),
+          dateScheduled: match.date_scheduled ?? null,
           round: Number(match.round_number ?? 0),
           matchNo: Number(match.match_no ?? 0),
           nextMatchId: toNumber(match.next_match_id),
@@ -890,6 +1006,8 @@ const DoubleElimBracket = ({
           p2,
           p1Logo: match.team_a?.logo_url ?? null,
           p2Logo: match.team_b?.logo_url ?? null,
+          p1Color: normalizeTeamColorHex(match.team_a?.team_color_hex),
+          p2Color: normalizeTeamColorHex(match.team_b?.team_color_hex),
           s1: scoreA,
           s2: scoreB,
           winner,
@@ -988,6 +1106,36 @@ const DoubleElimBracket = ({
       match5,
     };
   }, [rounds]);
+
+  const fourTeamAdvanceSpecial = useMemo(() => {
+    if (rounds.length < 4) return null;
+
+    const roundShape = getRoundShape(displayMatches);
+    if (roundShape !== FOUR_TEAM_ADVANCE_ROUND_SHAPE) return null;
+
+    const byRound = new Map(rounds);
+    const r1 = (byRound.get(1) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r2 = (byRound.get(2) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r3 = (byRound.get(3) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+    const r4 = (byRound.get(4) ?? []).sort((a, b) => a.matchNo - b.matchNo);
+
+    if (
+      r1.length !== 2 ||
+      r2.length !== 1 ||
+      r3.length !== 1 ||
+      r4.length !== 1
+    ) {
+      return null;
+    }
+
+    return {
+      match1A: r1[0],
+      match1B: r1[1],
+      upperFinal: r2[0],
+      lowerRound: r3[0],
+      decider: r4[0],
+    };
+  }, [rounds, displayMatches]);
 
   const eightTeamSpecial = useMemo(() => {
     const likelyEightTeamBracket = inferredTeamCount >= 7;
@@ -1094,19 +1242,256 @@ const DoubleElimBracket = ({
 
   if (!rounds.length) {
     return (
-      <p className="text-sm text-[#EEEEEE]">ChĂ†Â°a cÄ‚Â³ match trong bracket nÄ‚Â y.</p>
+      <p className="text-sm text-[#EEEEEE]">Chưa có trận trong bracket này.</p>
     );
   }
 
   const totalRounds = rounds.length;
   const firstRoundMatchCount = rounds[0]?.[1]?.length ?? 0;
-  const getMatchTitle = (round: number) =>
-    getDoubleElimRoundTitle(
-      round,
-      totalRounds,
-      firstRoundMatchCount,
-      teamCount,
+  const isAdvanceMode = Boolean(fourTeamAdvanceSpecial);
+  const getMatchTitle = (match: DisplayMatch) =>
+    formatDoubleElimMatchFooterTitle(
+      getDoubleElimRoundTitle(
+        match.round,
+        totalRounds,
+        firstRoundMatchCount,
+        teamCount || inferredTeamCount,
+        { isAdvanceMode },
+      ),
+      match.matchNo,
     );
+
+  if (fourTeamAdvanceSpecial) {
+    const x1 = 0;
+    const x2 = CARD_W + 72;
+    const x3 = x2 + CARD_W + 72;
+
+    const y1A = 0;
+    const y1B = CARD_H + 56;
+    const y2 = (y1A + y1B + CARD_H) / 2 - CARD_H / 2;
+
+    const y3 = y1B + CARD_H + 96;
+    const y4 = y3;
+
+    const outX1 = x1 + CARD_W;
+    const outX2 = x2 + CARD_W;
+    const inX2 = x2;
+    const inX3 = x3;
+
+    const c1A = getMatchCardConnectorY(y1A + HEADER_H, ROW_H);
+    const c1B = getMatchCardConnectorY(y1B + HEADER_H, ROW_H);
+    const c2 = getMatchCardConnectorY(y2 + HEADER_H, ROW_H);
+    const c3 = getMatchCardConnectorY(y3 + HEADER_H, ROW_H);
+    const c4 = getMatchCardConnectorY(y4 + HEADER_H, ROW_H);
+
+    const totalW = x3 + CARD_W;
+    const advanceSlotH = BRACKET_MATCH_TITLE_H + ROW_H;
+    const advanceAnchorY = BRACKET_MATCH_TITLE_H + ROW_H / 2;
+    // Align team-row center of Advances with match connector Y
+    const yAdvanceUpper = c2 - advanceAnchorY;
+    const yAdvanceLower = c4 - advanceAnchorY;
+    const totalH =
+      Math.max(y3 + CARD_H + HEADER_H, yAdvanceLower + advanceSlotH) + 16;
+
+    const resolveAdvanceTeam = (match: DisplayMatch) => {
+      const winnerId = getResolvedWinnerTeamId(
+        match,
+        selectedTeamByMatchId,
+      );
+      if (!winnerId) {
+        return {
+          teamId: null as number | null,
+          name: "TBD",
+          logoUrl: null as string | null,
+          color: null as string | null,
+        };
+      }
+      if (winnerId === match.teamAId) {
+        return {
+          teamId: match.teamAId,
+          name: match.p1,
+          logoUrl: match.p1Logo ?? null,
+          color: match.p1Color ?? null,
+        };
+      }
+      if (winnerId === match.teamBId) {
+        return {
+          teamId: match.teamBId,
+          name: match.p2,
+          logoUrl: match.p2Logo ?? null,
+          color: match.p2Color ?? null,
+        };
+      }
+      return {
+        teamId: winnerId,
+        name: `Đội #${winnerId}`,
+        logoUrl: null,
+        color: null,
+      };
+    };
+
+    const upperAdvance = resolveAdvanceTeam(fourTeamAdvanceSpecial.upperFinal);
+    const lowerAdvance = resolveAdvanceTeam(fourTeamAdvanceSpecial.decider);
+
+    const isAdvanceLineActive = (
+      teamId: number | null,
+      sourceMatchId: number,
+    ) =>
+      Boolean(
+        teamId &&
+          hoveredTeamId === teamId &&
+          journeySet?.has(sourceMatchId),
+      );
+
+    return withPickemContext(
+      <div className="space-y-3">
+        <div className="relative" style={{ width: totalW, height: totalH }}>
+          <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
+            <MatchCard
+              match={fourTeamAdvanceSpecial.match1A}
+              roundTitle={getMatchTitle(fourTeamAdvanceSpecial.match1A)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
+              isInJourney={
+                !journeySet ||
+                journeySet.has(fourTeamAdvanceSpecial.match1A.id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
+            <MatchCard
+              match={fourTeamAdvanceSpecial.match1B}
+              roundTitle={getMatchTitle(fourTeamAdvanceSpecial.match1B)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
+              isInJourney={
+                !journeySet ||
+                journeySet.has(fourTeamAdvanceSpecial.match1B.id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x2, top: y2 + HEADER_H }}>
+            <MatchCard
+              match={fourTeamAdvanceSpecial.upperFinal}
+              roundTitle={getMatchTitle(fourTeamAdvanceSpecial.upperFinal)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
+              isInJourney={
+                !journeySet ||
+                journeySet.has(fourTeamAdvanceSpecial.upperFinal.id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x3, top: yAdvanceUpper }}>
+            <AdvancesSlot
+              teamName={upperAdvance.name}
+              logoUrl={upperAdvance.logoUrl}
+              teamId={upperAdvance.teamId}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
+            />
+          </div>
+
+          <div className="absolute" style={{ left: x1, top: y3 + HEADER_H }}>
+            <MatchCard
+              match={fourTeamAdvanceSpecial.lowerRound}
+              roundTitle={getMatchTitle(fourTeamAdvanceSpecial.lowerRound)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
+              isInJourney={
+                !journeySet ||
+                journeySet.has(fourTeamAdvanceSpecial.lowerRound.id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x2, top: y4 + HEADER_H }}>
+            <MatchCard
+              match={fourTeamAdvanceSpecial.decider}
+              roundTitle={getMatchTitle(fourTeamAdvanceSpecial.decider)}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
+              isInJourney={
+                !journeySet ||
+                journeySet.has(fourTeamAdvanceSpecial.decider.id)
+              }
+            />
+          </div>
+          <div className="absolute" style={{ left: x3, top: yAdvanceLower }}>
+            <AdvancesSlot
+              teamName={lowerAdvance.name}
+              logoUrl={lowerAdvance.logoUrl}
+              teamId={lowerAdvance.teamId}
+              hoveredTeamId={hoveredTeamId}
+              onHoverTeam={setHover}
+            />
+          </div>
+
+          <MergeConnector
+            fromX={outX1}
+            fromYs={[c1A, c1B]}
+            toX={inX2}
+            toY={c2}
+            hasHover={hoveredTeamId !== null}
+            activeFrom={[
+              isPathActive(
+                fourTeamAdvanceSpecial.match1A,
+                fourTeamAdvanceSpecial.upperFinal,
+              ),
+              isPathActive(
+                fourTeamAdvanceSpecial.match1B,
+                fourTeamAdvanceSpecial.upperFinal,
+              ),
+            ]}
+            activeOutput={
+              isPathActive(
+                fourTeamAdvanceSpecial.match1A,
+                fourTeamAdvanceSpecial.upperFinal,
+              ) ||
+              isPathActive(
+                fourTeamAdvanceSpecial.match1B,
+                fourTeamAdvanceSpecial.upperFinal,
+              )
+            }
+          />
+          <ElbowConnector
+            fromX={outX2}
+            fromY={c2}
+            toX={inX3}
+            toY={c2}
+            hasHover={hoveredTeamId !== null}
+            active={isAdvanceLineActive(
+              upperAdvance.teamId,
+              fourTeamAdvanceSpecial.upperFinal.id,
+            )}
+            activeStroke={upperAdvance.color}
+          />
+          <ElbowConnector
+            fromX={outX1}
+            fromY={c3}
+            toX={inX2}
+            toY={c4}
+            hasHover={hoveredTeamId !== null}
+            active={isPathActive(
+              fourTeamAdvanceSpecial.lowerRound,
+              fourTeamAdvanceSpecial.decider,
+            )}
+          />
+          <ElbowConnector
+            fromX={outX2}
+            fromY={c4}
+            toX={inX3}
+            toY={c4}
+            hasHover={hoveredTeamId !== null}
+            active={isAdvanceLineActive(
+              lowerAdvance.teamId,
+              fourTeamAdvanceSpecial.decider.id,
+            )}
+            activeStroke={lowerAdvance.color}
+          />
+        </div>
+      </div>,
+    );
+  }
 
   if (eightTeamSpecial) {
     const x1 = 0;
@@ -1160,7 +1545,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[0]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r1[0].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[0])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1171,7 +1556,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[1]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r1[1].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[1])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1182,7 +1567,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1C + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[2]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r1[2].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[2])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1193,7 +1578,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1D + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r1[3]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r1[3].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r1[3])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1205,7 +1590,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r2[0]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r2[0].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r2[0])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1216,7 +1601,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r2[1]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r2[1].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r2[1])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1228,7 +1613,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x4, top: y3 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r3}
-              roundTitle={getMatchTitle(eightTeamSpecial.r3.round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r3)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1240,7 +1625,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r4[0]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r4[0].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r4[0])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1251,7 +1636,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r4[1]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r4[1].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r4[1])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1263,7 +1648,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y5A + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r5[0]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r5[0].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r5[0])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1274,7 +1659,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y5B + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r5[1]}
-              roundTitle={getMatchTitle(eightTeamSpecial.r5[1].round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r5[1])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1286,7 +1671,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x3, top: y6 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r6}
-              roundTitle={getMatchTitle(eightTeamSpecial.r6.round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r6)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1297,7 +1682,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x4, top: y7 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r7}
-              roundTitle={getMatchTitle(eightTeamSpecial.r7.round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r7)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1308,7 +1693,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x5, top: y8 + HEADER_H }}>
             <MatchCard
               match={eightTeamSpecial.r8}
-              roundTitle={getMatchTitle(eightTeamSpecial.r8.round)}
+              roundTitle={getMatchTitle(eightTeamSpecial.r8)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1500,7 +1885,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r1[0]}
-              roundTitle={getMatchTitle(sixTeamSpecial.r1[0].round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r1[0])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1511,7 +1896,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r1[1]}
-              roundTitle={getMatchTitle(sixTeamSpecial.r1[1].round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r1[1])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1523,7 +1908,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2A + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r2[0]}
-              roundTitle={getMatchTitle(sixTeamSpecial.r2[0].round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r2[0])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1534,7 +1919,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2B + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r2[1]}
-              roundTitle={getMatchTitle(sixTeamSpecial.r2[1].round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r2[1])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1546,7 +1931,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x4, top: y3 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r3}
-              roundTitle={getMatchTitle(sixTeamSpecial.r3.round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r3)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r3.id)}
@@ -1556,7 +1941,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4A + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r4[0]}
-              roundTitle={getMatchTitle(sixTeamSpecial.r4[0].round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r4[0])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1567,7 +1952,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y4B + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r4[1]}
-              roundTitle={getMatchTitle(sixTeamSpecial.r4[1].round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r4[1])}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1578,7 +1963,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y5 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r5}
-              roundTitle={getMatchTitle(sixTeamSpecial.r5.round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r5)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r5.id)}
@@ -1587,7 +1972,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x4, top: y6 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r6}
-              roundTitle={getMatchTitle(sixTeamSpecial.r6.round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r6)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r6.id)}
@@ -1596,7 +1981,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x5, top: y7 + HEADER_H }}>
             <MatchCard
               match={sixTeamSpecial.r7}
-              roundTitle={getMatchTitle(sixTeamSpecial.r7.round)}
+              roundTitle={getMatchTitle(sixTeamSpecial.r7)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={!journeySet || journeySet.has(sixTeamSpecial.r7.id)}
@@ -1715,7 +2100,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match1A}
-              roundTitle={getMatchTitle(fourTeamSpecial.match1A.round)}
+              roundTitle={getMatchTitle(fourTeamSpecial.match1A)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1726,7 +2111,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y1B + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match1B}
-              roundTitle={getMatchTitle(fourTeamSpecial.match1B.round)}
+              roundTitle={getMatchTitle(fourTeamSpecial.match1B)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1737,7 +2122,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y2 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match2}
-              roundTitle={getMatchTitle(fourTeamSpecial.match2.round)}
+              roundTitle={getMatchTitle(fourTeamSpecial.match2)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1748,7 +2133,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x1, top: y3 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match3}
-              roundTitle={getMatchTitle(fourTeamSpecial.match3.round)}
+              roundTitle={getMatchTitle(fourTeamSpecial.match3)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1759,7 +2144,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x2, top: y4 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match4}
-              roundTitle={getMatchTitle(fourTeamSpecial.match4.round)}
+              roundTitle={getMatchTitle(fourTeamSpecial.match4)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1770,7 +2155,7 @@ const DoubleElimBracket = ({
           <div className="absolute" style={{ left: x5, top: y5 + HEADER_H }}>
             <MatchCard
               match={fourTeamSpecial.match5}
-              roundTitle={getMatchTitle(fourTeamSpecial.match5.round)}
+              roundTitle={getMatchTitle(fourTeamSpecial.match5)}
               hoveredTeamId={hoveredTeamId}
               onHoverTeam={setHover}
               isInJourney={
@@ -1866,7 +2251,7 @@ const DoubleElimBracket = ({
                 >
                   <MatchCard
                     match={match}
-                    roundTitle={getMatchTitle(match.round)}
+                    roundTitle={getMatchTitle(match)}
                     hoveredTeamId={hoveredTeamId}
                     onHoverTeam={setHover}
                     isInJourney={!journeySet || journeySet.has(match.id)}

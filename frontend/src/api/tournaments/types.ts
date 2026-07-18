@@ -11,6 +11,8 @@ export interface TournamentPayload {
   check_in_end?: string;
   max_player_per_team?: number;
   max_participate?: number;
+  /** org = theo đội; individual = cá nhân (TFT solo) */
+  registration_mode?: "org" | "individual";
 }
 
 export interface Tournament {
@@ -42,8 +44,14 @@ export interface TournamentBySlugResponse {
       logo_url?: string;
       team_color_hex?: string;
       isCheckedIn?: boolean;
+      player_ids?: Array<number | string>;
+      primary_riot_account?: string | null;
     }>;
     registered_count?: number;
+    registration_mode?: "org" | "individual" | string;
+    max_player_per_team?: number;
+    short_name?: string;
+    game_name?: string;
     prizes?: Array<{
       id?: number;
       place_label?: string;
@@ -78,6 +86,8 @@ export interface Bracket {
   format_name?: string;
   format_type?: string;
   has_losers_bracket?: boolean;
+  /** Ngày bắt đầu bracket — dùng để auto-select UI */
+  date_start?: string | null;
 }
 
 export interface Match {

@@ -1,6 +1,12 @@
 export const BRACKET_BG_CLASS = "";
 
 export const BRACKET_MATCH_TITLE_H = 32;
+export const BRACKET_MATCH_FOOTER_H = 28;
+
+export type BracketMatchDisplayStatus =
+  | "upcoming"
+  | "ongoing"
+  | "completed";
 
 export const getCardCenterY = (top: number, cardH: number): number =>
   top + cardH / 2;
@@ -10,7 +16,63 @@ export const getMatchCardConnectorY = (top: number, rowH: number): number =>
   top + BRACKET_MATCH_TITLE_H + rowH;
 
 export const getBracketMatchCardHeight = (rowH: number): number =>
-  BRACKET_MATCH_TITLE_H + rowH * 2;
+  BRACKET_MATCH_TITLE_H + rowH * 2 + BRACKET_MATCH_FOOTER_H;
+
+export const normalizeBracketMatchStatus = (
+  status?: string | null,
+): BracketMatchDisplayStatus => {
+  const normalized = String(status ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (["complete", "completed", "done", "finished"].includes(normalized)) {
+    return "completed";
+  }
+
+  if (
+    ["ongoing", "live", "in_progress", "in-progress", "playing"].includes(
+      normalized,
+    )
+  ) {
+    return "ongoing";
+  }
+
+  return "upcoming";
+};
+
+export const getBracketMatchStatusLabel = (
+  status?: string | null,
+): string => {
+  const display = normalizeBracketMatchStatus(status);
+  if (display === "completed") return "ĐÃ KẾT THÚC";
+  if (display === "ongoing") return "ĐANG DIỄN RA";
+  return "SẮP DIỄN RA";
+};
+
+export const formatBracketMatchDate = (
+  dateScheduled?: string | null,
+): string => {
+  const raw = String(dateScheduled ?? "").trim();
+  if (!raw) return "CHƯA CÓ";
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "CHƯA CÓ";
+
+  const weekday = parsed
+    .toLocaleDateString("vi-VN", { weekday: "short" })
+    .toUpperCase();
+  const day = parsed.getDate();
+  const month = parsed
+    .toLocaleDateString("vi-VN", { month: "short" })
+    .toUpperCase();
+  const time = parsed.toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  return `${weekday}, ${day} ${month} - ${time}`;
+};
 
 export const BRACKET_INNER_CARD_CLASS =
   "box-border block overflow-hidden border border-neutral-600 bg-[#141414]";

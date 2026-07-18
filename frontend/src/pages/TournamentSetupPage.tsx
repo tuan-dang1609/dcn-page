@@ -118,6 +118,7 @@ type TournamentListItem = {
   max_player_per_team?: number | null;
   max_participate?: number | null;
   banner_url?: string | null;
+  registration_mode?: "org" | "individual" | string | null;
 };
 
 type TournamentRequirementApi = {
@@ -254,6 +255,7 @@ const TournamentSetupPage = () => {
     check_in_end: "",
     max_player_per_team: "",
     max_participate: "",
+    registration_mode: "org" as "org" | "individual",
     preview_game_slug: "valorant",
   });
   const [bannerFile, setBannerFile] = useState<File | null>(null);
@@ -400,6 +402,14 @@ const TournamentSetupPage = () => {
     [tournamentOptions],
   );
   const selectedGameId = tournamentForm.game_id;
+  const selectedGame = gameById.get(String(selectedGameId));
+  const selectedGameSlug = String(selectedGame?.short_name ?? "")
+    .trim()
+    .toLowerCase();
+  const isTftGame = ["tft", "teamfighttactics", "teamfight_tactics"].includes(
+    selectedGameSlug,
+  );
+  const isIndividualMode = tournamentForm.registration_mode === "individual";
   const hasGameIdOption = gameOptions.some(
     (game) => String(game.id) === selectedGameId,
   );
@@ -538,6 +548,10 @@ const TournamentSetupPage = () => {
       check_in_end: toGmt7InputDateTime(fallbackCheckInEnd),
       max_player_per_team: toInputValue(selected.max_player_per_team),
       max_participate: toInputValue(selected.max_participate),
+      registration_mode:
+        String(selected.registration_mode ?? "").toLowerCase() === "individual"
+          ? "individual"
+          : "org",
       preview_game_slug: selectedGame?.short_name ?? prev.preview_game_slug,
     }));
 
@@ -689,9 +703,21 @@ const TournamentSetupPage = () => {
         ...(toGmt7OffsetDateTime(tournamentForm.check_in_end)
           ? { check_in_end: toGmt7OffsetDateTime(tournamentForm.check_in_end) }
           : {}),
-        ...(toNumber(tournamentForm.max_player_per_team)
-          ? { max_player_per_team: Number(tournamentForm.max_player_per_team) }
-          : {}),
+        ...(tournamentForm.registration_mode === "individual"
+          ? {
+              registration_mode: "individual" as const,
+              max_player_per_team: 1,
+            }
+          : {
+              registration_mode: "org" as const,
+              ...(toNumber(tournamentForm.max_player_per_team)
+                ? {
+                    max_player_per_team: Number(
+                      tournamentForm.max_player_per_team,
+                    ),
+                  }
+                : {}),
+            }),
         ...(toNumber(tournamentForm.max_participate)
           ? { max_participate: Number(tournamentForm.max_participate) }
           : {}),
@@ -1060,12 +1086,30 @@ const TournamentSetupPage = () => {
                 <label className="text-xstext-[#EEEEEE]">Game</label>
                 <select
                   value={tournamentForm.game_id}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const nextGameId = event.target.value;
+                    const nextGame = gameById.get(nextGameId);
+                    const nextSlug = String(nextGame?.short_name ?? "")
+                      .trim()
+                      .toLowerCase();
+                    const nextIsTft = [
+                      "tft",
+                      "teamfighttactics",
+                      "teamfight_tactics",
+                    ].includes(nextSlug);
+
                     setTournamentForm((prev) => ({
                       ...prev,
-                      game_id: event.target.value,
-                    }))
-                  }
+                      game_id: nextGameId,
+                      preview_game_slug:
+                        nextGame?.short_name ?? prev.preview_game_slug,
+                      ...(nextIsTft
+                        ? {}
+                        : {
+                            registration_mode: "org" as const,
+                          }),
+                    }));
+                  }}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 >
                   <option value="">Chọn game (game_id)</option>
@@ -1081,6 +1125,39 @@ const TournamentSetupPage = () => {
                   ))}
                 </select>
               </div>
+              {isTftGame ? (
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xstext-[#EEEEEE]">
+                    Hình thức đăng ký (TFT)
+                  </label>
+                  <select
+                    value={tournamentForm.registration_mode}
+                    onChange={(event) => {
+                      const nextMode =
+                        event.target.value === "individual"
+                          ? "individual"
+                          : "org";
+                      setTournamentForm((prev) => ({
+                        ...prev,
+                        registration_mode: nextMode,
+                        ...(nextMode === "individual"
+                          ? { max_player_per_team: "1" }
+                          : {}),
+                      }));
+                    }}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="org">Theo tổ chức / đội (hiện tại)</option>
+                    <option value="individual">
+                      Cá nhân / TFT solo (không cần đội, cần Riot ID)
+                    </option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Cá nhân: mỗi user tự đăng ký 1 suất; bắt buộc có
+                    riot_account.
+                  </p>
+                </div>
+              ) : null}
               <Input
                 value={tournamentForm.name}
                 onChange={(event) =>
@@ -1246,7 +1323,9 @@ const TournamentSetupPage = () => {
                 />
               </div>
               <Input
-                value={tournamentForm.max_player_per_team}
+                value={
+                  isIndividualMode ? "1" : tournamentForm.max_player_per_team
+                }
                 onChange={(event) =>
                   setTournamentForm((prev) => ({
                     ...prev,
@@ -1255,6 +1334,7 @@ const TournamentSetupPage = () => {
                 }
                 placeholder="max_player_per_team"
                 inputMode="numeric"
+                disabled={isIndividualMode}
               />
               <Input
                 value={tournamentForm.max_participate}
@@ -1264,7 +1344,11 @@ const TournamentSetupPage = () => {
                     max_participate: event.target.value,
                   }))
                 }
-                placeholder="max_participate"
+                placeholder={
+                  isIndividualMode
+                    ? "max_participate (số suất cá nhân)"
+                    : "max_participate"
+                }
                 inputMode="numeric"
               />
             </div>

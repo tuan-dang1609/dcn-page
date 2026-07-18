@@ -1,11 +1,10 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useOutletContext } from "react-router-dom";
 import {
   fetchNormalizedTournamentBrackets,
   tournamentBracketsQueryKey,
 } from "@/api/tournaments/queryFns";
-import { type Bracket } from "@/api/tournaments/index";
 import { TournamentTabCard } from "@/components/TournamentTabCard";
 import {
   Select,
@@ -19,6 +18,7 @@ import {
   TOURNAMENT_TAB_ROW_CLASS,
 } from "@/components/tournamentTheme";
 import PageLoader from "@/components/PageLoader";
+import { resolveActiveBracketId } from "@/lib/resolveActiveBracket";
 
 const SingleElimBracket = lazy(() => import("@/components/BracketView"));
 const DoubleElimBracket = lazy(() => import("@/components/DoubleElimBracket"));
@@ -54,6 +54,7 @@ const toBranchLabel = (index: number) => {
 const BracketPage = () => {
   const { tournament } = useOutletContext<BracketOutletContext>();
   const [activeBracketId, setActiveBracketId] = useState<number | null>(null);
+  const userPickedRef = useRef(false);
 
   const {
     data: brackets = [],
@@ -69,6 +70,20 @@ const BracketPage = () => {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
+
+  useEffect(() => {
+    if (!brackets.length || userPickedRef.current) return;
+
+    const resolved = resolveActiveBracketId(brackets);
+    if (resolved != null) {
+      setActiveBracketId(resolved);
+    }
+  }, [brackets]);
+
+  const selectBracket = (bracketId: number) => {
+    userPickedRef.current = true;
+    setActiveBracketId(bracketId);
+  };
 
   const selectedBracket =
     brackets.find((bracket) => bracket.id === activeBracketId) ?? brackets[0];
@@ -174,7 +189,7 @@ const BracketPage = () => {
                 key={tab.id}
                 title={tab.title}
                 isActive={resolvedActiveId === tab.id}
-                onClick={() => setActiveBracketId(tab.id)}
+                onClick={() => selectBracket(tab.id)}
               />
             ))}
           </div>
@@ -182,7 +197,7 @@ const BracketPage = () => {
           <div className="md:hidden">
             <Select
               value={String(resolvedActiveId ?? "")}
-              onValueChange={(value) => setActiveBracketId(Number(value))}
+              onValueChange={(value) => selectBracket(Number(value))}
             >
               <SelectTrigger className="w-full border border-[#333] bg-[#141414] text-white">
                 <SelectValue placeholder="Chọn bracket" />

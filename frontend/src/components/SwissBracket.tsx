@@ -13,7 +13,6 @@ import {
   isHoverableTeamId,
 } from "@/components/bracketHover";
 import {
-  BRACKET_INNER_CARD_CLASS,
   BRACKET_OUTCOME_DOT_CLASS,
   BRACKET_OUTCOME_DOT_COLORS,
   BRACKET_ROW_BASE_CLASS,
@@ -23,9 +22,11 @@ import {
   BRACKET_STAGE_WRAPPER_CLASS,
   buildSwissOutcomeDots,
   formatBracketSideScore,
+  getBracketMatchCardHeight,
   getBracketRowStateClass,
   getSwissColumnRoundTitle,
 } from "@/components/bracketTheme";
+import { BracketMatchCardShell } from "@/components/BracketMatchCardShell";
 
 type SwissBracketProps = {
   bracketId?: number | null;
@@ -82,6 +83,7 @@ type DisplayMatch = {
   s2: number | null;
   winner: string | null;
   status: string;
+  dateScheduled?: string | null;
 };
 
 type StageMetrics = {
@@ -102,7 +104,7 @@ type TeamProgress = {
 
 const CARD_W = 268;
 const ROW_H = 44;
-const CARD_H = ROW_H * 2;
+const CARD_H = getBracketMatchCardHeight(ROW_H);
 const STAGE_HEADER_H = 32;
 const STAGE_HEADER_GAP = 12;
 const MATCH_GAP = 10;
@@ -282,6 +284,7 @@ const toDisplayMatches = (
       s2: scoreB,
       winner,
       status: String(match.status || "scheduled"),
+      dateScheduled: match.date_scheduled ?? null,
     };
   });
 };
@@ -398,6 +401,7 @@ const createTbdPlaceholder = (label: string, index: number): DisplayMatch => ({
   s2: null,
   winner: null,
   status: "scheduled",
+  dateScheduled: null,
 });
 
 const PlayerRow = ({
@@ -578,22 +582,32 @@ const MatchCard = ({
 
   if (disableMatchLink || canPick || !isMatchCompleted) {
     return (
-      <div
-        className={`${BRACKET_INNER_CARD_CLASS} flex flex-col divide-y divide-neutral-700 transition-all ${cardHoverCls}`}
+      <BracketMatchCardShell
+        title={`MATCH #${match.matchNo || match.id}`}
+        status={match.status}
+        dateScheduled={match.dateScheduled}
+        className={`transition-all ${cardHoverCls}`}
         style={{ width: CARD_W, height: CARD_H }}
       >
         {content}
-      </div>
+      </BracketMatchCardShell>
     );
   }
 
   return (
     <Link
       to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`${BRACKET_INNER_CARD_CLASS} flex flex-col divide-y divide-neutral-700 hover:outline hover:outline-1 hover:outline-white/20 transition-all ${cardHoverCls}`}
-      style={{ width: CARD_W, height: CARD_H }}
+      className={`block transition-all hover:outline hover:outline-1 hover:outline-white/20 ${cardHoverCls}`}
+      style={{ width: CARD_W }}
     >
-      {content}
+      <BracketMatchCardShell
+        title={`MATCH #${match.matchNo || match.id}`}
+        status={match.status}
+        dateScheduled={match.dateScheduled}
+        style={{ width: CARD_W, height: CARD_H }}
+      >
+        {content}
+      </BracketMatchCardShell>
     </Link>
   );
 };

@@ -6,11 +6,33 @@ import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
 import PageLoader from "@/components/PageLoader";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
-import { useTournamentPrefetch, type TournamentTab } from "@/hooks/useTournamentPrefetch";
+import {
+  useTournamentPrefetch,
+  type TournamentTab,
+} from "@/hooks/useTournamentPrefetch";
 import { TOURNAMENT_PAGE_BG_CLASS } from "@/components/tournamentTheme";
-import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
+import {
+  Outlet,
+  useMatch,
+  useLocation,
+  useParams,
+  useNavigate,
+} from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import {
+  fetchNormalizedTournamentBrackets,
+  tournamentBracketsQueryKey,
+} from "@/api/tournaments/queryFns";
+import {
+  resolveActiveBracketId,
+  toDateKey,
+} from "@/lib/resolveActiveBracket";
+
+const autoBracketSkipKey = (tournamentId: number | string) =>
+  `skip-auto-bracket:${tournamentId}`;
 
 const Layout = () => {
+  const navigate = useNavigate();
   const isTournamentHome = Boolean(useMatch("/tournament/:game/:slug"));
   const isMatchDetailPage = Boolean(
     useMatch("/tournament/:game/:slug/match/:id"),
@@ -25,7 +47,10 @@ const Layout = () => {
   );
   const isRulePage = Boolean(useMatch("/tournament/:game/:slug/rule"));
   const { game, slug } = useParams();
-  const { tournament, isLoading, error, refetch } = useTournamentBySlug(game, slug);
+  const { tournament, isLoading, error, refetch } = useTournamentBySlug(
+    game,
+    slug,
+  );
 
   const activeTab: TournamentTab = isBracketPage
     ? "bracket"
@@ -39,6 +64,47 @@ const Layout = () => {
 
   useTournamentPrefetch(tournament?.id, activeTab);
   const location = useLocation();
+
+  const { data: brackets = [] } = useQuery({
+    queryKey: tournamentBracketsQueryKey(tournament?.id),
+    enabled: Boolean(tournament?.id) && isTournamentHome,
+    queryFn: async () => fetchNormalizedTournamentBrackets(tournament!.id!),
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (!isTournamentHome || !tournament?.id || !game || !slug) return;
+    if (!brackets.length) return;
+
+    const hasScheduledDates = brackets.some((bracket) =>
+      Boolean(toDateKey(bracket.date_start)),
+    );
+    if (!hasScheduledDates) return;
+
+    try {
+      if (sessionStorage.getItem(autoBracketSkipKey(tournament.id))) return;
+    } catch {
+      // ignore storage errors
+    }
+
+    const activeId = resolveActiveBracketId(brackets);
+    const active = brackets.find((bracket) => bracket.id === activeId);
+    const activeDate = toDateKey(active?.date_start);
+    const today = toDateKey(new Date());
+
+    // Chỉ auto vào trang bracket khi có bracket đang/đã tới ngày diễn ra.
+    if (!activeDate || !today || activeDate > today) return;
+
+    try {
+      sessionStorage.setItem(autoBracketSkipKey(tournament.id), "1");
+    } catch {
+      // ignore
+    }
+
+    navigate(`/tournament/${game}/${slug}/bracket`, { replace: true });
+  }, [isTournamentHome, tournament?.id, brackets, game, slug, navigate]);
 
   const tournamentTitle = tournament?.name?.trim() || "Giải đấu";
 
@@ -69,7 +135,6 @@ const Layout = () => {
   ]);
 
   useEffect(() => {
-    // Ensure we start at the top when navigating inside tournament pages
     window.scrollTo(0, 0);
   }, [location.pathname]);
 

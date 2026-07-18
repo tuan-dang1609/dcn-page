@@ -68,6 +68,7 @@ interface EditableMatch extends Match {
   draftScoreB: string;
   draftWinnerTeamId: string;
   draftDateScheduled: string;
+  draftStatus: string;
   draftRoomId: string;
   saving?: boolean;
   scheduleSaving?: boolean;
@@ -305,6 +306,7 @@ const hydrateMatches = (matches: Match[]): EditableMatch[] =>
         ? "auto"
         : String(match.winner_team_id),
     draftDateScheduled: toDatetimeLocalInput(match.date_scheduled),
+    draftStatus: String(match.status ?? "scheduled").trim() || "scheduled",
     draftRoomId: String(match.room_id ?? "").trim(),
     saving: false,
     scheduleSaving: false,
@@ -814,6 +816,7 @@ const ScoreControlPage = () => {
       | "draftScoreB"
       | "draftWinnerTeamId"
       | "draftDateScheduled"
+      | "draftStatus"
       | "draftRoomId",
     value: string,
   ) => {
@@ -1043,7 +1046,7 @@ const ScoreControlPage = () => {
     } = {
       score_a: scoreA,
       score_b: scoreB,
-      status: "completed",
+      status: String(match.draftStatus || "completed").trim() || "completed",
       propagate_winner: true,
       propagate_loser: true,
     };
@@ -1402,7 +1405,7 @@ const ScoreControlPage = () => {
                       </div>
                     </div>
 
-                    <div className="grid gap-2 md:grid-cols-[120px_120px_1fr_auto]">
+                    <div className="grid gap-2 md:grid-cols-[120px_120px_160px_1fr_auto]">
                       <Input
                         value={match.draftScoreA}
                         onChange={(event) =>
@@ -1427,6 +1430,21 @@ const ScoreControlPage = () => {
                         placeholder="score_b"
                         inputMode="numeric"
                       />
+                      <select
+                        value={match.draftStatus}
+                        onChange={(event) =>
+                          updateDraftMatch(
+                            match.id,
+                            "draftStatus",
+                            event.target.value,
+                          )
+                        }
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="scheduled">upcoming</option>
+                        <option value="ongoing">ongoing</option>
+                        <option value="completed">completed</option>
+                      </select>
                       <select
                         value={match.draftWinnerTeamId}
                         onChange={(event) =>

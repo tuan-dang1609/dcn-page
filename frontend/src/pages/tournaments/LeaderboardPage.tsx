@@ -106,6 +106,11 @@ const LeaderboardPage = () => {
               <TableHead
                 className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-28 text-center whitespace-nowrap`}
               >
+                Nhánh
+              </TableHead>
+              <TableHead
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-28 text-center whitespace-nowrap`}
+              >
                 Điểm Thưởng
               </TableHead>
             </TableRow>
@@ -114,6 +119,18 @@ const LeaderboardPage = () => {
             {leaderboard.map((row: TournamentTeamResult) => {
               const placementText = row.placement_label ?? "-";
               const medal = toMedal(row.placement_label);
+              const elimRoundText = (() => {
+                const raw = String(row.elim_label ?? "").trim();
+                if (!raw) {
+                  return row.elim_round != null && row.elim_round > 0
+                    ? `Vòng ${row.elim_round}`
+                    : "-";
+                }
+                // Chuẩn hóa cache cũ kiểu "playin · …"
+                return raw
+                  .replace(/^play[\s_-]*in\b/i, "Play-in")
+                  .replace(/^play[\s_-]*off\b/i, "Play-off");
+              })();
               return (
                 <TableRow
                   key={`${row.tournament_id}-${row.team_id}`}
@@ -149,6 +166,9 @@ const LeaderboardPage = () => {
                   </TableCell>
                   <TableCell className="text-center font-bold text-error whitespace-nowrap">
                     {row.losses}
+                  </TableCell>
+                  <TableCell className="text-center font-semibold text-neutral-300 whitespace-nowrap">
+                    {elimRoundText}
                   </TableCell>
                   <TableCell className="text-center font-semibold text-foreground whitespace-nowrap">
                     {row.points}

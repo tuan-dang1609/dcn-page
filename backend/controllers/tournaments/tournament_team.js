@@ -231,13 +231,28 @@ teamTourRoute.post(
     }
 
     const { rows: tournamentRows } = await pool.query(
-      "SELECT register_start, register_end FROM tournaments WHERE id = $1",
+      `
+      SELECT
+        register_start,
+        register_end,
+        COALESCE(NULLIF(TRIM(to_jsonb(t)->>'registration_mode'), ''), 'org') AS registration_mode
+      FROM tournaments t
+      WHERE id = $1
+      `,
       [tournamentId],
     );
 
     if (tournamentRows.length === 0) {
       set.status = 404;
       return { message: "Không tìm thấy giải đấu" };
+    }
+
+    if (String(tournamentRows[0].registration_mode) === "individual") {
+      set.status = 400;
+      return {
+        message:
+          "Giải cá nhân chỉ đăng ký qua /register-solo (cần Riot ID, không cần đội).",
+      };
     }
 
     const registerStartMs = Number(new Date(tournamentRows[0].register_start));
@@ -293,6 +308,225 @@ teamTourRoute.post(
         },
       ],
     },
+  },
+);
+
+teamTourRoute.post(
+  "/:tournament_id/register-solo",
+  async ({ params, set, user }) => {
+    const tournamentId = Number(params.tournament_id);
+    const userId = Number(user?.id);
+
+    if (!userId) {
+      set.status = 403;
+      return { message: "Bạn cần đăng nhập để đăng ký giải" };
+    }
+
+    const { rows: tournamentRows } = await pool.query(
+      `
+      SELECT
+        id,
+        register_start,
+        register_end,
+        max_participate,
+        COALESCE(NULLIF(TRIM(to_jsonb(t)->>'registration_mode'), ''), 'org') AS registration_mode
+      FROM tournaments t
+      WHERE id = $1
+      `,
+      [tournamentId],
+    );
+
+    if (tournamentRows.length === 0) {
+      set.status = 404;
+      return { message: "Không tìm thấy giải đấu" };
+    }
+
+    const tournament = tournamentRows[0];
+    if (String(tournament.registration_mode) !== "individual") {
+      set.status = 400;
+      return {
+        message:
+          "Giải này không phải dạng đăng ký cá nhân. Hãy dùng đăng ký theo đội.",
+      };
+    }
+
+    const registerStartMs = Number(new Date(tournament.register_start));
+    const registerEndMs = Number(new Date(tournament.register_end));
+    const now = Date.now();
+    const isRegistrationOpen =
+      Number.isFinite(registerStartMs) &&
+      Number.isFinite(registerEndMs) &&
+      now >= registerStartMs &&
+      now <= registerEndMs;
+
+    if (!isRegistrationOpen) {
+      set.status = 400;
+      return { message: "Ngoài thời gian đăng ký giải đấu" };
+    }
+
+    const { rows: userRows } = await pool.query(
+      `
+      SELECT id, nickname, username, profile_picture, riot_account
+      FROM users
+      WHERE id = $1
+      `,
+      [userId],
+    );
+
+    if (userRows.length === 0) {
+      set.status = 404;
+      return { message: "Không tìm thấy người dùng" };
+    }
+
+    const profile = userRows[0];
+    const riotAccount = String(profile.riot_account ?? "").trim();
+    if (!riotAccount) {
+      set.status = 400;
+      return {
+        message:
+          "Bạn cần liên kết Riot ID trước khi đăng ký giải cá nhân (TFT solo).",
+      };
+    }
+
+    const { rows: alreadyRows } = await pool.query(
+      `
+      SELECT tt.id
+      FROM tournament_teams tt
+      JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+      WHERE tt.tournament_id = $1
+        AND ttp.user_id = $2
+      LIMIT 1
+      `,
+      [tournamentId, userId],
+    );
+
+    if (alreadyRows.length > 0) {
+      set.status = 400;
+      return { message: "Bạn đã đăng ký giải này rồi" };
+    }
+
+    const maxParticipate = Number(tournament.max_participate);
+    if (Number.isFinite(maxParticipate) && maxParticipate > 0) {
+      const { rows: countRows } = await pool.query(
+        `
+        SELECT COUNT(*)::int AS total
+        FROM tournament_teams
+        WHERE tournament_id = $1
+        `,
+        [tournamentId],
+      );
+      const total = Number(countRows[0]?.total ?? 0);
+      if (total >= maxParticipate) {
+        set.status = 400;
+        return { message: "Giải đã đủ số suất đăng ký" };
+      }
+    }
+
+    const displayName =
+      String(profile.nickname ?? "").trim() ||
+      riotAccount.split("#")[0] ||
+      String(profile.username ?? "").trim() ||
+      `Player ${userId}`;
+    const shortName = `S${userId}`.slice(0, 16);
+    const soloTeamName = displayName.slice(0, 64);
+
+    let soloTeamId = null;
+    const { rows: existingSoloTeams } = await pool.query(
+      `
+      SELECT id
+      FROM teams
+      WHERE created_by = $1
+        AND short_name = $2
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [userId, shortName],
+    );
+
+    if (existingSoloTeams.length > 0) {
+      soloTeamId = Number(existingSoloTeams[0].id);
+      await pool.query(
+        `
+        UPDATE teams
+        SET name = $1,
+            logo_url = COALESCE($2, logo_url)
+        WHERE id = $3
+        `,
+        [soloTeamName, profile.profile_picture ?? null, soloTeamId],
+      );
+    } else {
+      const { rows: createdTeams } = await pool.query(
+        `
+        INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+        `,
+        [
+          soloTeamName,
+          shortName,
+          profile.profile_picture ?? null,
+          "#94A3B8",
+          userId,
+        ],
+      );
+      soloTeamId = Number(createdTeams[0]?.id);
+    }
+
+    if (!soloTeamId) {
+      set.status = 500;
+      return { message: "Không tạo được slot cá nhân để đăng ký" };
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const { rows: registrationRows } = await client.query(
+        `
+        INSERT INTO tournament_teams (team_id, tournament_id)
+        VALUES ($1, $2)
+        RETURNING *
+        `,
+        [soloTeamId, tournamentId],
+      );
+
+      const registration = registrationRows[0];
+      await client.query(
+        `
+        INSERT INTO tournament_team_players (tournament_team_id, user_id)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        `,
+        [registration.id, userId],
+      );
+
+      await client.query("COMMIT");
+
+      void recalculateTournamentResults(tournamentId).catch(() => {});
+
+      set.status = 201;
+      return {
+        message: "Đăng ký cá nhân thành công",
+        data: {
+          ...registration,
+          riot_account: riotAccount,
+          display_name: soloTeamName,
+        },
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      set.status = 500;
+      return {
+        message: error?.message || "Đăng ký cá nhân thất bại",
+      };
+    } finally {
+      client.release();
+    }
+  },
+  {
+    tags: [TAG],
+    summary: "Register individual (solo) player to tournament",
+    security: [{ bearerAuth: [] }],
   },
 );
 

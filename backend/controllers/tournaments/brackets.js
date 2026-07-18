@@ -198,20 +198,63 @@ const resolveParticipantTeamIds = async ({ tournamentId, teamIds }) => {
   return uniqueTeamIds;
 };
 
+const hasBracketDateStartColumn = async () => {
+  const { rows } = await pool.query(
+    `
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'brackets'
+      AND column_name = 'date_start'
+    LIMIT 1
+    `,
+  );
+  return rows.length > 0;
+};
+
+const normalizeBracketDateStart = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  return raw;
+};
+
 const createBracketRecord = async ({
   tournamentId,
   formatId,
   name = "Main Bracket",
   stage = "main",
   status = "scheduled",
+  dateStart = null,
 }) => {
+  const supportsDateStart = await hasBracketDateStartColumn();
+  const dateStartValue = normalizeBracketDateStart(dateStart);
+
+  const columns = ["tournament_id", "format_id", "name", "stage", "status"];
+  const values = [tournamentId, formatId, name, stage, status];
+  const returning = [
+    "id",
+    "tournament_id",
+    "format_id",
+    "name",
+    "stage",
+    "status",
+  ];
+
+  if (supportsDateStart) {
+    columns.push("date_start");
+    values.push(dateStartValue);
+    returning.push("date_start");
+  }
+
+  const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
   const { rows } = await pool.query(
     `
-    INSERT INTO brackets (tournament_id, format_id, name, stage, status)
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING *
+    INSERT INTO brackets (${columns.join(", ")})
+    VALUES (${placeholders})
+    RETURNING ${returning.join(", ")}
     `,
-    [tournamentId, formatId, name, stage, status],
+    values,
   );
 
   return rows[0] ?? null;
@@ -224,7 +267,7 @@ const generateSingleEliminationMatches = async ({
   bestOf = 1,
   autoAdvanceByes = true,
 }) => {
-  const bracketSize = nextPowerOfTwo(teamIds.length);
+  const bracketSize = nextPowerOfTwo(Math.max(teamIds.length, 2));
   const totalRounds = Math.log2(bracketSize);
   const seedOrder = buildSeedOrder(bracketSize);
 
@@ -331,6 +374,126 @@ const generateSingleEliminationMatches = async ({
     roundMatchIds,
     bracketSize,
     totalRounds,
+  };
+};
+
+/**
+ * 4-team double-elim where 2 teams advance (no grand final).
+ * Shape: 1:2, 2:1, 3:1, 4:1
+ * - R1 Opening → R2 Upper Final (winner advances)
+ * - R1 losers → R3 Lower
+ * - R3 winner + R2 loser → R4 Decider (winner advances)
+ */
+const generateFourTeamAdvanceDoubleEliminationMatches = async ({
+  bracketId,
+  tournamentId,
+  teamIds,
+  bestOf = 1,
+}) => {
+  if (!Array.isArray(teamIds) || teamIds.length !== 4) {
+    return null;
+  }
+
+  const [seed1, seed2, seed3, seed4] = teamIds;
+
+  const insertMatch = async ({
+    round,
+    matchNo,
+    teamAId = null,
+    teamBId = null,
+    seedA = null,
+    seedB = null,
+  }) => {
+    const { rows } = await pool.query(
+      `
+      INSERT INTO matches (
+        bracket_id,
+        tournament_id,
+        round_number,
+        match_no,
+        seed_a,
+        seed_b,
+        team_a_id,
+        team_b_id,
+        best_of,
+        status
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING id
+      `,
+      [
+        bracketId,
+        tournamentId,
+        round,
+        matchNo,
+        seedA,
+        seedB,
+        teamAId,
+        teamBId,
+        bestOf,
+        "scheduled",
+      ],
+    );
+
+    return Number(rows[0]?.id);
+  };
+
+  const matchIds = {
+    r1m1: await insertMatch({
+      round: 1,
+      matchNo: 1,
+      teamAId: seed1,
+      teamBId: seed4,
+      seedA: 1,
+      seedB: 4,
+    }),
+    r1m2: await insertMatch({
+      round: 1,
+      matchNo: 2,
+      teamAId: seed2,
+      teamBId: seed3,
+      seedA: 2,
+      seedB: 3,
+    }),
+    r2m1: await insertMatch({ round: 2, matchNo: 1 }),
+    r3m1: await insertMatch({ round: 3, matchNo: 1 }),
+    r4m1: await insertMatch({ round: 4, matchNo: 1 }),
+  };
+
+  const links = [
+    [matchIds.r1m1, matchIds.r2m1, "A"],
+    [matchIds.r1m2, matchIds.r2m1, "B"],
+    [matchIds.r3m1, matchIds.r4m1, "A"],
+  ];
+
+  for (const [fromMatchId, toMatchId, slot] of links) {
+    await pool.query(
+      `
+      UPDATE matches
+      SET next_match_id = $1, next_slot = $2
+      WHERE id = $3
+      `,
+      [toMatchId, slot, fromMatchId],
+    );
+  }
+
+  const { rows: matches } = await pool.query(
+    `
+    SELECT *
+    FROM matches
+    WHERE bracket_id = $1
+    ORDER BY round_number ASC, match_no ASC, id ASC
+    `,
+    [bracketId],
+  );
+
+  return {
+    matches,
+    bracketSize: 4,
+    winnerRounds: 2,
+    loserRounds: 2,
+    roundsTotal: 4,
+    teamsToAdvance: 2,
   };
 };
 
@@ -989,9 +1152,21 @@ bracketRouter.get(
       return { error: "tournament_id không hợp lệ" };
     }
 
+    // Fixed column list (no SELECT *) — avoids bind/result-format desync after DDL.
+    // date_start via to_jsonb so missing column does not break the query.
     const { rows } = await pool.query(
       `
-      SELECT b.*, f.name AS format_name, f.type AS format_type, f.has_losers_bracket
+      SELECT
+        b.id,
+        b.tournament_id,
+        b.format_id,
+        b.name,
+        b.stage,
+        b.status,
+        NULLIF(TRIM(to_jsonb(b)->>'date_start'), '')::timestamptz AS date_start,
+        f.name AS format_name,
+        f.type AS format_type,
+        f.has_losers_bracket
       FROM brackets b
       LEFT JOIN formats f ON f.id = b.format_id
       WHERE b.tournament_id = $1
@@ -1139,6 +1314,110 @@ bracketRouter.delete(
   },
 );
 
+bracketRouter.patch(
+  "/:bracket_id/meta",
+  async ({ params, body, set, user }) => {
+    const bracketId = toNumber(params.bracket_id);
+
+    if (!bracketId) {
+      set.status = 400;
+      return { error: "bracket_id không hợp lệ" };
+    }
+
+    const { rows: bracketRows } = await pool.query(
+      "SELECT id, tournament_id FROM brackets WHERE id = $1 LIMIT 1",
+      [bracketId],
+    );
+
+    if (bracketRows.length === 0) {
+      set.status = 404;
+      return { error: "Bracket không tồn tại" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      Number(bracketRows[0].tournament_id),
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const supportsDateStart = await hasBracketDateStartColumn();
+    const nextName =
+      body?.name !== undefined ? String(body.name ?? "").trim() || null : undefined;
+    const nextStage =
+      body?.stage !== undefined
+        ? String(body.stage ?? "").trim() || null
+        : undefined;
+    const nextStatus =
+      body?.status !== undefined
+        ? String(body.status ?? "").trim() || null
+        : undefined;
+    const nextDateStart =
+      body?.date_start !== undefined
+        ? normalizeBracketDateStart(body.date_start)
+        : undefined;
+
+    if (
+      nextName === undefined &&
+      nextStage === undefined &&
+      nextStatus === undefined &&
+      nextDateStart === undefined
+    ) {
+      set.status = 400;
+      return { error: "Không có trường nào để cập nhật" };
+    }
+
+    if (nextDateStart !== undefined && !supportsDateStart) {
+      set.status = 400;
+      return {
+        error:
+          "DB chưa có cột brackets.date_start. Chạy backend/docs/bracket_date_start.sql trước.",
+      };
+    }
+
+    const sets = [];
+    const values = [];
+    let index = 1;
+
+    if (nextName !== undefined) {
+      sets.push(`name = $${index++}`);
+      values.push(nextName);
+    }
+    if (nextStage !== undefined) {
+      sets.push(`stage = $${index++}`);
+      values.push(nextStage);
+    }
+    if (nextStatus !== undefined) {
+      sets.push(`status = $${index++}`);
+      values.push(nextStatus);
+    }
+    if (nextDateStart !== undefined) {
+      sets.push(`date_start = $${index++}`);
+      values.push(nextDateStart);
+    }
+
+    values.push(bracketId);
+
+    const { rows } = await pool.query(
+      `
+      UPDATE brackets
+      SET ${sets.join(", ")}
+      WHERE id = $${index}
+      RETURNING *
+      `,
+      values,
+    );
+
+    set.status = 200;
+    return { message: "Cập nhật bracket thành công", data: rows[0] ?? null };
+  },
+  {
+    tags: [TAG],
+    summary: "Update bracket meta (name/stage/status/date_start)",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
 bracketRouter.post(
   "/:tournament_id/single-elimination/generate",
   async ({ params, body, set, user }) => {
@@ -1236,21 +1515,15 @@ bracketRouter.post(
         return { error: "Bracket đã có matches, không thể generate lại" };
       }
     } else {
-      const { rows: createdRows } = await pool.query(
-        `
-        INSERT INTO brackets (tournament_id, format_id, name, stage, status)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *
-        `,
-        [
-          tournamentId,
-          formatId,
-          body?.name ?? "Main Bracket",
-          body?.stage ?? "main",
-          body?.status ?? "scheduled",
-        ],
-      );
-      bracketId = Number(createdRows[0]?.id);
+      const created = await createBracketRecord({
+        tournamentId,
+        formatId,
+        name: body?.name ?? "Main Bracket",
+        stage: body?.stage ?? "main",
+        status: body?.status ?? "scheduled",
+        dateStart: body?.date_start,
+      });
+      bracketId = Number(created?.id);
     }
 
     const bestOf = toNumber(body?.best_of) ?? 1;
@@ -1261,7 +1534,6 @@ bracketRouter.post(
         tournamentId,
         teamIds: uniqueTeamIds,
         bestOf,
-        autoAdvanceByes: true,
       });
 
     set.status = 201;
@@ -1408,6 +1680,17 @@ bracketRouter.post(
     }
 
     const bestOf = toNumber(body?.best_of) ?? 1;
+    const teamsToAdvance = toNumber(body?.teams_to_advance) ?? 1;
+    const isFourTeamAdvance =
+      teamIds.length === 4 && teamsToAdvance === 2;
+
+    if (teamsToAdvance === 2 && teamIds.length !== 4) {
+      set.status = 400;
+      return {
+        error:
+          "teams_to_advance=2 hiện chỉ hỗ trợ double-elimination 4 đội (2 đội đi tiếp, không có chung kết tổng).",
+      };
+    }
 
     const bracket = await createBracketRecord({
       tournamentId,
@@ -1415,6 +1698,7 @@ bracketRouter.post(
       name: body?.name ?? "Double Elimination Bracket",
       stage: body?.stage ?? "main",
       status: body?.status ?? "scheduled",
+      dateStart: body?.date_start,
     });
 
     let bracketSize = 0;
@@ -1423,9 +1707,35 @@ bracketRouter.post(
     let roundsTotal = 0;
     let roundMap = {};
     let note =
-      "Double-elimination được tạo trong 1 bracket duy nhất. Hỗ trợ 4/6/8 đội; với 6 đội sẽ auto-advance bye ở nhánh trên.";
+      "Double-elimination được tạo trong 1 bracket duy nhất. Hỗ trợ 4/6/8 đội; với 6 đội sẽ auto-advance bye ở nhánh trên. Với 4 đội có thể chọn teams_to_advance=2 (không chung kết tổng).";
 
-    if (teamIds.length === 6) {
+    if (isFourTeamAdvance) {
+      const advanceResult =
+        await generateFourTeamAdvanceDoubleEliminationMatches({
+          bracketId: Number(bracket.id),
+          tournamentId,
+          teamIds,
+          bestOf,
+        });
+
+      bracketSize = Number(advanceResult?.bracketSize ?? 4);
+      winnerRounds = Number(advanceResult?.winnerRounds ?? 2);
+      loserMainRounds = Number(advanceResult?.loserRounds ?? 2);
+      roundsTotal = Number(advanceResult?.roundsTotal ?? 4);
+      roundMap = {
+        winner_rounds: {
+          1: "Opening Matches",
+          2: "Upper Bracket",
+        },
+        loser_rounds: {
+          3: "Lower Bracket",
+          4: "Decider Matches",
+        },
+        advances: 2,
+      };
+      note =
+        "Double-elimination 4 đội dạng advance: winner Upper Bracket và winner Decider đi tiếp (không có chung kết tổng).";
+    } else if (teamIds.length === 6) {
       const compactSixResult =
         await generateCompactSixTeamDoubleEliminationMatches({
           bracketId: Number(bracket.id),
@@ -1658,6 +1968,7 @@ bracketRouter.post(
         winner_rounds: winnerRounds,
         loser_rounds: loserMainRounds,
         rounds_total: roundsTotal,
+        teams_to_advance: isFourTeamAdvance ? 2 : 1,
         matches: allMatches,
         round_map: roundMap,
         note,
@@ -1693,6 +2004,12 @@ bracketRouter.post(
                   example: [11, 22, 17, 21, 31, 32, 33, 34],
                 },
                 best_of: { type: "integer", example: 3 },
+                teams_to_advance: {
+                  type: "integer",
+                  example: 2,
+                  description:
+                    "Số đội đi tiếp. Với 4 đội + giá trị 2: không tạo chung kết tổng, winner Upper và Decider advance.",
+                },
                 name: { type: "string", example: "Double Elimination Bracket" },
                 stage: { type: "string", example: "main" },
                 status: { type: "string", example: "scheduled" },
@@ -1773,6 +2090,7 @@ bracketRouter.post(
       name: body?.name ?? "Swiss Stage",
       stage: body?.stage ?? "main",
       status: body?.status ?? "scheduled",
+      dateStart: body?.date_start,
     });
 
     await generateSwissMatches({
@@ -2323,6 +2641,7 @@ bracketRouter.post(
       name: body?.name ?? "Group Stage",
       stage: body?.stage ?? "group",
       status: body?.status ?? "scheduled",
+      dateStart: body?.date_start,
     });
 
     await generateRoundRobinMatches({
@@ -2450,7 +2769,7 @@ bracketRouter.patch(
     }
 
     const { rows: nextRows } = await pool.query(
-      "SELECT id, bracket_id FROM matches WHERE id = $1",
+      "SELECT id, bracket_id, tournament_id FROM matches WHERE id = $1",
       [nextMatchId],
     );
 
@@ -2482,7 +2801,7 @@ bracketRouter.patch(
   },
   {
     tags: [TAG],
-    summary: "Link match to next slot (manual for double/swiss/custom)",
+    summary: "Link match to next slot (same bracket)",
     security: [{ bearerAuth: [] }],
   },
 );
