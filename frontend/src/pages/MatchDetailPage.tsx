@@ -35,8 +35,6 @@ import {
 } from "@/api/tournaments";
 import type { TournamentTeamPlayersResponse } from "@/api/tournaments/types";
 import {
-  MATCH_ROSTER_AVATAR_CLASS,
-  MATCH_ROSTER_HEADER_CLASS,
   MATCH_ROSTER_PANEL_CLASS,
   MATCH_SCOREBOARD_WRAPPER_CLASS,
   TOURNAMENT_PAGE_BG_CLASS,
@@ -1788,10 +1786,10 @@ const MatchRosterPlayerChip = ({
   return (
     <div
       key={`${teamTag}-${player.name}-${index}`}
-      className="mx-auto flex w-full min-w-0 flex-col items-center gap-1.5 text-center"
+      className="mx-auto flex w-full min-w-0 flex-col items-center gap-2 text-center"
       title={shouldShowRiot ? riotAccount : displayName}
     >
-      <div className={`${MATCH_ROSTER_AVATAR_CLASS} h-10 w-10 sm:h-11 sm:w-11`}>
+      <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden sm:h-[4.5rem] sm:w-[4.5rem]">
         {portrait ? (
           <img
             src={portrait}
@@ -1799,14 +1797,16 @@ const MatchRosterPlayerChip = ({
             className="h-full w-full object-cover"
           />
         ) : (
-          <span>{(displayName || "P").charAt(0).toUpperCase()}</span>
+          <span className="flex h-full w-full items-center justify-center bg-[#2d2d2d] text-base font-bold uppercase text-neutral-300 sm:text-lg">
+            {(displayName || "P").charAt(0).toUpperCase()}
+          </span>
         )}
       </div>
-      <p className="w-full text-[10px] font-bold leading-snug text-white break-words [overflow-wrap:anywhere]">
+      <p className="w-full text-xs font-bold leading-snug text-white break-words [overflow-wrap:anywhere] sm:text-sm">
         {displayName || `P${index + 1}`}
       </p>
       {player.role ? (
-        <p className="w-full text-[9px] font-semibold uppercase leading-snug tracking-wide text-neutral-500 break-words [overflow-wrap:anywhere]">
+        <p className="w-full text-[10px] font-semibold uppercase leading-snug tracking-wide text-neutral-500 break-words [overflow-wrap:anywhere]">
           {player.role}
         </p>
       ) : null}
@@ -1832,76 +1832,68 @@ const MatchRosterLineupGrid = ({
 
   if (lineup.length === 0) {
     return (
-      <p className="px-3 py-4 text-xs text-neutral-500">Chưa có roster</p>
+      <p className="px-4 py-4 text-xs text-neutral-500">Chưa có roster</p>
     );
   }
 
-  const desktopGridClass =
-    slotCount === undefined
-      ? "md:grid md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
-      : "md:grid md:grid-cols-5";
-
   return (
-    <div className="px-2 py-3">
-      <div
-        className={`flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${desktopGridClass} md:gap-2 md:overflow-visible`}
-      >
-        {lineup.map((player, index) => (
-          <div
-            key={`${teamTag}-${player.name}-${index}`}
-            className="w-[5.5rem] shrink-0 snap-start md:w-auto md:shrink"
-          >
-            <MatchRosterPlayerChip
-              player={player}
-              index={index}
-              teamTag={teamTag}
-              showRiotMeta={showRiotMeta}
-              linkedContext={linkedContext}
-            />
-          </div>
-        ))}
-      </div>
+    <div
+      className="grid w-full items-start justify-items-center gap-x-4 gap-y-4 px-4 py-5 sm:gap-x-6 sm:px-8 sm:py-6"
+      style={{
+        gridTemplateColumns: `repeat(${Math.max(lineup.length, 1)}, minmax(0, 1fr))`,
+      }}
+    >
+      {lineup.map((player, index) => (
+        <div
+          key={`${teamTag}-${player.name}-${index}`}
+          className="w-full max-w-[7.5rem]"
+        >
+          <MatchRosterPlayerChip
+            player={player}
+            index={index}
+            teamTag={teamTag}
+            showRiotMeta={showRiotMeta}
+            linkedContext={linkedContext}
+          />
+        </div>
+      ))}
     </div>
   );
 };
 
-const MatchTeamRosterMobileHeader = ({
+const MatchTeamRosterStatHeader = ({
   team,
   playerCount,
   showAllParticipants,
-  align = "left",
 }: {
   team: MatchDetail["team1"];
   playerCount: number;
   showAllParticipants: boolean;
-  align?: "left" | "right";
 }) => (
-  <div
-    className={`flex items-center gap-2.5 bg-[#1a1a1a] px-3 py-2.5 ${
-      align === "right" ? "flex-row-reverse text-right" : ""
-    }`}
-  >
+  <div className={`${MATCH_STAT_TH} flex items-center gap-2.5 px-4 py-2.5 text-left`}>
     {team.logo ? (
       <img
         src={team.logo}
         alt={team.tag}
-        className="h-7 w-7 shrink-0 object-cover"
+        className="h-5 w-5 shrink-0 object-cover"
         onError={(event) => {
           event.currentTarget.style.display = "none";
         }}
       />
     ) : (
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-[10px] font-bold text-white">
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center bg-neutral-800 text-[9px] font-bold text-neutral-200">
         {team.tag.slice(0, 2)}
       </div>
     )}
     <div className="min-w-0">
-      <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
+      <p className="truncate text-sm font-extrabold uppercase tracking-wide text-neutral-900">
         {team.name}
       </p>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-600">
         {team.tag}
-        {showAllParticipants && playerCount > 0 ? ` · ${playerCount} người` : ""}
+        {showAllParticipants && playerCount > 0
+          ? ` · ${playerCount} người`
+          : ""}
       </p>
     </div>
   </div>
@@ -1927,92 +1919,34 @@ const MatchDualRosterStrip = ({
   const slotCount = showAllParticipants ? undefined : 5;
 
   return (
-    <div className={MATCH_ROSTER_PANEL_CLASS}>
-      <div className="hidden border-b border-neutral-700 bg-[#1a1a1a] md:grid md:grid-cols-2">
-        <div className="flex items-center gap-2.5 border-r border-neutral-700 px-3 py-2.5">
-          {team1.logo ? (
-            <img
-              src={team1.logo}
-              alt={team1.tag}
-              className="h-7 w-7 shrink-0 object-cover"
-            />
-          ) : (
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-[10px] font-bold text-white">
-              {team1.tag.slice(0, 2)}
-            </div>
-          )}
-          <div className="min-w-0">
-            <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
-              {team1.name}
-            </p>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-              {team1.tag}
-              {showAllParticipants && team1Players.length > 0
-                ? ` · ${team1Players.length} người`
-                : ""}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-row-reverse items-center gap-2.5 px-3 py-2.5 text-right">
-          {team2.logo ? (
-            <img
-              src={team2.logo}
-              alt={team2.tag}
-              className="h-7 w-7 shrink-0 object-cover"
-            />
-          ) : (
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-[10px] font-bold text-white">
-              {team2.tag.slice(0, 2)}
-            </div>
-          )}
-          <div className="min-w-0">
-            <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
-              {team2.name}
-            </p>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-              {team2.tag}
-              {showAllParticipants && team2Players.length > 0
-                ? ` · ${team2Players.length} người`
-                : ""}
-            </p>
-          </div>
-        </div>
+    <div className="grid grid-cols-1 gap-4">
+      <div className={MATCH_ROSTER_PANEL_CLASS}>
+        <MatchTeamRosterStatHeader
+          team={team1}
+          playerCount={team1Players.length}
+          showAllParticipants={showAllParticipants}
+        />
+        <MatchRosterLineupGrid
+          players={team1Players}
+          teamTag={team1.tag}
+          showRiotMeta={showRiotMeta}
+          slotCount={slotCount}
+          linkedContext={linkedContext}
+        />
       </div>
-
-      <div className="flex flex-col md:grid md:grid-cols-2">
-        <div className="border-b border-neutral-800 md:border-b-0 md:border-r">
-          <div className="md:hidden">
-            <MatchTeamRosterMobileHeader
-              team={team1}
-              playerCount={team1Players.length}
-              showAllParticipants={showAllParticipants}
-            />
-          </div>
-          <MatchRosterLineupGrid
-            players={team1Players}
-            teamTag={team1.tag}
-            showRiotMeta={showRiotMeta}
-            slotCount={slotCount}
-            linkedContext={linkedContext}
-          />
-        </div>
-        <div>
-          <div className="md:hidden">
-            <MatchTeamRosterMobileHeader
-              team={team2}
-              playerCount={team2Players.length}
-              showAllParticipants={showAllParticipants}
-              align="right"
-            />
-          </div>
-          <MatchRosterLineupGrid
-            players={team2Players}
-            teamTag={team2.tag}
-            showRiotMeta={showRiotMeta}
-            slotCount={slotCount}
-            linkedContext={linkedContext}
-          />
-        </div>
+      <div className={MATCH_ROSTER_PANEL_CLASS}>
+        <MatchTeamRosterStatHeader
+          team={team2}
+          playerCount={team2Players.length}
+          showAllParticipants={showAllParticipants}
+        />
+        <MatchRosterLineupGrid
+          players={team2Players}
+          teamTag={team2.tag}
+          showRiotMeta={showRiotMeta}
+          slotCount={slotCount}
+          linkedContext={linkedContext}
+        />
       </div>
     </div>
   );
@@ -2035,22 +1969,11 @@ const MatchTeamRosterPanel = ({
 
   return (
     <div className={MATCH_ROSTER_PANEL_CLASS}>
-      <div
-        className={`${MATCH_ROSTER_HEADER_CLASS} ${
-          align === "right" ? "flex-row-reverse text-right" : ""
-        }`}
-      >
-        <img src={team.logo} alt={team.tag} className="h-7 w-7 shrink-0" />
-        <div className="min-w-0">
-          <p className="text-sm font-extrabold uppercase tracking-wide text-white break-words [overflow-wrap:anywhere]">
-            {team.name}
-          </p>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-            {team.tag}
-          </p>
-        </div>
-      </div>
-
+      <MatchTeamRosterStatHeader
+        team={team}
+        playerCount={safePlayers.length}
+        showAllParticipants={false}
+      />
       <MatchRosterLineupGrid
         players={safePlayers}
         teamTag={team.tag}

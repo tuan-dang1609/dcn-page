@@ -55,7 +55,8 @@ export const unknownEndpoint = new Elysia({ name: "unknown-endpoint" }).all(
 
 export const errorHandler = new Elysia({ name: "error-handler" }).onError(
   ({ error, set }) => {
-    logger.error(error?.message);
+    logger.error(error?.message ?? error);
+    if (error?.stack) logger.error(error.stack);
 
     if (error?.name === "CastError") {
       set.status = 400;
@@ -78,7 +79,9 @@ export const errorHandler = new Elysia({ name: "error-handler" }).onError(
     }
 
     set.status = 500;
-    return { error: "internal server error" };
+    return {
+      error: error?.message || "internal server error",
+    };
   },
 );
 

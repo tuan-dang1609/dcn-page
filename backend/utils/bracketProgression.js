@@ -1,6 +1,7 @@
 import { pool } from "./db.js";
 
 export const COMPACT_SIX_ROUND_SHAPE = "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+export const FOUR_TEAM_ADVANCE_ROUND_SHAPE = "1:2,2:1,3:1,4:1";
 
 const toNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -21,6 +22,16 @@ export const getCompactSixLoserTarget = (currentRound, currentMatchNo) => {
   return compactSixLoserMap[`${currentRound}-${currentMatchNo}`] ?? null;
 };
 
+export const getFourTeamAdvanceLoserTarget = (currentRound, currentMatchNo) => {
+  const map = {
+    "1-1": { round: 3, matchNo: 1, slot: "A" },
+    "1-2": { round: 3, matchNo: 1, slot: "B" },
+    "2-1": { round: 4, matchNo: 1, slot: "B" },
+  };
+
+  return map[`${currentRound}-${currentMatchNo}`] ?? null;
+};
+
 const getWinnerRoundsForBracket = async (bracketId, roundShape) => {
   const { rows: roundOneCountRows } = await pool.query(
     `
@@ -37,6 +48,10 @@ const getWinnerRoundsForBracket = async (bracketId, roundShape) => {
 
   if (roundShape === COMPACT_SIX_ROUND_SHAPE) {
     winnerRounds = 3;
+  }
+
+  if (roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE) {
+    winnerRounds = 2;
   }
 
   return winnerRounds;
@@ -149,6 +164,7 @@ export const propagateLoserToLoserBracket = async ({
     .join(",");
 
   const isCompactSixSingleBracket = roundShape === COMPACT_SIX_ROUND_SHAPE;
+  const isFourTeamAdvance = roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE;
   const winnerRounds = await getWinnerRoundsForBracket(
     updatedMatch.bracket_id,
     roundShape,
@@ -190,7 +206,16 @@ export const propagateLoserToLoserBracket = async ({
   let targetMatchNo = Math.ceil(currentMatchNo / 2);
   let preferredSlot = currentMatchNo % 2 === 1 ? "A" : "B";
 
-  if (isCompactSixSingleBracket) {
+  if (isFourTeamAdvance) {
+    targetBracketId = toNumber(updatedMatch.bracket_id);
+    const target = getFourTeamAdvanceLoserTarget(currentRound, currentMatchNo);
+    if (!target) {
+      return null;
+    }
+    targetRound = target.round;
+    targetMatchNo = target.matchNo;
+    preferredSlot = target.slot;
+  } else if (isCompactSixSingleBracket) {
     targetBracketId = toNumber(updatedMatch.bracket_id);
 
     const target = getCompactSixLoserTarget(currentRound, currentMatchNo);
@@ -258,6 +283,14 @@ export const propagateLoserToLoserBracket = async ({
 
   const target = targetRows[0];
 
+  // Không ghi cùng một đội vào cả hai slot (tránh GLORY vs GLORY)
+  if (
+    (toNumber(target.team_a_id) === loserTeamId && preferredSlot === "B") ||
+    (toNumber(target.team_b_id) === loserTeamId && preferredSlot === "A")
+  ) {
+    return null;
+  }
+
   let slot = preferredSlot;
   if (
     (slot === "A" && toNumber(target.team_a_id)) ||
@@ -266,6 +299,13 @@ export const propagateLoserToLoserBracket = async ({
     if (!toNumber(target.team_a_id)) slot = "A";
     else if (!toNumber(target.team_b_id)) slot = "B";
     else return null;
+  }
+
+  if (
+    (slot === "A" && toNumber(target.team_b_id) === loserTeamId) ||
+    (slot === "B" && toNumber(target.team_a_id) === loserTeamId)
+  ) {
+    return null;
   }
 
   const teamField = slot === "A" ? "team_a_id" : "team_b_id";

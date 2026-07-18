@@ -19,21 +19,27 @@ const resolveListenResult = async (listenResult: unknown) => {
     const listenResult = await resolveListenResult(app.listen(port));
     logger.info(`Server running on port ${port}`);
 
-    // Self-ping to keep Render (free-tier) instance from idling.
-    // Render provides `PORT` env var; we ping public /alive endpoint.
-    const selfUrl = "https://dcn-page.onrender.com/alive";
-    setInterval(async () => {
+    // Keep Render free-tier awake while this process is running.
+    // External cron (.github/workflows/keepalive.yml) is still required after spin-down.
+    const selfUrl =
+      process.env.RENDER_EXTERNAL_URL
+        ? `${String(process.env.RENDER_EXTERNAL_URL).replace(/\/+$/, "")}/alive`
+        : process.env.BACKEND_ALIVE_URL ||
+          "https://dcn-page.onrender.com/alive";
+
+    const pingAlive = async () => {
       try {
-        // global fetch is available in Bun; swallow errors silently.
         await fetch(selfUrl).catch(() => {});
       } catch (err) {
-        // logger.warn doesn't exist, use error to avoid crashing
         logger.error(
           "self-ping failed:",
           err instanceof Error ? err.message : String(err),
         );
       }
-    }, 30_000);
+    };
+
+    void pingAlive();
+    setInterval(pingAlive, 30_000);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("error connecting to Postgres:", msg);

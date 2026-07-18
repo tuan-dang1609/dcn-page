@@ -15,6 +15,7 @@ import {
   getBracketsByTournamentId,
   pairSwissNextRound,
   getTournamentTeams,
+  updateBracketMeta,
   type Bracket,
   type FormatOption,
   type BracketType,
@@ -47,6 +48,13 @@ const toNumber = (value: unknown): number | null => {
 const getTeamLabel = (team: TournamentTeamRecord) =>
   team.short_name?.trim() || team.name?.trim() || `Team #${team.team_id}`;
 
+const toDateInputValue = (value: unknown): string => {
+  if (value == null || value === "") return "";
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] ?? "";
+};
+
 const orderTeamIdsByTournament = (
   ids: number[],
   teams: TournamentTeamRecord[],
@@ -71,11 +79,16 @@ const BracketSetupPage = () => {
     format_id: "",
     best_of: "1",
     legs: "2",
+    teams_to_advance: "1",
     name: "",
     stage: "",
     status: "scheduled",
+    date_start: "",
     swiss_round: "",
   });
+  const [savingDateBracketId, setSavingDateBracketId] = useState<number | null>(
+    null,
+  );
 
   const [tournamentTeams, setTournamentTeams] = useState<
     TournamentTeamRecord[]
@@ -138,28 +151,40 @@ const BracketSetupPage = () => {
 
     (async () => {
       try {
-        const [teamsResponse, bracketsResponse] = await Promise.all([
-          getTournamentTeams(tournamentId),
-          getBracketsByTournamentId(tournamentId),
-        ]);
+        const teamsResponse = await getTournamentTeams(tournamentId);
         if (cancelled) return;
 
         const teams =
           teamsResponse.data?.teams ?? teamsResponse.data?.data?.teams ?? [];
-        const brackets = bracketsResponse.data?.data ?? [];
-
         setTournamentTeams(teams);
-        setExistingBrackets(brackets);
 
         const validIds = new Set(teams.map((team) => team.team_id));
         setSelectedTeamIds((prev) => prev.filter((id) => validIds.has(id)));
         setDraftTeamIds((prev) => prev.filter((id) => validIds.has(id)));
-      } catch (err) {
+      } catch {
         if (cancelled) return;
         setTournamentTeams([]);
-        setExistingBrackets([]);
         setSelectedTeamIds([]);
         setDraftTeamIds([]);
+      }
+
+      try {
+        const bracketsResponse = await getBracketsByTournamentId(tournamentId);
+        if (cancelled) return;
+        setExistingBrackets(bracketsResponse.data?.data ?? []);
+      } catch (err) {
+        if (cancelled) return;
+        setExistingBrackets([]);
+        const message =
+          err?.response?.data?.error ||
+          err?.response?.data?.message ||
+          err?.message ||
+          "Không tải được danh sách bracket.";
+        toast({
+          title: "Lỗi tải bracket",
+          description: String(message),
+          variant: "destructive",
+        });
       } finally {
         if (!cancelled) {
           setLoadingBrackets(false);
@@ -267,9 +292,16 @@ const BracketSetupPage = () => {
         format_id: formatId,
         ...(toNumber(form.best_of) ? { best_of: Number(form.best_of) } : {}),
         ...(form.type === "round-robin" ? { legs: selectedLegs } : {}),
+        ...(form.type === "double-elimination" &&
+        toNumber(form.teams_to_advance) === 2
+          ? { teams_to_advance: 2 }
+          : {}),
         ...(form.name.trim() ? { name: form.name.trim() } : {}),
         ...(form.stage.trim() ? { stage: form.stage.trim() } : {}),
         ...(form.status.trim() ? { status: form.status.trim() } : {}),
+        ...(form.date_start.trim()
+          ? { date_start: form.date_start.trim() }
+          : {}),
         ...(parsedTeamIds?.length ? { team_ids: parsedTeamIds } : {}),
       });
 
@@ -342,6 +374,33 @@ const BracketSetupPage = () => {
       });
     } finally {
       setDeletingBracketId(null);
+    }
+  };
+
+  const handleSaveBracketDate = async (
+    bracketId: number,
+    dateStart: string,
+  ) => {
+    setSavingDateBracketId(bracketId);
+    try {
+      await updateBracketMeta(bracketId, {
+        date_start: dateStart.trim() ? dateStart.trim() : null,
+      });
+      const tournamentId = toNumber(tournamentIdInput);
+      if (tournamentId) await reloadBrackets(tournamentId);
+      toast({
+        title: "Đã cập nhật ngày bắt đầu",
+        description: `Bracket #${bracketId}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Cập nhật ngày thất bại",
+        description:
+          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingDateBracketId(null);
     }
   };
 
@@ -442,6 +501,29 @@ const BracketSetupPage = () => {
               </select>
             </div>
 
+            {form.type === "double-elimination" ? (
+              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 md:col-span-1">
+                <Label>Số đội đi tiếp (double-elim)</Label>
+                <select
+                  value={form.teams_to_advance}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      teams_to_advance: event.target.value,
+                    }))
+                  }
+                  className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                >
+                  <option value="1">1 đội — có chung kết tổng</option>
+                  <option value="2">2 đội advance — 4 đội, không GF (như ảnh)</option>
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Chọn mục 2 + đúng 4 đội để tạo Opening / Upper / Lower / Decider + 2 ô
+                  Advances.
+                </p>
+              </div>
+            ) : null}
+
             <div>
               <Label>Format</Label>
               <select
@@ -517,6 +599,23 @@ const BracketSetupPage = () => {
             </div>
 
             <div>
+              <Label>Ngày bắt đầu bracket</Label>
+              <Input
+                type="date"
+                value={form.date_start}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    date_start: event.target.value,
+                  }))
+                }
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Tới đúng ngày này, trang Nhánh đấu sẽ tự mở bracket tương ứng.
+              </p>
+            </div>
+
+            <div>
               <Label>Stage</Label>
               <Input
                 value={form.stage}
@@ -574,13 +673,15 @@ const BracketSetupPage = () => {
                   if (!bracketId) return null;
 
                   const isDeleting = deletingBracketId === bracketId;
+                  const isSavingDate = savingDateBracketId === bracketId;
+                  const dateValue = toDateInputValue(bracket.date_start);
 
                   return (
                     <div
                       key={bracketId}
                       className="rounded-md border border-border bg-card p-2.5 flex flex-wrap items-center justify-between gap-2"
                     >
-                      <div>
+                      <div className="min-w-0 flex-1 space-y-2">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium">
                             {bracket.name || `Bracket #${bracketId}`}
@@ -596,6 +697,36 @@ const BracketSetupPage = () => {
                             bracket.format_name ||
                             "unknown"}
                         </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Input
+                            type="date"
+                            className="h-8 w-40"
+                            defaultValue={dateValue}
+                            key={`${bracketId}-${dateValue}`}
+                            id={`bracket-date-${bracketId}`}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={isSavingDate || submitting}
+                            onClick={() => {
+                              const input = document.getElementById(
+                                `bracket-date-${bracketId}`,
+                              ) as HTMLInputElement | null;
+                              void handleSaveBracketDate(
+                                bracketId,
+                                input?.value ?? "",
+                              );
+                            }}
+                          >
+                            {isSavingDate ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              "Lưu ngày"
+                            )}
+                          </Button>
+                        </div>
                       </div>
 
                       <Button

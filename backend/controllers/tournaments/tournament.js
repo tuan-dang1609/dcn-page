@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
+import logger from "../../utils/logger.js";
 import {
   ensureRankingTables,
   fetchTournamentResultsRows,
@@ -68,13 +69,35 @@ function slugify(s) {
     .replace(/^_+|_+$/g, "");
 }
 
+const hasTournamentRegistrationModeColumn = async () => {
+  const { rows } = await pool.query(
+    `
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'tournaments'
+      AND column_name = 'registration_mode'
+    LIMIT 1
+    `,
+  );
+  return rows.length > 0;
+};
+
+const normalizeRegistrationMode = (value) => {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return normalized === "individual" ? "individual" : "org";
+};
+
 const loadTournamentInfo = async (tournamentId) => {
   const { rows: tRows } = await pool.query(
-    `SELECT t.id, t.name, t.slug, g.short_name, g.name AS game_name, g.icon_game_url, f.name AS format, t.banner_url, t.season, t.date_start,
+    `SELECT t.id, t.name, t.slug, t.game_id, g.short_name, g.name AS game_name, g.icon_game_url, f.name AS format, t.banner_url, t.season, t.date_start,
       t.date_end, t.register_start, t.register_end,
       COALESCE(t.check_in_start, t.register_start) AS check_in_start,
       COALESCE(t.check_in_end, t.register_end) AS check_in_end,
-      t.created_by, t.max_player_per_team, t.max_participate
+      t.created_by, t.max_player_per_team, t.max_participate,
+      COALESCE(NULLIF(TRIM(to_jsonb(t)->>'registration_mode'), ''), 'org') AS registration_mode
    FROM tournaments t
    JOIN games g ON t.game_id = g.id
    LEFT JOIN formats f ON f.id = t.format_id
@@ -87,17 +110,29 @@ const loadTournamentInfo = async (tournamentId) => {
 
   const tournament = tRows[0];
 
-  const { rows: mRows } = await pool.query(
-    "SELECT id, title, context, milestone_time FROM milestones WHERE tournament_id = $1 ORDER BY milestone_time",
-    [tournament.id],
-  );
-
-  const { rows: rulesRows } = await pool.query(
-    "SELECT * FROM rules WHERE tournament_id = $1 ORDER BY id",
-    [tournament.id],
-  );
-  const { rows: tourTeam } = await pool.query(
-    `SELECT
+  const [
+    { rows: mRows },
+    { rows: rulesRows },
+    { rows: tourTeam },
+    { rows: requirementRows },
+    { rows: creatorRows },
+    { rows: regCountRows },
+    prizeResult,
+  ] = await Promise.all([
+    pool
+      .query(
+        "SELECT id, title, context, milestone_time FROM milestones WHERE tournament_id = $1 ORDER BY milestone_time",
+        [tournament.id],
+      )
+      .catch(() => ({ rows: [] })),
+    pool
+      .query("SELECT * FROM rules WHERE tournament_id = $1 ORDER BY id", [
+        tournament.id,
+      ])
+      .catch(() => ({ rows: [] })),
+    pool
+      .query(
+        `SELECT
        tt.id,
        tt.team_id,
        tt.tournament_id,
@@ -111,15 +146,30 @@ const loadTournamentInfo = async (tournamentId) => {
          (to_jsonb(tt)->>'is_checked_in')::boolean,
          (to_jsonb(tt)->>'isCheckedIn')::boolean,
          false
-       ) AS "isCheckedIn"
+       ) AS "isCheckedIn",
+       COALESCE((
+         SELECT json_agg(ttp.user_id ORDER BY ttp.user_id)
+         FROM tournament_team_players ttp
+         WHERE ttp.tournament_team_id = tt.id
+       ), '[]'::json) AS player_ids,
+       (
+         SELECT u2.riot_account
+         FROM tournament_team_players ttp2
+         JOIN users u2 ON u2.id = ttp2.user_id
+         WHERE ttp2.tournament_team_id = tt.id
+         ORDER BY ttp2.user_id
+         LIMIT 1
+       ) AS primary_riot_account
  FROM tournament_teams tt
  JOIN teams t ON t.id = tt.team_id
  JOIN users u ON u.id = t.created_by
  WHERE tt.tournament_id = $1`,
-    [tournament.id],
-  );
-  const { rows: requirementRows } = await pool.query(
-    `SELECT r.device, r.discord,
+        [tournament.id],
+      )
+      .catch(() => ({ rows: [] })),
+    pool
+      .query(
+        `SELECT r.device, r.discord,
        COALESCE((to_jsonb(r)->>'pner_only')::boolean, false) AS pner_only,
        rg1.name AS rank_min, rg2.name AS rank_max
    FROM requirements r
@@ -127,36 +177,35 @@ const loadTournamentInfo = async (tournamentId) => {
    LEFT JOIN rank_game rg2 ON rg2.id = r.rank_max
    WHERE tournament_id = $1
    ORDER BY r.id`,
-    [tournament.id],
-  );
-
-  const { rows: creatorRows } = await pool.query(
-    "SELECT nickname, profile_picture FROM users WHERE id = $1",
-    [tournament.created_by],
-  );
-
-  const { rows: regCountRows } = await pool.query(
-    "SELECT COUNT(*)::int AS registered_count FROM tournament_teams WHERE tournament_id = $1",
-    [tournament.id],
-  );
-  const registered_count = regCountRows[0]?.registered_count ?? 0;
-
-  let prizeRows = [];
-
-  try {
-    const { rows } = await pool.query(
-      `
+        [tournament.id],
+      )
+      .catch(() => ({ rows: [] })),
+    pool
+      .query("SELECT nickname, profile_picture FROM users WHERE id = $1", [
+        tournament.created_by,
+      ])
+      .catch(() => ({ rows: [] })),
+    pool
+      .query(
+        "SELECT COUNT(*)::int AS registered_count FROM tournament_teams WHERE tournament_id = $1",
+        [tournament.id],
+      )
+      .catch(() => ({ rows: [{ registered_count: 0 }] })),
+    pool
+      .query(
+        `
       SELECT id, place_label, place_order, prize, description
       FROM tournament_prizes
       WHERE tournament_id = $1
       ORDER BY place_order ASC, id ASC
       `,
-      [tournament.id],
-    );
-    prizeRows = rows;
-  } catch {
-    prizeRows = [];
-  }
+        [tournament.id],
+      )
+      .catch(() => ({ rows: [] })),
+  ]);
+
+  const registered_count = regCountRows[0]?.registered_count ?? 0;
+  const prizeRows = prizeResult.rows ?? [];
 
   return {
     status: "success",
@@ -244,11 +293,13 @@ tournamentRouter.get(
 
       set.status = 200;
       return payload;
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("GET /by-slug failed:", message);
       set.status = 500;
       return {
         status: "error",
-        error: "Internal server error",
+        error: message || "Internal server error",
       };
     }
   },
@@ -296,9 +347,11 @@ tournamentRouter.get(
 
       set.status = 200;
       return payload;
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("GET /:id/info failed:", message);
       set.status = 500;
-      return { status: "error", error: "Internal server error" };
+      return { status: "error", error: message || "Internal server error" };
     }
   },
   {
@@ -422,7 +475,7 @@ const parseRefreshFlag = (query) =>
 
 tournamentRouter.get(
   "/:tournament_id/results",
-  async ({ params, query, set, user }) => {
+  async ({ params, set }) => {
     const tournamentId = Number(params.tournament_id);
 
     if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
@@ -430,32 +483,13 @@ tournamentRouter.get(
       return { error: "tournament_id không hợp lệ" };
     }
 
-    if (parseRefreshFlag(query)) {
-      const permission = await ensureTournamentManagePermission(
-        user,
-        tournamentId,
-        set,
-      );
-      if (!permission.ok) return permission.error;
-
-      const recalculated = await recalculateTournamentResults(tournamentId);
-      const rows = await fetchTournamentResultsRows(tournamentId);
-
-      set.status = 200;
-      return {
-        ranking_bracket_id: recalculated.ranking_bracket_id ?? null,
-        data: rows,
-      };
-    }
-
-    const [rankingBracketId, rows] = await Promise.all([
-      readTournamentRankingBracketId(tournamentId),
-      fetchTournamentResultsRows(tournamentId),
-    ]);
+    // Luôn tính lại để hạng/thắng/thua cập nhật ngay khi có trận kết thúc
+    const recalculated = await recalculateTournamentResults(tournamentId);
+    const rows = await fetchTournamentResultsRows(tournamentId);
 
     set.status = 200;
     return {
-      ranking_bracket_id: rankingBracketId,
+      ranking_bracket_id: recalculated.ranking_bracket_id ?? null,
       data: rows,
     };
   },
@@ -611,15 +645,35 @@ tournamentRouter.post(
       check_in_end,
       max_player_per_team,
       max_participate,
+      registration_mode,
     } = body ?? {};
 
     const slug = slugify(name);
+    const mode = normalizeRegistrationMode(registration_mode);
+    const resolvedMaxPlayerPerTeam =
+      mode === "individual"
+        ? 1
+        : max_player_per_team ?? null;
+    const supportsRegistrationMode =
+      await hasTournamentRegistrationModeColumn();
 
-    const ctesql = `INSERT INTO tournaments (name, slug, game_id, banner_url, season, date_start,
+    if (mode === "individual" && !supportsRegistrationMode) {
+      set.status = 400;
+      return {
+        error:
+          "DB chưa có cột registration_mode. Chạy backend/docs/tournament_registration_mode.sql trước.",
+      };
+    }
+
+    const ctesql = supportsRegistrationMode
+      ? `INSERT INTO tournaments (name, slug, game_id, banner_url, season, date_start,
+    date_end, register_start, register_end, check_in_start, check_in_end, created_by, max_player_per_team, max_participate, registration_mode)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`
+      : `INSERT INTO tournaments (name, slug, game_id, banner_url, season, date_start,
     date_end, register_start, register_end, check_in_start, check_in_end, created_by, max_player_per_team, max_participate)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`;
 
-    const { rows } = await pool.query(ctesql, [
+    const queryParams = [
       name,
       slug,
       game_id,
@@ -632,9 +686,15 @@ tournamentRouter.post(
       check_in_start ?? register_start,
       check_in_end ?? register_end,
       userId,
-      max_player_per_team,
+      resolvedMaxPlayerPerTeam,
       max_participate,
-    ]);
+    ];
+
+    if (supportsRegistrationMode) {
+      queryParams.push(mode);
+    }
+
+    const { rows } = await pool.query(ctesql, queryParams);
 
     set.status = 201;
     return { message: "Tạo giải thành công", data: rows[0] };
@@ -699,6 +759,13 @@ tournamentRouter.post(
                 },
                 max_player_per_team: { type: "integer", example: 5 },
                 max_participate: { type: "integer", example: 64 },
+                registration_mode: {
+                  type: "string",
+                  enum: ["org", "individual"],
+                  example: "individual",
+                  description:
+                    "org = đăng ký theo đội; individual = đăng ký cá nhân (TFT solo)",
+                },
               },
             },
           },
@@ -751,18 +818,43 @@ tournamentRouter.patch(
       check_in_end,
       max_player_per_team,
       max_participate,
+      registration_mode,
     } = body ?? {};
 
     const slug = slugify(name);
+    const mode = normalizeRegistrationMode(
+      registration_mode ?? findTournament[0]?.registration_mode,
+    );
+    const resolvedMaxPlayerPerTeam =
+      mode === "individual"
+        ? 1
+        : max_player_per_team ?? findTournament[0]?.max_player_per_team;
+    const supportsRegistrationMode =
+      await hasTournamentRegistrationModeColumn();
 
-    const ctesql = `UPDATE tournaments
+    if (mode === "individual" && !supportsRegistrationMode) {
+      set.status = 400;
+      return {
+        error:
+          "DB chưa có cột registration_mode. Chạy backend/docs/tournament_registration_mode.sql trước.",
+      };
+    }
+
+    const ctesql = supportsRegistrationMode
+      ? `UPDATE tournaments
+    SET name = $1, slug = $2, game_id = $3, banner_url = $4, season = $5, date_start = $6,
+      date_end = $7, register_start = $8, register_end = $9, check_in_start = $10, check_in_end = $11,
+      max_player_per_team = $12, max_participate = $13, registration_mode = $14
+    WHERE id = $15
+    RETURNING *`
+      : `UPDATE tournaments
     SET name = $1, slug = $2, game_id = $3, banner_url = $4, season = $5, date_start = $6,
       date_end = $7, register_start = $8, register_end = $9, check_in_start = $10, check_in_end = $11,
       max_player_per_team = $12, max_participate = $13
     WHERE id = $14
     RETURNING *`;
 
-    const { rows } = await pool.query(ctesql, [
+    const queryParams = [
       name,
       slug,
       game_id,
@@ -774,10 +866,17 @@ tournamentRouter.patch(
       register_end,
       check_in_start ?? register_start,
       check_in_end ?? register_end,
-      max_player_per_team,
+      resolvedMaxPlayerPerTeam,
       max_participate,
-      id,
-    ]);
+    ];
+
+    if (supportsRegistrationMode) {
+      queryParams.push(mode, id);
+    } else {
+      queryParams.push(id);
+    }
+
+    const { rows } = await pool.query(ctesql, queryParams);
 
     set.status = 200;
     return { message: "Cập nhật giải thành công", data: rows[0] };
@@ -832,6 +931,11 @@ tournamentRouter.patch(
                 },
                 max_player_per_team: { type: "integer", example: 5 },
                 max_participate: { type: "integer", example: 128 },
+                registration_mode: {
+                  type: "string",
+                  enum: ["org", "individual"],
+                  example: "individual",
+                },
               },
             },
           },

@@ -55,6 +55,16 @@ const ensureRankingTables = async () => {
   `);
 
   await pool.query(`
+    ALTER TABLE tournament_team_results
+    ADD COLUMN IF NOT EXISTS elim_round INT
+  `);
+
+  await pool.query(`
+    ALTER TABLE tournament_team_results
+    ADD COLUMN IF NOT EXISTS elim_label TEXT
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_ttr_tournament_place
       ON tournament_team_results (tournament_id, placement)
   `);
@@ -283,17 +293,102 @@ const sortCompletedMatches = (matches) =>
       return (toNumber(a.id) ?? 0) - (toNumber(b.id) ?? 0);
     });
 
+const FOUR_TEAM_ADVANCE_ROUND_SHAPE = "1:2,2:1,3:1,4:1";
+
+const getMatchRoundShape = (matches) => {
+  const countByRound = new Map();
+  for (const match of matches) {
+    const roundNumber = toNumber(match.round_number);
+    if (!roundNumber) continue;
+    countByRound.set(roundNumber, (countByRound.get(roundNumber) ?? 0) + 1);
+  }
+  return [...countByRound.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([round, count]) => `${round}:${count}`)
+    .join(",");
+};
+
+const normalizeBracketStageLabel = (raw) => {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+
+  const key = value.toLowerCase().replace(/[\s_-]+/g, "");
+  const aliases = {
+    playin: "Play-in",
+    playins: "Play-in",
+    playoff: "Play-off",
+    playoffs: "Play-off",
+    main: "Main",
+    group: "Group",
+    groups: "Group",
+    swiss: "Swiss",
+  };
+
+  if (aliases[key]) return aliases[key];
+
+  // Title-case nhẹ: "play in" → "Play In"
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join("-");
+};
+
+const getEliminationBranchLabel = (roundNumber, roundShape) => {
+  if (roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE) {
+    const labels = {
+      1: "Trận mở màn",
+      2: "Nhánh thắng",
+      3: "Nhánh thua",
+      4: "Trận quyết định",
+    };
+    return labels[roundNumber] ?? `Vòng ${roundNumber}`;
+  }
+  return roundNumber ? `Vòng ${roundNumber}` : null;
+};
+
+const formatElimLabel = (bracketLabel, roundNumber, roundShape) => {
+  const stage = normalizeBracketStageLabel(bracketLabel);
+  const branch = getEliminationBranchLabel(roundNumber, roundShape);
+
+  // Play-in / Play-off: ưu tiên tên vòng trong bracket (dễ đọc hơn "playin · …")
+  if (stage === "Play-in" || stage === "Play-off") {
+    if (branch) return `${stage} · ${branch}`;
+    return stage;
+  }
+
+  if (stage && branch && stage.toLowerCase() !== branch.toLowerCase()) {
+    return `${stage} · ${branch}`;
+  }
+  return stage || branch || null;
+};
+
+const resolveEliminationLossThreshold = ({
+  hasLosersBracket,
+  matches,
+}) => {
+  const roundShape = getMatchRoundShape(matches);
+  // DE advance / double-elim: thua 1 trận chưa bị loại (còn nhánh thua / quyết định)
+  if (roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE) return 2;
+  if (hasLosersBracket) return 2;
+  return 1;
+};
+
 const buildEliminationRanking = ({
   teamIds,
   matches,
   eliminationLossThreshold,
+  bracketLabel = null,
 }) => {
   const completedMatches = sortCompletedMatches(matches);
   const stats = buildTeamStats({ teamIds, matches: completedMatches });
+  const roundShape = getMatchRoundShape(matches);
+  const lossThreshold = Math.max(1, Number(eliminationLossThreshold) || 1);
 
   const teamLosses = new Map(teamIds.map((teamId) => [teamId, 0]));
   const eliminatedTeams = new Set();
   const eliminatedByRound = new Map();
+  const elimRoundByTeam = new Map();
 
   for (const match of completedMatches) {
     const roundNumber = toNumber(match.round_number) ?? 0;
@@ -309,11 +404,9 @@ const buildEliminationRanking = ({
     const nextLossCount = Number(teamLosses.get(loser) ?? 0) + 1;
     teamLosses.set(loser, nextLossCount);
 
-    if (
-      nextLossCount >= eliminationLossThreshold &&
-      !eliminatedTeams.has(loser)
-    ) {
+    if (nextLossCount >= lossThreshold && !eliminatedTeams.has(loser)) {
       eliminatedTeams.add(loser);
+      elimRoundByTeam.set(loser, roundNumber);
 
       if (!eliminatedByRound.has(roundNumber)) {
         eliminatedByRound.set(roundNumber, []);
@@ -330,28 +423,7 @@ const buildEliminationRanking = ({
     remainingTeamIds.length === 1 &&
     eliminatedTeams.size === teamIds.length - 1;
 
-  if (!isFinal) {
-    const rankings = [...stats.values()]
-      .sort((a, b) => {
-        if (b.wins !== a.wins) return b.wins - a.wins;
-        if (a.losses !== b.losses) return a.losses - b.losses;
-        if (b.last_round !== a.last_round) return b.last_round - a.last_round;
-        if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
-        return a.team_id - b.team_id;
-      })
-      .map((item) => ({
-        ...item,
-        placement: null,
-        placement_end: null,
-        placement_label: null,
-      }));
-
-    return {
-      isFinal: false,
-      rankings,
-    };
-  }
-
+  // Gán hạng ngay khi bị loại (theo vòng), đội còn lại để null → UI hiện "-"
   const placementByTeam = new Map();
   const rounds = [...eliminatedByRound.keys()].sort((a, b) => a - b);
   let remaining = teamIds.length;
@@ -368,22 +440,28 @@ const buildEliminationRanking = ({
     const placementLabel = toPlacementLabel(placementStart, placementEnd);
 
     for (const teamId of eliminatedInRound) {
+      const elimRound = elimRoundByTeam.get(teamId) ?? roundNumber;
       placementByTeam.set(teamId, {
         placement: placementStart,
         placement_end: placementEnd,
         placement_label: placementLabel,
+        elim_round: elimRound,
+        elim_label: formatElimLabel(bracketLabel, elimRound, roundShape),
       });
     }
 
     remaining -= groupSize;
   }
 
-  const championId = remainingTeamIds[0];
-  placementByTeam.set(championId, {
-    placement: 1,
-    placement_end: 1,
-    placement_label: "1",
-  });
+  if (isFinal && remainingTeamIds[0]) {
+    placementByTeam.set(remainingTeamIds[0], {
+      placement: 1,
+      placement_end: 1,
+      placement_label: "1",
+      elim_round: null,
+      elim_label: null,
+    });
+  }
 
   const rankings = teamIds
     .map((teamId) => {
@@ -392,6 +470,8 @@ const buildEliminationRanking = ({
         placement: null,
         placement_end: null,
         placement_label: null,
+        elim_round: null,
+        elim_label: null,
       };
 
       return {
@@ -400,16 +480,167 @@ const buildEliminationRanking = ({
       };
     })
     .sort((a, b) => {
-      const aPlacement = toNumber(a.placement) ?? 9999;
-      const bPlacement = toNumber(b.placement) ?? 9999;
-      if (aPlacement !== bPlacement) return aPlacement - bPlacement;
+      const aPlacement = toNumber(a.placement);
+      const bPlacement = toNumber(b.placement);
+      // Đội còn thi đấu (chưa có hạng) lên trước
+      if (aPlacement === null && bPlacement !== null) return -1;
+      if (aPlacement !== null && bPlacement === null) return 1;
+      if (aPlacement !== null && bPlacement !== null && aPlacement !== bPlacement) {
+        return aPlacement - bPlacement;
+      }
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (a.losses !== b.losses) return a.losses - b.losses;
+      if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
       return a.team_id - b.team_id;
     });
 
   return {
-    isFinal: true,
+    isFinal,
     rankings,
   };
+};
+
+const getSwissQualificationRules = (teamCount) => {
+  if (teamCount === 8) {
+    return { advance_wins: 2, eliminate_losses: 2 };
+  }
+  if (teamCount === 16) {
+    return { advance_wins: 3, eliminate_losses: 3 };
+  }
+  const fallback = Math.max(1, Math.ceil(Math.log2(Math.max(2, teamCount))));
+  return { advance_wins: fallback, eliminate_losses: fallback };
+};
+
+/** Swiss: hạng cặp khi đủ số trận thua loại; đội còn lại / đi tiếp → "-" */
+const buildSwissRanking = ({ teamIds, matches }) => {
+  const completedMatches = sortCompletedMatches(matches);
+  const stats = buildTeamStats({ teamIds, matches: completedMatches });
+  const { advance_wins: advanceWins, eliminate_losses: eliminateLosses } =
+    getSwissQualificationRules(teamIds.length);
+
+  const teamLosses = new Map(teamIds.map((teamId) => [teamId, 0]));
+  const eliminatedTeams = new Set();
+  const elimRoundByTeam = new Map();
+  /** Group by wins-at-elim for tied bands like 9-12 */
+  const eliminatedByWins = new Map();
+
+  for (const match of completedMatches) {
+    const roundNumber = toNumber(match.round_number) ?? 0;
+    const teamA = toNumber(match.team_a_id);
+    const teamB = toNumber(match.team_b_id);
+    const winner = toNumber(match.winner_team_id);
+    if (!teamA || !teamB || !winner) continue;
+
+    const loser = winner === teamA ? teamB : winner === teamB ? teamA : null;
+    if (!loser) continue;
+
+    const nextLossCount = Number(teamLosses.get(loser) ?? 0) + 1;
+    teamLosses.set(loser, nextLossCount);
+
+    if (nextLossCount >= eliminateLosses && !eliminatedTeams.has(loser)) {
+      eliminatedTeams.add(loser);
+      elimRoundByTeam.set(loser, roundNumber);
+      const winsAtElim = Number(stats.get(loser)?.wins ?? 0);
+      if (!eliminatedByWins.has(winsAtElim)) {
+        eliminatedByWins.set(winsAtElim, []);
+      }
+      eliminatedByWins.get(winsAtElim).push(loser);
+    }
+  }
+
+  const matchesWithTwoTeams = matches.filter((match) => {
+    const teamA = toNumber(match.team_a_id);
+    const teamB = toNumber(match.team_b_id);
+    return teamA && teamB;
+  });
+
+  const pendingOrAdvanced = teamIds.filter((id) => !eliminatedTeams.has(id));
+  const allMatchesDone =
+    matchesWithTwoTeams.length > 0 &&
+    matchesWithTwoTeams.every((match) => toNumber(match.winner_team_id));
+  const noPendingLeft = pendingOrAdvanced.every((teamId) => {
+    const wins = Number(stats.get(teamId)?.wins ?? 0);
+    return wins >= advanceWins;
+  });
+  const isFinal = allMatchesDone || (eliminatedTeams.size > 0 && noPendingLeft);
+
+  const placementByTeam = new Map();
+  let remaining = teamIds.length;
+
+  // Worst elim bands first (fewest wins)
+  const winBands = [...eliminatedByWins.keys()].sort((a, b) => a - b);
+  for (const wins of winBands) {
+    const group = [...new Set(eliminatedByWins.get(wins) ?? [])];
+    if (!group.length) continue;
+    const groupSize = group.length;
+    const placementStart = remaining - groupSize + 1;
+    const placementEnd = remaining;
+    const placementLabel = toPlacementLabel(placementStart, placementEnd);
+    for (const teamId of group) {
+      const elimRound = elimRoundByTeam.get(teamId) ?? null;
+      placementByTeam.set(teamId, {
+        placement: placementStart,
+        placement_end: placementEnd,
+        placement_label: placementLabel,
+        elim_round: elimRound,
+        elim_label: elimRound
+          ? formatElimLabel(null, elimRound, null)
+          : "Swiss",
+      });
+    }
+    remaining -= groupSize;
+  }
+
+  if (isFinal) {
+    const survivors = pendingOrAdvanced
+      .map((teamId) => stats.get(teamId))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (a.losses !== b.losses) return a.losses - b.losses;
+        if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+        return a.team_id - b.team_id;
+      });
+
+    survivors.forEach((stat, index) => {
+      const placement = index + 1;
+      placementByTeam.set(stat.team_id, {
+        placement,
+        placement_end: placement,
+        placement_label: String(placement),
+        elim_round: null,
+        elim_label: null,
+      });
+    });
+  }
+
+  const rankings = teamIds
+    .map((teamId) => {
+      const stat = stats.get(teamId);
+      const placement = placementByTeam.get(teamId) ?? {
+        placement: null,
+        placement_end: null,
+        placement_label: null,
+        elim_round: null,
+        elim_label: null,
+      };
+      return { ...stat, ...placement };
+    })
+    .sort((a, b) => {
+      const aPlacement = toNumber(a.placement);
+      const bPlacement = toNumber(b.placement);
+      if (aPlacement === null && bPlacement !== null) return -1;
+      if (aPlacement !== null && bPlacement === null) return 1;
+      if (aPlacement !== null && bPlacement !== null && aPlacement !== bPlacement) {
+        return aPlacement - bPlacement;
+      }
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (a.losses !== b.losses) return a.losses - b.losses;
+      if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+      return a.team_id - b.team_id;
+    });
+
+  return { isFinal, rankings };
 };
 
 const buildStandingsRanking = ({ teamIds, matches }) => {
@@ -440,6 +671,8 @@ const buildStandingsRanking = ({ teamIds, matches }) => {
         placement: null,
         placement_end: null,
         placement_label: null,
+        elim_round: null,
+        elim_label: null,
       };
     }
 
@@ -449,6 +682,8 @@ const buildStandingsRanking = ({ teamIds, matches }) => {
       placement,
       placement_end: placement,
       placement_label: String(placement),
+      elim_round: null,
+      elim_label: null,
     };
   });
 
@@ -547,7 +782,9 @@ const upsertTournamentResults = async ({
     const placementEnd = toNumber(item.placement_end) ?? placement;
     const placementLabel = item.placement_label ?? null;
     const points = isFinal && placement ? (pointMap.get(placement) ?? 0) : 0;
-    const offset = index * 8;
+    const elimRound = toNumber(item.elim_round);
+    const elimLabel = item.elim_label ?? null;
+    const offset = index * 10;
 
     values.push(
       item.team_id,
@@ -558,9 +795,11 @@ const upsertTournamentResults = async ({
       item.wins,
       item.losses,
       isFinal,
+      elimRound,
+      elimLabel,
     );
 
-    return `($1, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`;
+    return `($1, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`;
   });
 
   await pool.query(
@@ -575,7 +814,8 @@ const upsertTournamentResults = async ({
         wins,
         losses,
         is_final,
-        calculated_at
+        elim_round,
+        elim_label
       )
       VALUES ${rowPlaceholders.join(", ")}
       ON CONFLICT (tournament_id, team_id)
@@ -587,6 +827,8 @@ const upsertTournamentResults = async ({
         wins = EXCLUDED.wins,
         losses = EXCLUDED.losses,
         is_final = EXCLUDED.is_final,
+        elim_round = EXCLUDED.elim_round,
+        elim_label = EXCLUDED.elim_label,
         calculated_at = now()
     `,
     [tournamentId, ...values],
@@ -736,12 +978,20 @@ export const recalculateTournamentResults = async (tournamentId) => {
   let rankingBracketId = await getTournamentRankingBracketId(
     normalizedTournamentId,
   );
+  let bracketLabel = null;
+  let bracketHasLosers = hasLosersBracket;
+
   if (rankingBracketId) {
     const { rows: bracketRows } = await pool.query(
       `
-      SELECT id
-      FROM brackets
-      WHERE id = $1 AND tournament_id = $2
+      SELECT
+        b.id,
+        b.name,
+        b.stage,
+        COALESCE(f.has_losers_bracket, false) AS has_losers_bracket
+      FROM brackets b
+      LEFT JOIN formats f ON f.id = b.format_id
+      WHERE b.id = $1 AND b.tournament_id = $2
       LIMIT 1
       `,
       [rankingBracketId, normalizedTournamentId],
@@ -753,6 +1003,17 @@ export const recalculateTournamentResults = async (tournamentId) => {
         bracketId: null,
       });
       rankingBracketId = null;
+    } else {
+      const stage = String(bracketRows[0].stage ?? "").trim();
+      const name = String(bracketRows[0].name ?? "").trim();
+      // Ưu tiên name nếu stage chỉ là slug kiểu "playin"
+      const stageNorm = normalizeBracketStageLabel(stage);
+      const nameNorm = normalizeBracketStageLabel(name);
+      bracketLabel =
+        stageNorm === "Play-in" || stageNorm === "Play-off"
+          ? stageNorm
+          : nameNorm || stageNorm || name || stage || null;
+      bracketHasLosers = Boolean(bracketRows[0].has_losers_bracket);
     }
   }
 
@@ -817,17 +1078,51 @@ export const recalculateTournamentResults = async (tournamentId) => {
     matchesQuery.params,
   );
 
+  if (!bracketLabel) {
+    const bracketIdFromMatches = toNumber(matchRows[0]?.bracket_id);
+    if (bracketIdFromMatches) {
+      const { rows: labelRows } = await pool.query(
+        `
+        SELECT name, stage
+        FROM brackets
+        WHERE id = $1
+        LIMIT 1
+        `,
+        [bracketIdFromMatches],
+      );
+      if (labelRows.length) {
+        const stage = String(labelRows[0].stage ?? "").trim();
+        const name = String(labelRows[0].name ?? "").trim();
+        const stageNorm = normalizeBracketStageLabel(stage);
+        const nameNorm = normalizeBracketStageLabel(name);
+        bracketLabel =
+          stageNorm === "Play-in" || stageNorm === "Play-off"
+            ? stageNorm
+            : nameNorm || stageNorm || name || stage || null;
+      }
+    }
+  }
+
   const rankingResult =
     formatType === "elimination"
       ? buildEliminationRanking({
           teamIds,
           matches: matchRows,
-          eliminationLossThreshold: hasLosersBracket ? 2 : 1,
+          eliminationLossThreshold: resolveEliminationLossThreshold({
+            hasLosersBracket: bracketHasLosers || hasLosersBracket,
+            matches: matchRows,
+          }),
+          bracketLabel,
         })
-      : buildStandingsRanking({
-          teamIds,
-          matches: matchRows,
-        });
+      : formatType === "swiss"
+        ? buildSwissRanking({
+            teamIds,
+            matches: matchRows,
+          })
+        : buildStandingsRanking({
+            teamIds,
+            matches: matchRows,
+          });
 
   const { rankings, isFinal } = rankingResult;
 
@@ -870,6 +1165,8 @@ const TOURNAMENT_RESULTS_SELECT = `
     r.points,
     r.wins,
     r.losses,
+    r.elim_round,
+    r.elim_label,
     r.is_final,
     r.calculated_at,
     t.name,
@@ -879,7 +1176,13 @@ const TOURNAMENT_RESULTS_SELECT = `
   FROM tournament_team_results r
   JOIN teams t ON t.id = r.team_id
   WHERE r.tournament_id = $1
-  ORDER BY r.wins DESC, r.losses ASC, r.placement ASC NULLS LAST, r.points DESC, t.id ASC
+  ORDER BY
+    CASE WHEN r.placement IS NULL THEN 0 ELSE 1 END,
+    r.placement ASC NULLS LAST,
+    r.wins DESC,
+    r.losses ASC,
+    r.points DESC,
+    t.id ASC
 `;
 
 /** Read cached BXH rows only — single SELECT, no schema migration. */

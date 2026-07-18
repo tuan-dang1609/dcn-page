@@ -1,6 +1,17 @@
 export const BRACKET_CONN_BASE_STROKE = "rgb(55, 65, 81)";
+/** Active path — xanh lá khi hover hành trình đội */
 export const BRACKET_CONN_ACTIVE_STROKE = "rgb(52, 211, 153)";
 export const BRACKET_CONN_DIM_OPACITY = 0.42;
+
+export const normalizeTeamColorHex = (
+  value?: string | null,
+): string | null => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const withHash = raw.startsWith("#") ? raw : `#${raw}`;
+  if (!/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(withHash)) return null;
+  return withHash;
+};
 
 export const bracketRowHoverClass = (
   hasHover: boolean,

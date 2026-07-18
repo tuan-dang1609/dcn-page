@@ -45,10 +45,15 @@ interface HeroBannerProps {
     register_end?: string;
     name?: string;
     short_name?: string;
+    registration_mode?: "org" | "individual" | string;
     registered?: Array<{
       id?: number | string;
       team_id?: number | string;
       isCheckedIn?: boolean;
+      player_ids?: Array<number | string>;
+      name?: string;
+      short_name?: string;
+      logo_url?: string | null;
     }>;
   } | null;
 }
@@ -60,6 +65,9 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   const location = useLocation();
   const { game } = useParams();
   const showRiotId = isRiotGameSlug(game ?? tournament?.short_name);
+  const isIndividualMode =
+    String(tournament?.registration_mode ?? "org").toLowerCase() ===
+    "individual";
   const [regOpen, setRegOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<"manage" | "roster">("manage");
   const [rosterOpen, setRosterOpen] = useState(false);
@@ -101,10 +109,16 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   };
 
   const handleOpenRoster = () => {
-    const registered = (tournament as any)?.registered ?? [];
-    const match = registered.find(
-      (r: any) => Number(r.team_id) === Number(user?.team_id),
-    );
+    const registered = tournament?.registered ?? [];
+    const match = isIndividualMode
+      ? registered.find((r) =>
+          (r.player_ids ?? []).some(
+            (playerId) => Number(playerId) === Number(user?.id),
+          ),
+        )
+      : registered.find(
+          (r) => Number(r.team_id) === Number(user?.team_id),
+        );
     setRosterTeamId(match ? Number(match.id) : null);
     setRosterOpen(true);
   };
@@ -124,17 +138,29 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     }
 
     const registered = tournament?.registered ?? [];
-    const myTeam = registered.find(
-      (team) => Number(team.team_id) === Number(user?.team_id),
-    );
-    const nextRegisteredTeamId = myTeam
-      ? Number(myTeam.id ?? myTeam.team_id)
+    const myEntry = isIndividualMode
+      ? registered.find((team) =>
+          (team.player_ids ?? []).some(
+            (playerId) => Number(playerId) === Number(user.id),
+          ),
+        )
+      : registered.find(
+          (team) => Number(team.team_id) === Number(user?.team_id),
+        );
+    const nextRegisteredTeamId = myEntry
+      ? Number(myEntry.id ?? myEntry.team_id)
       : null;
 
     setMyRegisteredTeamId(nextRegisteredTeamId);
-    setMyTeamCheckedIn(Boolean(myTeam?.isCheckedIn));
+    setMyTeamCheckedIn(Boolean(myEntry?.isCheckedIn));
     setIsRegistered(Boolean(nextRegisteredTeamId));
-  }, [tournament?.id, tournament?.registered, user, setIsRegistered]);
+  }, [
+    tournament?.id,
+    tournament?.registered,
+    user,
+    setIsRegistered,
+    isIndividualMode,
+  ]);
 
   const checkInTournament = tournament as
     | { check_in_start?: string; check_in_end?: string }
@@ -152,7 +178,8 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     nowMs <= checkInEndMs;
 
   const canShowHeaderCheckIn = Boolean(
-    isTeamCaptain && user?.team_id && myRegisteredTeamId,
+    myRegisteredTeamId &&
+      (isIndividualMode || (isTeamCaptain && user?.team_id)),
   );
 
   const showUpdateRegistration = Boolean(myRegisteredTeamId || isRegistered);
@@ -374,7 +401,29 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                   </div>
                   <span className="text-sm font-semibold">{user.nickname}</span>
                 </div>
-                {hasTeam && !isTeamCaptain ? (
+                {isIndividualMode ? (
+                  isRegistrationOpen || isRegistered ? (
+                    <Button
+                      size="sm"
+                      onClick={handleOpenRegistration}
+                      className="h-11 px-4 sm:px-5 gap-2 text-sm sm:text-base font-semibold"
+                      variant={showUpdateRegistration ? "outline" : "default"}
+                    >
+                      {showUpdateRegistration ? (
+                        <>
+                          <RefreshCw className="w-4 h-4" />
+                          <span>Đã đăng ký</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trophy className="w-4 h-4" />
+                          <span className="hidden sm:inline">Đăng ký cá nhân</span>
+                          <span className="sm:hidden">Đăng ký</span>
+                        </>
+                      )}
+                    </Button>
+                  ) : null
+                ) : hasTeam && !isTeamCaptain ? (
                   <Button
                     type="button"
                     variant="ghost"
@@ -481,15 +530,38 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
         tournamentId={tournament?.id}
         requiredPlayerCount={tournament?.max_player_per_team}
         viewMode={dialogMode}
+        registrationMode={tournament?.registration_mode}
       />
 
       <TeamRosterDialog
         open={rosterOpen}
         onOpenChange={setRosterOpen}
         teamId={rosterTeamId}
-        teamName={user?.team?.name ?? null}
-        teamShortName={user?.team?.short_name ?? null}
-        teamLogoUrl={user?.team?.logo_url ?? null}
+        teamName={
+          isIndividualMode
+            ? (tournament?.registered?.find(
+                (item) => Number(item.id) === Number(rosterTeamId),
+              )?.name ??
+              user?.nickname ??
+              null)
+            : (user?.team?.name ?? null)
+        }
+        teamShortName={
+          isIndividualMode
+            ? (tournament?.registered?.find(
+                (item) => Number(item.id) === Number(rosterTeamId),
+              )?.short_name ?? null)
+            : (user?.team?.short_name ?? null)
+        }
+        teamLogoUrl={
+          isIndividualMode
+            ? (tournament?.registered?.find(
+                (item) => Number(item.id) === Number(rosterTeamId),
+              )?.logo_url ??
+              user?.profile_picture ??
+              null)
+            : (user?.team?.logo_url ?? null)
+        }
         showRiotId={showRiotId}
       />
 

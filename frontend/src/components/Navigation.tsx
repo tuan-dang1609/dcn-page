@@ -71,7 +71,22 @@ const Navigation = ({ tournamentId }: NavigationProps) => {
   return (
     <nav className={TOURNAMENT_NAV_WRAPPER_CLASS}>
       <div className="p-2 md:hidden">
-        <Select value={selectedValue} onValueChange={(value) => navigate(value)}>
+        <Select
+          value={selectedValue}
+          onValueChange={(value) => {
+            if (value === basePath && tournamentId != null) {
+              try {
+                sessionStorage.setItem(
+                  `skip-auto-bracket:${tournamentId}`,
+                  "1",
+                );
+              } catch {
+                // ignore
+              }
+            }
+            navigate(value);
+          }}
+        >
           <SelectTrigger className="h-10 w-full border-neutral-600 bg-[#1a1a1a] text-xs font-extrabold uppercase tracking-wide text-white">
             <SelectValue placeholder={activeLabel}>{activeLabel}</SelectValue>
           </SelectTrigger>
@@ -98,6 +113,18 @@ const Navigation = ({ tournamentId }: NavigationProps) => {
             end={link.to === basePath}
             onMouseEnter={() => handlePrefetch(link.tab)}
             onFocus={() => handlePrefetch(link.tab)}
+            onClick={() => {
+              if (link.to === basePath && tournamentId != null) {
+                try {
+                  sessionStorage.setItem(
+                    `skip-auto-bracket:${tournamentId}`,
+                    "1",
+                  );
+                } catch {
+                  // ignore
+                }
+              }
+            }}
             className={({ isActive }) =>
               `${TOURNAMENT_NAV_LINK_BASE} ${
                 isActive

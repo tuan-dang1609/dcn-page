@@ -25,6 +25,7 @@ import {
   UserCheck,
   X,
   Trash2,
+  Link2 as LinkIcon,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
@@ -40,6 +41,8 @@ import {
   sendTeamInvite,
   type TeamInviteRecord,
 } from "@/api/teamInvites";
+import { registerSoloToTournament } from "@/api/tournaments";
+import { Link } from "react-router-dom";
 
 interface TeamMember {
   id: number;
@@ -102,6 +105,7 @@ interface Props {
   tournamentId?: number | string;
   requiredPlayerCount?: number | string;
   viewMode?: "manage" | "roster";
+  registrationMode?: "org" | "individual" | string;
 }
 
 const TournamentRegistration = ({
@@ -110,12 +114,16 @@ const TournamentRegistration = ({
   tournamentId,
   requiredPlayerCount,
   viewMode = "manage",
+  registrationMode = "org",
 }: Props) => {
   const { user, token, setIsRegistered, refreshUser } = useAuth();
+  const isIndividualMode =
+    String(registrationMode ?? "org").toLowerCase() === "individual";
   const isRosterView = viewMode === "roster";
   const [step, setStep] = useState<
     "team" | "members" | "create-team" | "edit-team" | "team-members"
   >(isRosterView ? "members" : "team");
+  const [soloSubmitting, setSoloSubmitting] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState<number[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -876,12 +884,121 @@ const TournamentRegistration = ({
       setInvitePanel("search");
       setPendingInvites([]);
       setSendingInviteId(null);
+      setSoloSubmitting(false);
     }
     onOpenChange(v);
   };
 
+  const handleSoloRegister = async () => {
+    if (!tournamentId || !token) return;
+
+    const riotAccount = String(user?.riot_account ?? "").trim();
+    if (!riotAccount) {
+      toast({
+        title: "Thiếu Riot ID",
+        description: "Hãy liên kết Riot trên trang Profile trước khi đăng ký.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSoloSubmitting(true);
+    try {
+      await registerSoloToTournament(tournamentId);
+      setIsRegistered(true);
+      toast({
+        title: "Đăng ký thành công",
+        description: `Đã đăng ký cá nhân với Riot ID ${riotAccount}.`,
+      });
+      resetAndClose(false);
+      window.location.reload();
+    } catch (error) {
+      toast({
+        title: "Đăng ký thất bại",
+        description: getApiErrorMessage(
+          error,
+          "Không thể đăng ký cá nhân vào giải.",
+        ),
+        variant: "destructive",
+      });
+    } finally {
+      setSoloSubmitting(false);
+    }
+  };
+
   // Keep hook order stable: guard only after all hooks are declared.
   if (!user) return null;
+
+  if (isIndividualMode && !isRosterView) {
+    const riotAccount = String(user.riot_account ?? "").trim();
+    const hasRiot = Boolean(riotAccount);
+
+    return (
+      <Dialog open={open} onOpenChange={resetAndClose}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-md bg-card border-border px-4 py-5 sm:w-full sm:max-w-md sm:px-6 sm:py-6">
+          <DialogHeader>
+            <DialogTitle>Đăng ký cá nhân</DialogTitle>
+            <DialogDescription>
+              Giải TFT solo — không cần chọn đội. Chỉ cần tài khoản đã liên kết
+              Riot ID.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Riot ID
+              </p>
+              <p className="text-base font-bold text-foreground">
+                {hasRiot ? riotAccount : "Chưa liên kết"}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {user.nickname || user.id
+                  ? `Tài khoản: ${user.nickname || `#${user.id}`}`
+                  : null}
+              </p>
+            </div>
+
+            {!hasRiot ? (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                Bạn chưa liên kết Riot. Vào Profile để kết nối Riot Sign On rồi
+                quay lại đăng ký.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => resetAndClose(false)}>
+              Đóng
+            </Button>
+            {!hasRiot ? (
+              <Button asChild className="gap-2">
+                <Link to="/profile">
+                  <LinkIcon className="h-4 w-4" />
+                  Liên kết Riot
+                </Link>
+              </Button>
+            ) : (
+              <Button
+                onClick={() => void handleSoloRegister()}
+                disabled={soloSubmitting || !tournamentId}
+                className="gap-2"
+              >
+                {soloSubmitting ? (
+                  "Đang đăng ký..."
+                ) : (
+                  <>
+                    <Check className="h-4 w-4" />
+                    Xác nhận đăng ký
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   // Not allowed when user already has a team but lacks permission by rule
   if (!isRosterView && hasTeam && !canRegister) {
