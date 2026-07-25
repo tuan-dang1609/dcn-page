@@ -1,4 +1,5 @@
 import { pool } from "./db.js";
+import { assignAovPlayersAcrossTeams } from "./aovIgnMatch.js";
 
 const toNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -59,7 +60,7 @@ export const ensureAovStatsTables = async () => {
   return ensureTablesPromise;
 };
 
-const getInfoGameIdColumnName = async () => {
+export const getInfoGameIdColumnName = async () => {
   if (infoGameIdColumnCache) return infoGameIdColumnCache;
 
   const { rows } = await pool.query(
@@ -182,6 +183,9 @@ const upsertPlayerStats = async ({ matchGameId, teamSide, players, source }) => 
 
   for (const [index, player] of players.entries()) {
     const slotNo = toNumber(player.slot) ?? index + 1;
+    const originalIgn =
+      String(player.matched_from_ign ?? "").trim() ||
+      String(player.ign ?? "").trim();
 
     await pool.query(
       `
@@ -217,7 +221,12 @@ const upsertPlayerStats = async ({ matchGameId, teamSide, players, source }) => 
         false,
         "[]",
         source,
-        JSON.stringify(player),
+        JSON.stringify({
+          ...player,
+          ign: originalIgn,
+          matched_from_ign: originalIgn,
+          display_ign: player.ign,
+        }),
       ],
     );
   }
@@ -293,6 +302,102 @@ const updateMatchGameFromParsed = async ({
   );
 };
 
+const loadMatchSidePlayers = async (matchId) => {
+  const { rows: matchRows } = await pool.query(
+    `
+    SELECT m.team_a_id, m.team_b_id, b.tournament_id
+    FROM matches m
+    JOIN brackets b ON b.id = m.bracket_id
+    WHERE m.id = $1
+    `,
+    [matchId],
+  );
+
+  const matchMeta = matchRows[0];
+  if (!matchMeta) {
+    return { teamAPlayers: [], teamBPlayers: [] };
+  }
+
+  const tournamentId = toNumber(matchMeta.tournament_id);
+  const teamAId = toNumber(matchMeta.team_a_id);
+  const teamBId = toNumber(matchMeta.team_b_id);
+
+  const fetchPlayersForTeam = async (teamId) => {
+    if (!teamId || !tournamentId) return [];
+
+    const { rows } = await pool.query(
+      `
+      SELECT user_id, username, nickname, profile_picture, riot_account
+      FROM (
+        SELECT
+          u.id AS user_id,
+          u.username,
+          u.nickname,
+          u.profile_picture,
+          u.riot_account
+        FROM tournament_teams tt
+        INNER JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+        INNER JOIN users u ON u.id = ttp.user_id
+        WHERE tt.tournament_id = $1 AND tt.team_id = $2
+
+        UNION
+
+        SELECT
+          u.id AS user_id,
+          u.username,
+          u.nickname,
+          u.profile_picture,
+          u.riot_account
+        FROM users u
+        WHERE u.team_id = $2
+      ) team_players
+      ORDER BY user_id ASC
+      `,
+      [tournamentId, teamId],
+    );
+
+    return rows;
+  };
+
+  const [teamAPlayers, teamBPlayers] = await Promise.all([
+    fetchPlayersForTeam(teamAId),
+    fetchPlayersForTeam(teamBId),
+  ]);
+
+  return { teamAPlayers, teamBPlayers };
+};
+
+const remapParsedPlayersToMatchRosters = async (matchId, parsed) => {
+  const { teamAPlayers, teamBPlayers } = await loadMatchSidePlayers(matchId);
+
+  // Giữ 5v5: chỉ đảo cả side nếu roster khớp ngược
+  const assigned = assignAovPlayersAcrossTeams({
+    bluePlayers: parsed.players?.blue ?? [],
+    redPlayers: parsed.players?.red ?? [],
+    teamAPlayers,
+    teamBPlayers,
+  });
+
+  const game = { ...(parsed.game ?? {}) };
+  if (assigned.swapped) {
+    const blueKills = game.blue_kills;
+    game.blue_kills = game.red_kills;
+    game.red_kills = blueKills;
+    if (game.winner_side === "blue") game.winner_side = "red";
+    else if (game.winner_side === "red") game.winner_side = "blue";
+  }
+
+  return {
+    ...parsed,
+    game,
+    players: {
+      blue: assigned.blue,
+      red: assigned.red,
+    },
+    sides_swapped: Boolean(assigned.swapped),
+  };
+};
+
 export const applyParsedStatsToMatchGame = async ({
   matchGameId,
   matchId,
@@ -312,80 +417,32 @@ export const applyParsedStatsToMatchGame = async ({
   }
 
   const infoGameIdColumn = await getInfoGameIdColumnName();
+  const remapped = await remapParsedPlayersToMatchRosters(matchId, parsed);
 
   await upsertPlayerStats({
     matchGameId,
     teamSide: "blue",
-    players: parsed.players.blue ?? [],
+    players: remapped.players.blue ?? [],
     source,
   });
   await upsertPlayerStats({
     matchGameId,
     teamSide: "red",
-    players: parsed.players.red ?? [],
+    players: remapped.players.red ?? [],
     source,
   });
 
   await updateMatchGameFromParsed({
     matchGameId,
     infoGameIdColumn,
-    parsed,
+    parsed: remapped,
     matchRow,
     preserveInfoGameId,
   });
 
-  await recalculateSeriesScore(matchId);
+  // Không tự ghi đè score_a/score_b series — giữ theo Score Control
 
   return getMatchGameStats(matchGameId);
-};
-
-const recalculateSeriesScore = async (matchId) => {
-  const { rows: gameRows } = await pool.query(
-    `
-    SELECT winner_team_id
-    FROM match_games
-    WHERE match_id = $1
-      AND winner_team_id IS NOT NULL
-    `,
-    [matchId],
-  );
-
-  if (!gameRows.length) return;
-
-  const { rows: matchRows } = await pool.query(
-    "SELECT team_a_id, team_b_id FROM matches WHERE id = $1",
-    [matchId],
-  );
-  const matchRow = matchRows[0];
-  if (!matchRow) return;
-
-  const teamA = toNumber(matchRow.team_a_id);
-  const teamB = toNumber(matchRow.team_b_id);
-
-  let scoreA = 0;
-  let scoreB = 0;
-
-  for (const row of gameRows) {
-    const winner = toNumber(row.winner_team_id);
-    if (winner === teamA) scoreA += 1;
-    else if (winner === teamB) scoreB += 1;
-  }
-
-  let winnerTeamId = null;
-  if (scoreA > scoreB) winnerTeamId = teamA;
-  if (scoreB > scoreA) winnerTeamId = teamB;
-
-  await pool.query(
-    `
-    UPDATE matches
-    SET score_a = $1,
-        score_b = $2,
-        winner_team_id = COALESCE($3, winner_team_id),
-        status = CASE WHEN $3 IS NOT NULL THEN 'completed' ELSE status END
-    WHERE id = $4
-    `,
-    [scoreA, scoreB, winnerTeamId, matchId],
-  );
 };
 
 export const importAovGameStats = async ({
@@ -456,13 +513,35 @@ export const getMatchGameStats = async (matchGameId) => {
     `
     SELECT id, team_side, team_id, slot_no, ign, hero_name,
            performance_score, kills, deaths, assists, gold,
-           is_mvp, items, source, created_at
+           is_mvp, items, source, raw_payload, created_at
     FROM match_game_player_stats
     WHERE match_game_id = $1
     ORDER BY team_side ASC, slot_no ASC
     `,
     [matchGameId],
   );
+
+  const players = playerRows.map((row) => {
+    let raw = row.raw_payload;
+    if (typeof raw === "string") {
+      try {
+        raw = JSON.parse(raw);
+      } catch {
+        raw = null;
+      }
+    }
+
+    const matchedFromIgn =
+      String(raw?.matched_from_ign ?? "").trim() ||
+      String(raw?.ign ?? "").trim() ||
+      null;
+
+    // ign cột = tên hiển thị; matched_from_ign = IGN gốc trong game
+    return {
+      ...row,
+      matched_from_ign: matchedFromIgn || null,
+    };
+  });
 
   return {
     match_game_id: matchGameId,
@@ -473,7 +552,7 @@ export const getMatchGameStats = async (matchGameId) => {
     team_b_score: toNumber(gameRow.team_b_score),
     winner_team_id: toNumber(gameRow.winner_team_id),
     aov: payload?.aov ?? null,
-    players: playerRows,
+    players,
   };
 };
 

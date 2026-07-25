@@ -38,8 +38,18 @@ export type AovStagingResult = {
   data: AovStagingPayload;
 };
 
-export const generateAovStagingStats = (data: AovParsedPayload) =>
-  axios.post<{ status: string; message: string; data: AovStagingResult }>(
+export type AovStagingBatchResult = {
+  count: number;
+  items: AovStagingResult[];
+  /** Có khi chỉ 1 ván (tương thích cũ) */
+  match_id?: string;
+  data?: AovStagingPayload;
+};
+
+export const generateAovStagingStats = (
+  data: AovParsedPayload | AovParsedPayload[],
+) =>
+  axios.post<{ status: string; message: string; data: AovStagingBatchResult }>(
     `${matchesBaseUrl}/aov/staging/generate`,
     { data },
     getAuthConfig(),
@@ -51,6 +61,7 @@ export const getAovStagingStats = (matchId: string) =>
 export type AovMatchGamePlayer = {
   team_side: "blue" | "red";
   ign: string;
+  matched_from_ign?: string | null;
   performance_score?: number | null;
   kills: number;
   deaths: number;
@@ -69,7 +80,16 @@ export type AovMatchGameStats = {
   players: AovMatchGamePlayer[];
 };
 
+export type AovMatchSeriesScore = {
+  score_a: number;
+  score_b: number;
+  winner_team_id?: number | null;
+  status?: string | null;
+};
+
 export const getAovMatchStats = (matchId: number | string) =>
-  axios.get<{ status: string; data: AovMatchGameStats[] }>(
-    `${matchesBaseUrl}/matches/${matchId}/aov/stats`,
-  );
+  axios.get<{
+    status: string;
+    data: AovMatchGameStats[];
+    series?: AovMatchSeriesScore | null;
+  }>(`${matchesBaseUrl}/matches/${matchId}/aov/stats`);
