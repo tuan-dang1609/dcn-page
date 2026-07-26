@@ -23,6 +23,7 @@ import {
 import {
   getAovMatchStats,
   type AovMatchGameStats,
+  type AovMatchSeriesScore,
 } from "@/api/aovStats";
 import {
   getBracketsByTournamentId,
@@ -34,6 +35,11 @@ import {
   type TournamentBySlugResponse,
 } from "@/api/tournaments";
 import type { TournamentTeamPlayersResponse } from "@/api/tournaments/types";
+import {
+  assignAovPlayersAcrossTeams,
+  mapAovPlayersToRoster,
+  matchAovIgnToPlayer,
+} from "@/lib/aovIgnMatch";
 import {
   MATCH_ROSTER_PANEL_CLASS,
   MATCH_SCOREBOARD_WRAPPER_CLASS,
@@ -49,11 +55,11 @@ const MATCH_STAT_PANEL = "overflow-hidden";
 const MATCH_STAT_TH =
   "px-2 py-1.5 text-center text-[11px] font-extrabold uppercase tracking-wider text-neutral-900 bg-[#D1D5DB]";
 const MATCH_STAT_TH_NAME =
-  "sticky left-0 z-20 min-w-[180px] bg-[#D1D5DB] px-4 py-1.5 text-left border-r border-neutral-600 text-neutral-900";
+  "sticky left-0 z-20 min-w-[120px] max-w-[140px] bg-[#D1D5DB] px-2.5 py-1.5 text-left border-r border-neutral-600 text-neutral-900 sm:min-w-[140px] sm:max-w-[180px] sm:px-3";
 const MATCH_STAT_TD =
   "px-2 py-3 text-[11px] text-neutral-200 text-center tabular-nums";
 const MATCH_STAT_TD_NAME =
-  "sticky left-0 z-10 bg-[#141414] group-hover:bg-[#1c1c1c] px-4 py-3 border-r border-neutral-800";
+  "sticky left-0 z-10 max-w-[140px] bg-[#141414] group-hover:bg-[#1c1c1c] px-2.5 py-3 border-r border-neutral-800 sm:max-w-[180px] sm:px-3";
 const MATCH_STAT_TR = `${TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS} group`;
 
 const formatDate = (d: string) =>
@@ -379,6 +385,27 @@ const findLinkedProfileForRosterPlayer = (
   ]);
 };
 
+/** Fuzzy fallback when IGN lệch nickname/username trên hệ thống */
+const findLinkedProfileForAovIgn = (
+  ign: string,
+  sidePlayers: NonNullable<LinkedTeamContext["team1Players"]>,
+  linkedContext: LinkedTeamContext,
+): { nickname?: string; avatar?: string } => {
+  const exact = lookupLinkedProfile(linkedContext, [ign]);
+  if (exact.avatar || exact.nickname) return exact;
+
+  const hit = matchAovIgnToPlayer(ign, sidePlayers);
+  if (!hit) return {};
+
+  return {
+    nickname:
+      String(hit.player.nickname ?? "").trim() ||
+      String(hit.player.username ?? "").trim() ||
+      undefined,
+    avatar: String(hit.player.profile_picture ?? "").trim() || undefined,
+  };
+};
+
 const findLinkedProfileFromValorantPlayer = (
   player: ValorantApiPlayer,
   linkedContext: LinkedTeamContext,
@@ -419,16 +446,137 @@ const enrichMatchWithLinkedProfiles = (
     return sourceMatch;
   }
 
+  const enrichAovSideRoster = (
+    roster: MatchDetail["team1Roster"],
+    sidePlayers: NonNullable<LinkedTeamContext["team1Players"]>,
+  ) => {
+    const mapped = mapAovPlayersToRoster(
+      (roster.players ?? []).map((player) => ({ ign: player.name })),
+      sidePlayers,
+    );
+
+    return {
+      ...roster,
+      players: (roster.players ?? []).map((player, index) => {
+        const hit = mapped[index];
+        const linkedPlayer = sidePlayers.find(
+          (entry) =>
+            hit?.matched_user_id != null &&
+            String(entry.user_id) === String(hit.matched_user_id),
+        );
+        const mappedName = hit?.ign || player.name;
+        let linked = findLinkedProfileForRosterPlayer(
+          { ...player, name: mappedName },
+          linkedContext,
+        );
+        if (!linked.nickname && !linked.avatar) {
+          linked = findLinkedProfileForAovIgn(
+            String(player.name ?? ""),
+            sidePlayers,
+            linkedContext,
+          );
+        }
+
+        return {
+          ...player,
+          name: mappedName || linked.nickname || player.name,
+          avatar:
+            linkedPlayer?.profile_picture ||
+            linked.avatar ||
+            player.avatar,
+        };
+      }),
+    };
+  };
+
+  const redistributeAovGameToTeams = (
+    game: NonNullable<MatchDetail["aovGameRosters"]>[number],
+  ) => {
+    const team1Players = linkedContext.team1Players ?? [];
+    const team2Players = linkedContext.team2Players ?? [];
+
+    const toIgnRow = (player: (typeof game.team1Roster.players)[number]) => ({
+      ...player,
+      ign: String(player.originalIgn || player.name || "").trim(),
+      matched_from_ign: String(player.originalIgn || "").trim() || null,
+    });
+
+    const assigned = assignAovPlayersAcrossTeams({
+      bluePlayers: (game.team1Roster?.players ?? []).map(toIgnRow),
+      redPlayers: (game.team2Roster?.players ?? []).map(toIgnRow),
+      teamAPlayers: team1Players,
+      teamBPlayers: team2Players,
+    });
+
+    const toDisplayPlayer = (
+      row: (typeof assigned.blue)[number],
+      sidePlayers: typeof team1Players,
+    ) => {
+      const linkedPlayer = sidePlayers.find(
+        (entry) =>
+          row.matched_user_id != null &&
+          String(entry.user_id) === String(row.matched_user_id),
+      );
+      const hit =
+        linkedPlayer ||
+        matchAovIgnToPlayer(
+          row.matched_from_ign || row.ign || row.name,
+          sidePlayers,
+        )?.player;
+
+      const displayName =
+        String(linkedPlayer?.nickname ?? "").trim() ||
+        String(linkedPlayer?.username ?? "").trim() ||
+        String(hit?.nickname ?? "").trim() ||
+        String(hit?.username ?? "").trim() ||
+        String(row.ign ?? "").trim() ||
+        row.name;
+
+      return {
+        ...row,
+        name: displayName,
+        originalIgn: row.matched_from_ign || row.originalIgn || undefined,
+        avatar:
+          linkedPlayer?.profile_picture ||
+          hit?.profile_picture ||
+          row.avatar,
+      };
+    };
+
+    return {
+      ...game,
+      team1Kills: assigned.swapped ? game.team2Kills : game.team1Kills,
+      team2Kills: assigned.swapped ? game.team1Kills : game.team2Kills,
+      team1Roster: {
+        ...game.team1Roster,
+        players: assigned.blue.map((row) => toDisplayPlayer(row, team1Players)),
+      },
+      team2Roster: {
+        ...game.team2Roster,
+        players: assigned.red.map((row) => toDisplayPlayer(row, team2Players)),
+      },
+    };
+  };
+
+  const aovGameRosters = sourceMatch.aovGameRosters?.map((game) =>
+    redistributeAovGameToTeams(game),
+  );
+  const firstAov = aovGameRosters?.[0];
+
   return {
     ...sourceMatch,
-    team1Roster: enrichRosterWithLinkedProfiles(
-      sourceMatch.team1Roster,
-      linkedContext,
-    ),
-    team2Roster: enrichRosterWithLinkedProfiles(
-      sourceMatch.team2Roster,
-      linkedContext,
-    ),
+    team1Roster: firstAov
+      ? firstAov.team1Roster
+      : enrichAovSideRoster(
+          enrichRosterWithLinkedProfiles(sourceMatch.team1Roster, linkedContext),
+          linkedContext.team1Players ?? [],
+        ),
+    team2Roster: firstAov
+      ? firstAov.team2Roster
+      : enrichAovSideRoster(
+          enrichRosterWithLinkedProfiles(sourceMatch.team2Roster, linkedContext),
+          linkedContext.team2Players ?? [],
+        ),
     fpsMapRosters: sourceMatch.fpsMapRosters?.map((mapRoster) => ({
       ...mapRoster,
       team1Roster: enrichRosterWithLinkedProfiles(
@@ -440,6 +588,14 @@ const enrichMatchWithLinkedProfiles = (
         linkedContext,
       ),
     })),
+    aovGameRosters,
+    maps: aovGameRosters?.length
+      ? aovGameRosters.map((game) => ({
+          mapName: game.label,
+          team1Score: game.team1Kills,
+          team2Score: game.team2Kills,
+        }))
+      : sourceMatch.maps,
   };
 };
 
@@ -960,8 +1116,16 @@ const getProviderMatchIds = (
   const ids = gameIds
     .filter((item) => {
       const infoGameId = String(item.info_game_id ?? "").trim();
-      if (provider === "aov" && /^aov:/i.test(infoGameId)) {
-        return true;
+      if (provider === "aov") {
+        if (/^aov:/i.test(infoGameId)) return true;
+        // staging đôi khi lưu thiếu prefix
+        if (
+          /^[a-z0-9]{10,}$/i.test(infoGameId) &&
+          !infoGameId.includes("-") &&
+          !infoGameId.includes(".")
+        ) {
+          return true;
+        }
       }
 
       const providerKey = normalizeGameSlug(
@@ -980,25 +1144,43 @@ const getProviderMatchIds = (
 const toAovPlayerStat = (
   player: AovMatchGameStats["players"][number],
   index: number,
-) => ({
-  name: String(player.ign ?? "").trim() || `Player ${index + 1}`,
-  icon: `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
-  kills: toNumber(player.kills) ?? 0,
-  deaths: toNumber(player.deaths) ?? 0,
-  assists: toNumber(player.assists) ?? 0,
-  performanceScore: toNumber(player.performance_score) ?? undefined,
-  gold: toNumber(player.gold) ?? undefined,
-});
+) => {
+  const displayName = String(player.ign ?? "").trim() || `Player ${index + 1}`;
+  const originalIgn =
+    String(player.matched_from_ign ?? "").trim() || displayName;
+
+  return {
+    name: displayName,
+    originalIgn,
+    icon: `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
+    kills: toNumber(player.kills) ?? 0,
+    deaths: toNumber(player.deaths) ?? 0,
+    assists: toNumber(player.assists) ?? 0,
+    performanceScore: toNumber(player.performance_score) ?? undefined,
+    gold: toNumber(player.gold) ?? undefined,
+  };
+};
+
+const linkedPlayersAsAovStats = (
+  players: TournamentTeamPlayersResponse["players"] | undefined,
+) =>
+  (players ?? []).map((player, index) =>
+    toTeamPlayerStat(player, index),
+  );
 
 const mergeAovStatsIntoMatch = (
   baseMatch: MatchDetail,
   games: AovMatchGameStats[],
+  linkedContext?: LinkedTeamContext,
 ): MatchDetail => {
   if (!games.length) return baseMatch;
 
   const sortedGames = [...games].sort(
     (a, b) => (toNumber(a.game_no) ?? 0) - (toNumber(b.game_no) ?? 0),
   );
+
+  const fallbackTeam1 = linkedPlayersAsAovStats(linkedContext?.team1Players);
+  const fallbackTeam2 = linkedPlayersAsAovStats(linkedContext?.team2Players);
 
   const aovGameRosters: AovGameRoster[] = sortedGames.map((game) => {
     const bluePlayers = (game.players ?? []).filter(
@@ -1008,21 +1190,30 @@ const mergeAovStatsIntoMatch = (
       (player) => player.team_side === "red",
     );
 
+    const team1FromStats = bluePlayers.map((player, index) =>
+      toAovPlayerStat(player, index),
+    );
+    const team2FromStats = redPlayers.map((player, index) =>
+      toAovPlayerStat(player, index),
+    );
+
+    // Ưu tiên stats thật; nếu thiếu 1 bên thì bổ sung roster đăng ký
+    const team1Players =
+      team1FromStats.length > 0 ? team1FromStats : fallbackTeam1;
+    const team2Players =
+      team2FromStats.length > 0 ? team2FromStats : fallbackTeam2;
+
     return {
       label: `Ván ${game.game_no}`,
       team1Kills: toNumber(game.team_a_score) ?? 0,
       team2Kills: toNumber(game.team_b_score) ?? 0,
       team1Roster: {
         ...baseMatch.team1Roster,
-        players: bluePlayers.map((player, index) =>
-          toAovPlayerStat(player, index),
-        ),
+        players: team1Players,
       },
       team2Roster: {
         ...baseMatch.team2Roster,
-        players: redPlayers.map((player, index) =>
-          toAovPlayerStat(player, index),
-        ),
+        players: team2Players,
       },
     };
   });
@@ -1039,11 +1230,88 @@ const mergeAovStatsIntoMatch = (
     ...baseMatch,
     gameType: "aov",
     maps,
-    team1Roster: firstGame?.team1Roster ?? baseMatch.team1Roster,
-    team2Roster: firstGame?.team2Roster ?? baseMatch.team2Roster,
+    // Series score luôn lấy từ Score Control (score_a/score_b), không đếm từ kill từng ván
+    team1: {
+      ...baseMatch.team1,
+      score: toNumber(baseMatch.team1.score) ?? 0,
+    },
+    team2: {
+      ...baseMatch.team2,
+      score: toNumber(baseMatch.team2.score) ?? 0,
+    },
+    team1Roster: firstGame?.team1Roster ?? {
+      ...baseMatch.team1Roster,
+      players:
+        baseMatch.team1Roster.players.length > 0
+          ? baseMatch.team1Roster.players
+          : fallbackTeam1,
+    },
+    team2Roster: firstGame?.team2Roster ?? {
+      ...baseMatch.team2Roster,
+      players:
+        baseMatch.team2Roster.players.length > 0
+          ? baseMatch.team2Roster.players
+          : fallbackTeam2,
+    },
     aovGameRosters,
     statTabs: aovGameRosters.map((game) => game.label),
   };
+};
+
+const buildRosterOnlyAovGames = (
+  baseMatch: MatchDetail,
+  linkedContext: LinkedTeamContext,
+  gameCount = 1,
+): MatchDetail => {
+  const team1Players = linkedPlayersAsAovStats(linkedContext.team1Players);
+  const team2Players = linkedPlayersAsAovStats(linkedContext.team2Players);
+  const count = Math.max(1, gameCount);
+
+  const aovGameRosters: AovGameRoster[] = Array.from({ length: count }, (_, i) => ({
+    label: count > 1 ? `Ván ${i + 1}` : "Đội hình",
+    team1Kills: 0,
+    team2Kills: 0,
+    team1Roster: {
+      ...baseMatch.team1Roster,
+      players: team1Players,
+    },
+    team2Roster: {
+      ...baseMatch.team2Roster,
+      players: team2Players,
+    },
+  }));
+
+  return {
+    ...baseMatch,
+    gameType: "aov",
+    aovGameRosters,
+    team1Roster: {
+      ...baseMatch.team1Roster,
+      players:
+        baseMatch.team1Roster.players.length > 0
+          ? baseMatch.team1Roster.players
+          : team1Players,
+    },
+    team2Roster: {
+      ...baseMatch.team2Roster,
+      players:
+        baseMatch.team2Roster.players.length > 0
+          ? baseMatch.team2Roster.players
+          : team2Players,
+    },
+    statTabs: aovGameRosters.map((game) => game.label),
+  };
+};
+
+const looksLikeAovStagingId = (value?: string | null) => {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return false;
+  if (/^aov:/i.test(trimmed)) return true;
+  return (
+    /^[a-z0-9]{10,}$/i.test(trimmed) &&
+    !trimmed.includes("-") &&
+    !trimmed.includes(".")
+  );
 };
 
 const normalizeTeamId = (value?: string | null) =>
@@ -1614,33 +1882,33 @@ const MapScoreRow = ({
   const bgImg = mapImages[map.mapName];
 
   return (
-    <div className="relative rounded-xl overflow-hidden h-14 bg-card/70">
+    <div className="relative h-12 overflow-hidden rounded-xl bg-card/70 sm:h-14">
       <div className="absolute inset-0">
-        <img src={bgImg} alt="" className="w-full h-full object-cover" />
+        <img src={bgImg} alt="" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-background/80 backdrop-blur-[1px]" />
       </div>
 
-      <div className="relative z-10 grid grid-cols-[1fr_auto_1fr] items-center w-full px-4 h-full">
-        <div className="flex items-center gap-3">
-          <img src={team1.logo} alt="" className="w-5 h-5 rounded" />
+      <div className="relative z-10 grid h-full w-full grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <img src={team1.logo} alt="" className="h-5 w-5 rounded" />
           <span
-            className={`text-lg font-black tabular-nums ${t1Win ? "text-primary" : "text-muted-foreground"}`}
+            className={`text-base font-black tabular-nums sm:text-lg ${t1Win ? "text-primary" : "text-muted-foreground"}`}
           >
             {map.team1Score}
           </span>
         </div>
 
-        <span className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-foreground px-3 py-1 min-w-33 text-center">
+        <span className="min-w-[4.5rem] px-2 py-1 text-center text-[10px] font-extrabold uppercase tracking-[0.16em] text-foreground sm:min-w-33 sm:px-3 sm:text-[11px] sm:tracking-[0.22em]">
           {map.mapName}
         </span>
 
-        <div className="flex items-center gap-3 justify-end">
+        <div className="flex items-center justify-end gap-2 sm:gap-3">
           <span
-            className={`text-lg font-black tabular-nums ${!t1Win ? "text-primary" : "text-muted-foreground"}`}
+            className={`text-base font-black tabular-nums sm:text-lg ${!t1Win ? "text-primary" : "text-muted-foreground"}`}
           >
             {map.team2Score}
           </span>
-          <img src={team2.logo} alt="" className="w-5 h-5 rounded" />
+          <img src={team2.logo} alt="" className="h-5 w-5 rounded" />
         </div>
       </div>
     </div>
@@ -2752,28 +3020,42 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
 
   if (!currentGame) return null;
 
+  const hasNumericStats = [
+    ...(currentGame.team1Roster.players ?? []),
+    ...(currentGame.team2Roster.players ?? []),
+  ].some(
+    (p) =>
+      (p.kills ?? 0) > 0 ||
+      (p.deaths ?? 0) > 0 ||
+      (p.assists ?? 0) > 0 ||
+      p.performanceScore != null ||
+      p.gold != null,
+  );
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-center flex-wrap gap-4 justify-between">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
             Match Stats
           </h3>
-          <p className="text-xs text-[#EEEEEE] mt-0.5">
-            Thống kê chi tiết từng người chơi (AOV / Liên Quân)
+          <p className="mt-0.5 text-xs text-[#EEEEEE]">
+            {hasNumericStats
+              ? "Thống kê chi tiết từng người chơi (AOV / Liên Quân)"
+              : "Danh sách người chơi 2 đội (chưa có KDA — gắn lại match_id AOV nếu cần)"}
           </p>
         </div>
         {games.length > 1 ? (
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex flex-wrap gap-2">
             {games.map((game, i) => (
               <button
                 key={game.label}
                 type="button"
                 onClick={() => setActiveTab(i)}
-                className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
+                className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition-all ${
                   activeTab === i
-                    ? "bg-foreground text-background border-foreground"
-                    : "bg-transparent border-border text-[#EEEEEE] hover:text-foreground"
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-transparent text-[#EEEEEE] hover:text-foreground"
                 }`}
               >
                 {game.label}
@@ -2782,29 +3064,29 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
           </div>
         ) : null}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
         {[currentGame.team1Roster, currentGame.team2Roster].map((roster) => (
           <div key={roster.teamTag} className={MATCH_STAT_PANEL}>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] border-collapse table-fixed">
+              <table className="w-full min-w-[280px] table-fixed border-collapse sm:min-w-[380px]">
                 <colgroup>
-                  <col />
-                  <col className="w-10" />
-                  <col className="w-10" />
-                  <col className="w-10" />
-                  <col className="w-14" />
-                  <col className="w-[4.5rem]" />
+                  <col className="w-[38%] max-w-[140px]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[18%]" />
                 </colgroup>
                 <thead>
                   <tr className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
                     <th className={MATCH_STAT_TH_NAME}>
-                      <div className="flex items-center gap-2 min-w-0 normal-case">
+                      <div className="flex min-w-0 items-center gap-1.5 normal-case">
                         <img
                           src={roster.teamLogo}
                           alt={roster.teamTag}
-                          className="w-5 h-5 shrink-0 rounded-sm"
+                          className="h-5 w-5 shrink-0 rounded-sm"
                         />
-                        <span className="truncate text-sm font-extrabold uppercase tracking-wide">
+                        <span className="truncate text-xs font-extrabold uppercase tracking-wide sm:text-sm">
                           {roster.teamName}
                         </span>
                       </div>
@@ -2817,25 +3099,58 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {roster.players.map((p, playerIndex) => (
-                    <tr
-                      key={`${roster.teamTag}-${p.name}-${playerIndex}`}
-                      className={MATCH_STAT_TR}
-                    >
-                      <td className={MATCH_STAT_TD_NAME}>
-                        <span className="block truncate text-[11px] font-semibold text-white">
-                          {p.name}
-                        </span>
+                  {(roster.players ?? []).length === 0 ? (
+                    <tr className={MATCH_STAT_TR}>
+                      <td
+                        colSpan={6}
+                        className="px-3 py-4 text-center text-xs text-neutral-500"
+                      >
+                        Chưa có người chơi
                       </td>
-                      <td className={MATCH_STAT_TD}>{p.kills}</td>
-                      <td className={MATCH_STAT_TD}>{p.deaths}</td>
-                      <td className={MATCH_STAT_TD}>{p.assists}</td>
-                      <td className={MATCH_STAT_TD}>
-                        {p.performanceScore ?? "-"}
-                      </td>
-                      <td className={MATCH_STAT_TD}>{p.gold ?? "-"}</td>
                     </tr>
-                  ))}
+                  ) : (
+                    roster.players.map((p, playerIndex) => (
+                      <tr
+                        key={`${roster.teamTag}-${p.name}-${playerIndex}`}
+                        className={MATCH_STAT_TR}
+                      >
+                        <td className={MATCH_STAT_TD_NAME}>
+                          <div className="flex min-w-0 max-w-full items-center gap-1.5">
+                            {p.avatar || p.icon ? (
+                              <img
+                                src={p.avatar || p.icon}
+                                alt=""
+                                className="h-5 w-5 shrink-0 rounded-sm object-cover sm:h-6 sm:w-6"
+                              />
+                            ) : null}
+                            <span
+                              className="block min-w-0 truncate text-[11px] font-semibold text-white"
+                              title={
+                                p.originalIgn && p.originalIgn !== p.name
+                                  ? `${p.name} (${p.originalIgn})`
+                                  : p.name
+                              }
+                            >
+                              {p.name}
+                            </span>
+                          </div>
+                        </td>
+                        <td className={MATCH_STAT_TD}>
+                          {hasNumericStats ? (p.kills ?? 0) : "-"}
+                        </td>
+                        <td className={MATCH_STAT_TD}>
+                          {hasNumericStats ? (p.deaths ?? 0) : "-"}
+                        </td>
+                        <td className={MATCH_STAT_TD}>
+                          {hasNumericStats ? (p.assists ?? 0) : "-"}
+                        </td>
+                        <td className={MATCH_STAT_TD}>
+                          {p.performanceScore ?? "-"}
+                        </td>
+                        <td className={MATCH_STAT_TD}>{p.gold ?? "-"}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -3088,8 +3403,9 @@ const MatchDetailPage = () => {
     useQuery({
       queryKey: ["tournament-match-list-all-brackets", tournamentId],
       enabled: Boolean(tournamentId),
-      staleTime: 1000 * 60,
-      refetchOnWindowFocus: false,
+      staleTime: 0,
+      refetchOnMount: "always",
+      refetchOnWindowFocus: true,
       refetchInterval: (query) =>
         resolveLiveMatchPollInterval(
           (query.state.data as { matches?: Match[] } | undefined)?.matches,
@@ -3304,19 +3620,32 @@ const MatchDetailPage = () => {
     if (!numId) return false;
     if (baseMatch?.gameType === "aov") return true;
     if (normalizedRouteGame === "aov") return true;
+    if (looksLikeAovStagingId(baseMatch?.roomId)) return true;
     return getProviderMatchIds(matchGameIds ?? [], "aov").length > 0;
-  }, [baseMatch?.gameType, matchGameIds, normalizedRouteGame, numId]);
+  }, [
+    baseMatch?.gameType,
+    baseMatch?.roomId,
+    matchGameIds,
+    normalizedRouteGame,
+    numId,
+  ]);
 
-  const { data: aovApiData, isLoading: isAovStatsLoading } = useQuery({
+  const { data: aovBundle, isLoading: isAovStatsLoading } = useQuery({
     queryKey: ["aov-match-detail", numId],
     enabled: shouldFetchAovStats,
-    staleTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: false,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const response = await getAovMatchStats(numId!);
-      return response.data?.data ?? [];
+      return {
+        games: response.data?.data ?? ([] as AovMatchGameStats[]),
+        series: (response.data?.series ?? null) as AovMatchSeriesScore | null,
+      };
     },
   });
+  const aovApiData = aovBundle?.games;
+  const aovSeriesScore = aovBundle?.series;
 
   const valorantApiMatchIds = useMemo(() => {
     const idsFromMatchGames = getProviderMatchIds(matchGameIds ?? [], "val")
@@ -3378,8 +3707,22 @@ const MatchDetailPage = () => {
   const match = useMemo(() => {
     if (!baseMatch) return null;
 
+    // Ưu tiên tỉ số series từ Score Control (API matches / aov series)
+    const seriesScoreA =
+      aovSeriesScore != null
+        ? toNumber(aovSeriesScore.score_a) ?? 0
+        : toNumber(baseMatch.team1.score) ?? 0;
+    const seriesScoreB =
+      aovSeriesScore != null
+        ? toNumber(aovSeriesScore.score_b) ?? 0
+        : toNumber(baseMatch.team2.score) ?? 0;
+
     const hydratedBaseMatch = hydrateRostersWithLinkedPlayers(
-      baseMatch,
+      {
+        ...baseMatch,
+        team1: { ...baseMatch.team1, score: seriesScoreA },
+        team2: { ...baseMatch.team2, score: seriesScoreB },
+      },
       linkedTeamContext,
     );
 
@@ -3408,10 +3751,68 @@ const MatchDetailPage = () => {
       aovApiData &&
       aovApiData.length > 0
     ) {
-      resolvedMatch = mergeAovStatsIntoMatch(hydratedBaseMatch, aovApiData);
+      resolvedMatch = mergeAovStatsIntoMatch(
+        hydratedBaseMatch,
+        aovApiData,
+        linkedTeamContext,
+      );
+
+      // Stats API trả games nhưng players rỗng → vẫn hiện roster 2 đội
+      const hasAnyPlayers = (resolvedMatch.aovGameRosters ?? []).some(
+        (game) =>
+          (game.team1Roster.players?.length ?? 0) > 0 ||
+          (game.team2Roster.players?.length ?? 0) > 0,
+      );
+      if (
+        !hasAnyPlayers &&
+        (linkedTeamContext.team1Players.length > 0 ||
+          linkedTeamContext.team2Players.length > 0)
+      ) {
+        resolvedMatch = buildRosterOnlyAovGames(
+          resolvedMatch,
+          linkedTeamContext,
+          aovApiData.length,
+        );
+      }
+    } else if (
+      hydratedBaseMatch.gameType === "aov" &&
+      (linkedTeamContext.team1Players.length > 0 ||
+        linkedTeamContext.team2Players.length > 0)
+    ) {
+      // Chưa có/ chưa áp được stats — vẫn hiện danh sách người đăng ký 2 đội
+      const seriesGames = Math.max(seriesScoreA, seriesScoreB, 1);
+      resolvedMatch = buildRosterOnlyAovGames(
+        hydratedBaseMatch,
+        linkedTeamContext,
+        seriesGames,
+      );
     }
 
-    return enrichMatchWithLinkedProfiles(resolvedMatch, linkedTeamContext);
+    const enriched = enrichMatchWithLinkedProfiles(
+      resolvedMatch,
+      linkedTeamContext,
+    );
+
+    // AOV: luôn khóa tỉ số series theo Score Control — không đếm từ kill/ván
+    if (
+      hydratedBaseMatch.gameType === "aov" ||
+      shouldFetchAovStats ||
+      enriched.gameType === "aov"
+    ) {
+      return {
+        ...enriched,
+        team1: {
+          ...enriched.team1,
+          score: seriesScoreA,
+        },
+        team2: {
+          ...enriched.team2,
+          score: seriesScoreB,
+        },
+      };
+    }
+
+    return enriched;
   }, [
     baseMatch,
     linkedTeamContext,
@@ -3419,6 +3820,7 @@ const MatchDetailPage = () => {
     tftApiData,
     valorantApiData,
     aovApiData,
+    aovSeriesScore,
     shouldFetchAovStats,
   ]);
 
@@ -3605,59 +4007,94 @@ const MatchDetailPage = () => {
 
       <div className="border-b border-neutral-800 bg-[#0f0f0f]">
         <div className={MATCH_SCOREBOARD_WRAPPER_CLASS}>
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 py-3 md:gap-5">
-          <div className="flex items-center justify-end gap-3 px-1 py-1">
-            <div className="min-w-0 text-right">
-              <span className="hidden text-sm font-extrabold uppercase tracking-wide text-white lg:block">
-                {match.team1.name}
-              </span>
-              <span
-                className={`block lg:hidden ${TOURNAMENT_TEAM_TAG_BADGE_CLASS}`}
-              >
-                {match.team1.tag}
-              </span>
+          {/* Mobile: điểm nổi giữa, tag + logo 2 bên; Desktop: 3 cột */}
+          <div className="flex flex-col gap-3 py-4 md:hidden">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
+                <img
+                  src={match.team1.logo}
+                  alt={match.team1.tag}
+                  className="h-11 w-11 shrink-0 rounded-md object-cover"
+                />
+                <span className="max-w-full truncate px-0.5 text-[11px] font-extrabold uppercase leading-tight tracking-wide text-white">
+                  {match.team1.tag}
+                </span>
+              </div>
+              <div className="flex shrink-0 flex-col items-center gap-1 px-2">
+                <div className="flex items-baseline gap-2.5">
+                  <span className="text-4xl font-black tabular-nums leading-none text-white">
+                    {match.team1.score}
+                  </span>
+                  <span className="text-xl font-bold text-neutral-600">:</span>
+                  <span className="text-4xl font-black tabular-nums leading-none text-white">
+                    {match.team2.score}
+                  </span>
+                </div>
+                <div className="text-center leading-tight">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wide text-neutral-300">
+                    {isMatchCompleted ? "FIN" : "LIVE"}
+                  </p>
+                  <p className="text-[10px] text-neutral-500">
+                    {isMatchCompleted ? formatDate(match.date) : "ĐANG DIỄN RA"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
+                <img
+                  src={match.team2.logo}
+                  alt={match.team2.tag}
+                  className="h-11 w-11 shrink-0 rounded-md object-cover"
+                />
+                <span className="max-w-full truncate px-0.5 text-[11px] font-extrabold uppercase leading-tight tracking-wide text-white">
+                  {match.team2.tag}
+                </span>
+              </div>
             </div>
-            <img
-              src={match.team1.logo}
-              alt={match.team1.tag}
-              className="h-9 w-9 shrink-0"
-            />
           </div>
 
-          <div className="flex min-w-[120px] items-center justify-center gap-4 px-2 py-1 md:gap-5">
-            <span className="text-3xl font-black tabular-nums text-white md:text-4xl">
-              {match.team1.score}
-            </span>
-            <div className="hidden min-w-[68px] text-center leading-tight lg:block">
-              <p className="text-base font-extrabold uppercase text-neutral-300">
-                {isMatchCompleted ? "FIN" : "LIVE"}
-              </p>
-              <p className="text-[10px] text-neutral-500">
-                {isMatchCompleted ? formatDate(match.date) : "ĐANG DIỄN RA"}
-              </p>
+          <div className="hidden grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-5 py-3 md:grid">
+            <div className="flex items-center justify-end gap-3 px-1 py-1">
+              <div className="min-w-0 text-right">
+                <span className="block text-sm font-extrabold uppercase tracking-wide text-white">
+                  {match.team1.name}
+                </span>
+              </div>
+              <img
+                src={match.team1.logo}
+                alt={match.team1.tag}
+                className="h-9 w-9 shrink-0"
+              />
             </div>
-            <span className="text-3xl font-black tabular-nums text-white md:text-4xl">
-              {match.team2.score}
-            </span>
-          </div>
 
-          <div className="flex items-center gap-3 px-1 py-1">
-            <img
-              src={match.team2.logo}
-              alt={match.team2.tag}
-              className="h-9 w-9 shrink-0"
-            />
-            <div className="min-w-0 text-left">
-              <span className="hidden text-sm font-extrabold uppercase tracking-wide text-white lg:block">
-                {match.team2.name}
+            <div className="flex min-w-[120px] items-center justify-center gap-5 px-2 py-1">
+              <span className="text-4xl font-black tabular-nums text-white">
+                {match.team1.score}
               </span>
-              <span
-                className={`block lg:hidden ${TOURNAMENT_TEAM_TAG_BADGE_CLASS}`}
-              >
-                {match.team2.tag}
+              <div className="min-w-[68px] text-center leading-tight">
+                <p className="text-base font-extrabold uppercase text-neutral-300">
+                  {isMatchCompleted ? "FIN" : "LIVE"}
+                </p>
+                <p className="text-[10px] text-neutral-500">
+                  {isMatchCompleted ? formatDate(match.date) : "ĐANG DIỄN RA"}
+                </p>
+              </div>
+              <span className="text-4xl font-black tabular-nums text-white">
+                {match.team2.score}
               </span>
             </div>
-          </div>
+
+            <div className="flex items-center gap-3 px-1 py-1">
+              <img
+                src={match.team2.logo}
+                alt={match.team2.tag}
+                className="h-9 w-9 shrink-0"
+              />
+              <div className="min-w-0 text-left">
+                <span className="block text-sm font-extrabold uppercase tracking-wide text-white">
+                  {match.team2.name}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

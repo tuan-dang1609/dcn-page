@@ -1,25 +1,16 @@
 import { Elysia } from "elysia";
-
 import middleware from "../../utils/middleware.js";
-
-import { normalizeAovParsedPayload } from "../../utils/aovPayload.js";
-
+import { pool } from "../../utils/db.js";
+import { normalizeAovImportBatch } from "../../utils/aovPayload.js";
 import {
-
   ensureAovStatsTables,
-
   getMatchGameStats,
-
   getMatchStatsByMatchId,
-
 } from "../../utils/aovMatchStatsDb.js";
-
 import {
-
   createStagedAovStats,
-
+  ensureMatchAovStatsFromStaging,
   getStagedAovStats,
-
 } from "../../utils/aovStagingDb.js";
 
 
@@ -83,81 +74,56 @@ aovStatsRouter.onBeforeHandle(async () => {
 
 
 aovStatsRouter.post(
-
   "/aov/staging/generate",
-
   async ({ body, set, user }) => {
-
     const permission = ensureOpsPermission(user, set);
-
     if (!permission.ok) return permission.error;
 
-
-
     const rawBody = body?.data ?? body;
+    const batch = normalizeAovImportBatch(rawBody);
 
-    const parsed = normalizeAovParsedPayload(rawBody);
-
-
-
-    if (!parsed.players.blue.length && !parsed.players.red.length) {
-
+    if (!batch.length) {
       set.status = 400;
-
       return { error: "Payload không có dữ liệu người chơi" };
-
     }
-
-
 
     try {
-
-      const result = await createStagedAovStats({
-
-        rawPayload: parsed,
-
-        userId: user?.id,
-
-      });
-
-
+      const items = [];
+      for (const parsed of batch) {
+        const result = await createStagedAovStats({
+          rawPayload: parsed,
+          userId: user?.id,
+        });
+        items.push(result);
+      }
 
       set.status = 201;
-
       return {
-
         status: "success",
-
         message:
-
-          "Đã tạo match_id. Dán match_id này vào Score Control (ô info_game_id).",
-
-        data: result,
-
+          items.length === 1
+            ? "Đã tạo match_id. Dán vào Score Control (ô info_game_id)."
+            : `Đã tạo ${items.length} match_id (mỗi ván một id). Dán lần lượt vào Game 1/2/… trên Score Control.`,
+        data: {
+          count: items.length,
+          items,
+          // tương thích client cũ: 1 ván → trả luôn object đầu
+          ...(items.length === 1
+            ? { match_id: items[0].match_id, data: items[0].data }
+            : {}),
+        },
       };
-
     } catch (error) {
-
       set.status = 500;
-
       return {
-
         error: error instanceof Error ? error.message : "Generate failed",
-
       };
-
     }
-
   },
-
   {
-
     tags: [TAG],
-
-    summary: "Tạo match_id AOV + lưu stats tạm (gắn trận ở Score Control)",
-
+    summary: "Tạo match_id AOV (1 JSON = 1 ván, mảng = nhiều ván)",
   },
-
 );
 
 
@@ -267,41 +233,50 @@ aovStatsRouter.get(
 
 
 aovStatsRouter.get(
-
   "/matches/:match_id/aov/stats",
-
   async ({ params, set }) => {
-
     const matchId = toNumber(params.match_id);
 
-
-
     if (!matchId) {
-
       set.status = 400;
-
       return { error: "match_id không hợp lệ" };
-
     }
 
-
+    // Tự áp lại staging nếu đã dán aov:… mà chưa có player stats
+    await ensureMatchAovStatsFromStaging(matchId);
 
     const data = await getMatchStatsByMatchId(matchId);
 
+    // Series score từ bảng matches (Score Control) — không tính từ kill từng ván
+    const { rows: matchRows } = await pool.query(
+      `
+      SELECT score_a, score_b, winner_team_id, status
+      FROM matches
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [matchId],
+    );
+    const matchRow = matchRows[0] ?? null;
+
     set.status = 200;
-
-    return { status: "success", data };
-
+    return {
+      status: "success",
+      data,
+      series: matchRow
+        ? {
+            score_a: toNumber(matchRow.score_a) ?? 0,
+            score_b: toNumber(matchRow.score_b) ?? 0,
+            winner_team_id: toNumber(matchRow.winner_team_id),
+            status: matchRow.status ?? null,
+          }
+        : null,
+    };
   },
-
   {
-
     tags: [TAG],
-
     summary: "Lấy tất cả ván AOV của một match series",
-
   },
-
 );
 
 

@@ -21,6 +21,8 @@ export interface PlayerStat {
   icon: string;
   avatar?: string;
   riotAccount?: string;
+  /** IGN gốc trong game (AOV) — dùng để remap đội */
+  originalIgn?: string;
   kills?: number;
   deaths?: number;
   plusMinus?: number;

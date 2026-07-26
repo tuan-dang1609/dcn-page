@@ -31,39 +31,40 @@ import {
 const allowedRoleIds = new Set([1, 2, 3]);
 
 const JSON_TEMPLATE = JSON.stringify(
-  {
-    match_id: null,
-    game: {
-      blue_kills: 19,
-      red_kills: 1,
-      duration_sec: 474,
-      winner_side: "blue",
+  [
+    {
+      game: {
+        blue_kills: 19,
+        red_kills: 1,
+        duration_sec: 474,
+        winner_side: "blue",
+      },
+      players: {
+        blue: [
+          {
+            slot: 1,
+            ign: "TenInGame1",
+            performance_score: 14.8,
+            kills: 10,
+            deaths: 0,
+            assists: 4,
+            gold: 6947,
+          },
+        ],
+        red: [
+          {
+            slot: 1,
+            ign: "TenInGame3",
+            performance_score: 5.6,
+            kills: 0,
+            deaths: 2,
+            assists: 1,
+            gold: 4079,
+          },
+        ],
+      },
     },
-    players: {
-      blue: [
-        {
-          slot: 1,
-          ign: "TenInGame1",
-          performance_score: 14.8,
-          kills: 10,
-          deaths: 0,
-          assists: 4,
-          gold: 6947,
-        },
-      ],
-      red: [
-        {
-          slot: 1,
-          ign: "TenInGame3",
-          performance_score: 5.6,
-          kills: 0,
-          deaths: 2,
-          assists: 1,
-          gold: 4079,
-        },
-      ],
-    },
-  },
+  ],
   null,
   2,
 );
@@ -100,6 +101,31 @@ const normalizeParsed = (raw: Record<string, unknown>): AovParsedPayload => {
       red: padSide(players.red ?? []),
     },
   };
+};
+
+/** 1 object = 1 ván; mảng / { games } / { data } = nhiều ván */
+const parseImportGames = (raw: unknown): AovParsedPayload[] => {
+  let list: unknown[] = [];
+
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj.games)) list = obj.games;
+    else if (Array.isArray(obj.data)) list = obj.data;
+    else list = [raw];
+  }
+
+  return list
+    .filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === "object"),
+    )
+    .map((item) => normalizeParsed(item))
+    .filter(
+      (game) =>
+        game.players.blue.some((p) => p.ign.trim()) ||
+        game.players.red.some((p) => p.ign.trim()),
+    );
 };
 
 const copyText = async (label: string, value: string) => {
@@ -202,11 +228,13 @@ const AovStatsImportPage = () => {
   const { user, token, isLoading } = useAuth();
 
   const [jsonInput, setJsonInput] = useState(JSON_TEMPLATE);
-  const [parsed, setParsed] = useState<AovParsedPayload | null>(null);
-  const [generated, setGenerated] = useState<AovStagingResult | null>(null);
+  const [games, setGames] = useState<AovParsedPayload[]>([]);
+  const [activeGame, setActiveGame] = useState(0);
+  const [generatedItems, setGeneratedItems] = useState<AovStagingResult[]>([]);
   const [generating, setGenerating] = useState(false);
 
   const hasAccess = allowedRoleIds.has(Number(user?.role_id));
+  const parsed = games[activeGame] ?? null;
 
   useEffect(() => {
     if (isLoading) return;
@@ -224,9 +252,26 @@ const AovStatsImportPage = () => {
 
   const handleParseJson = () => {
     try {
-      const raw = JSON.parse(jsonInput) as Record<string, unknown>;
-      setParsed(normalizeParsed(raw));
-      toast({ title: "Đã parse JSON", description: "Kiểm tra bảng rồi Generate match_id." });
+      const raw = JSON.parse(jsonInput) as unknown;
+      const nextGames = parseImportGames(raw);
+      if (!nextGames.length) {
+        toast({
+          title: "Không có ván hợp lệ",
+          description: "Cần ít nhất 1 object có players.blue/red",
+          variant: "destructive",
+        });
+        return;
+      }
+      setGames(nextGames);
+      setActiveGame(0);
+      setGeneratedItems([]);
+      toast({
+        title: `Đã parse ${nextGames.length} ván`,
+        description:
+          nextGames.length === 1
+            ? "Kiểm tra bảng rồi Generate match_id."
+            : "Mỗi ván sẽ ra 1 match_id riêng khi Generate.",
+      });
     } catch (error) {
       toast({
         title: "JSON không hợp lệ",
@@ -242,9 +287,12 @@ const AovStatsImportPage = () => {
     key: keyof AovPlayerRow,
     value: string,
   ) => {
-    setParsed((prev) => {
-      if (!prev) return prev;
-      const list = [...prev.players[side]];
+    setGames((prev) => {
+      const next = [...prev];
+      const currentGame = next[activeGame];
+      if (!currentGame) return prev;
+
+      const list = [...currentGame.players[side]];
       const current = { ...list[index] };
 
       if (key === "ign") current.ign = value;
@@ -255,39 +303,67 @@ const AovStatsImportPage = () => {
       }
 
       list[index] = current;
-      return { ...prev, players: { ...prev.players, [side]: list } };
+      next[activeGame] = {
+        ...currentGame,
+        players: { ...currentGame.players, [side]: list },
+      };
+      return next;
+    });
+  };
+
+  const updateGameField = (field: "blue_kills" | "red_kills", value: string) => {
+    setGames((prev) => {
+      const next = [...prev];
+      const currentGame = next[activeGame];
+      if (!currentGame) return prev;
+      next[activeGame] = {
+        ...currentGame,
+        game: {
+          ...currentGame.game,
+          [field]: Number(value) || 0,
+        },
+      };
+      return next;
     });
   };
 
   const handleGenerate = async () => {
-    if (!parsed) {
+    if (!games.length) {
       toast({ title: "Parse JSON trước", variant: "destructive" });
       return;
     }
 
-    const payload: AovParsedPayload = {
-      ...parsed,
+    const payload = games.map((game) => ({
+      ...game,
       players: {
-        blue: parsed.players.blue.filter((p) => p.ign.trim()),
-        red: parsed.players.red.filter((p) => p.ign.trim()),
+        blue: game.players.blue.filter((p) => p.ign.trim()),
+        red: game.players.red.filter((p) => p.ign.trim()),
       },
-    };
+    }));
 
     setGenerating(true);
     try {
-      const response = await generateAovStagingStats(payload);
-      const result = response.data?.data;
-      setGenerated(result ?? null);
+      const response = await generateAovStagingStats(
+        payload.length === 1 ? payload[0] : payload,
+      );
+      const batch = response.data?.data;
+      const items = batch?.items?.length
+        ? batch.items
+        : batch?.match_id
+          ? [{ match_id: batch.match_id, data: batch.data! }]
+          : [];
 
-      if (result) {
-        setJsonInput(JSON.stringify(result.data, null, 2));
-      }
+      setGeneratedItems(items);
 
       toast({
-        title: "Đã tạo match_id",
-        description: result?.match_id
-          ? `${result.match_id} — dán vào Score Control`
-          : undefined,
+        title:
+          items.length === 1
+            ? "Đã tạo match_id"
+            : `Đã tạo ${items.length} match_id`,
+        description:
+          items.length === 1
+            ? `${items[0].match_id} — dán vào Score Control (Game 1)`
+            : "Dán lần lượt vào Game 1, Game 2, … trên Score Control",
       });
     } catch (error: unknown) {
       const message =
@@ -304,10 +380,6 @@ const AovStatsImportPage = () => {
   }
 
   if (!hasAccess) return null;
-
-  const scoreControlUrl = generated?.match_id
-    ? `/ops/score-control?infoGameId=${encodeURIComponent(generated.match_id)}`
-    : "/ops/score-control";
 
   return (
     <div className="min-h-screen bg-background px-4 py-8">
@@ -329,9 +401,9 @@ const AovStatsImportPage = () => {
             <div>
               <h1 className="text-2xl font-bold">Tạo match_id AOV / Liên Quân</h1>
               <p className="text-sm text-muted-foreground">
-                Trang này chỉ nhập stats và generate <strong>match_id</strong> (vd:
-                aov:abc123). Không gắn trực tiếp vào trận giải. Sang Score Control
-                dán match_id vào ô <strong>info_game_id</strong> của trận cần gán.
+                Paste <strong>1 object</strong> → 1 match_id · Paste{" "}
+                <strong>mảng 2+ ván</strong> → mỗi ván một match_id. Sang Score
+                Control dán vào Game 1 / Game 2 / …
               </p>
             </div>
           </div>
@@ -341,8 +413,8 @@ const AovStatsImportPage = () => {
           <CardHeader>
             <CardTitle>1. Nhập stats (JSON)</CardTitle>
             <CardDescription>
-              blue = team A (trái), red = team B (phải). Chưa có match_id cho đến
-              khi bấm Generate.
+              blue = team A (trái), red = team B (phải). Hỗ trợ object đơn hoặc
+              mảng <code className="text-xs">[ game1, game2 ]</code>.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -358,8 +430,9 @@ const AovStatsImportPage = () => {
                 variant="outline"
                 onClick={() => {
                   setJsonInput(JSON_TEMPLATE);
-                  setParsed(null);
-                  setGenerated(null);
+                  setGames([]);
+                  setActiveGame(0);
+                  setGeneratedItems([]);
                 }}
               >
                 <ClipboardPaste className="h-4 w-4 mr-2" />
@@ -372,56 +445,72 @@ const AovStatsImportPage = () => {
           </CardContent>
         </Card>
 
-        {parsed ? (
+        {games.length ? (
           <Card>
             <CardHeader>
-              <CardTitle>2. Kiểm tra &amp; Generate match_id</CardTitle>
+              <CardTitle>
+                2. Kiểm tra &amp; Generate{" "}
+                {games.length > 1 ? `${games.length} match_id` : "match_id"}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-2 gap-3 max-w-md">
-                <div>
-                  <label className="text-xs text-muted-foreground">Blue kills</label>
-                  <Input
-                    value={parsed.game.blue_kills}
-                    onChange={(e) =>
-                      setParsed({
-                        ...parsed,
-                        game: {
-                          ...parsed.game,
-                          blue_kills: Number(e.target.value) || 0,
-                        },
-                      })
-                    }
-                  />
+              {games.length > 1 ? (
+                <div className="flex flex-wrap gap-2">
+                  {games.map((_, index) => (
+                    <Button
+                      key={`game-tab-${index}`}
+                      type="button"
+                      size="sm"
+                      variant={activeGame === index ? "default" : "outline"}
+                      onClick={() => setActiveGame(index)}
+                    >
+                      Ván {index + 1}
+                    </Button>
+                  ))}
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground">Red kills</label>
-                  <Input
-                    value={parsed.game.red_kills}
-                    onChange={(e) =>
-                      setParsed({
-                        ...parsed,
-                        game: {
-                          ...parsed.game,
-                          red_kills: Number(e.target.value) || 0,
-                        },
-                      })
-                    }
+              ) : null}
+
+              {parsed ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3 max-w-md">
+                    <div>
+                      <label className="text-xs text-muted-foreground">
+                        Blue kills
+                      </label>
+                      <Input
+                        value={parsed.game.blue_kills}
+                        onChange={(e) =>
+                          updateGameField("blue_kills", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">
+                        Red kills
+                      </label>
+                      <Input
+                        value={parsed.game.red_kills}
+                        onChange={(e) =>
+                          updateGameField("red_kills", e.target.value)
+                        }
+                      />
+                    </div>
+                  </div>
+                  <PlayerTable
+                    title="Đội xanh (team A)"
+                    side="blue"
+                    players={parsed.players.blue}
+                    onChange={updatePlayerField}
                   />
-                </div>
-              </div>
-              <PlayerTable
-                title="Đội xanh (team A)"
-                side="blue"
-                players={parsed.players.blue}
-                onChange={updatePlayerField}
-              />
-              <PlayerTable
-                title="Đội đỏ (team B)"
-                side="red"
-                players={parsed.players.red}
-                onChange={updatePlayerField}
-              />
+                  <PlayerTable
+                    title="Đội đỏ (team B)"
+                    side="red"
+                    players={parsed.players.red}
+                    onChange={updatePlayerField}
+                  />
+                </>
+              ) : null}
+
               <Button
                 type="button"
                 className="gap-2"
@@ -433,42 +522,60 @@ const AovStatsImportPage = () => {
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
-                Generate match_id
+                {games.length > 1
+                  ? `Generate ${games.length} match_id`
+                  : "Generate match_id"}
               </Button>
             </CardContent>
           </Card>
         ) : null}
 
-        {generated?.match_id ? (
+        {generatedItems.length ? (
           <Card className="border-primary/30">
             <CardHeader>
               <CardTitle>3. Dán vào Score Control</CardTitle>
               <CardDescription>
-                Mở Score Control → chọn trận giải → thêm info_game_id → dán match_id
-                bên dưới → chọn Game 1/2/3 (BO) → Lưu. Stats tự áp vào trận đó.
+                {generatedItems.length === 1
+                  ? "Dán match_id vào info_game_id (Game 1)."
+                  : `Có ${generatedItems.length} ván — dán Ván 1 → Game 1, Ván 2 → Game 2, …`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-md border border-border p-4 space-y-2">
-                <p className="text-xs text-muted-foreground">match_id (dán vào info_game_id)</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <code className="text-base font-semibold">{generated.match_id}</code>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void copyText("match_id", generated.match_id)}
-                  >
-                    <Clipboard className="h-3 w-3 mr-1" />
-                    Copy
-                  </Button>
+              {generatedItems.map((item, index) => (
+                <div
+                  key={item.match_id}
+                  className="rounded-md border border-border p-4 space-y-2"
+                >
+                  <p className="text-xs text-muted-foreground">
+                    Ván {index + 1} → dán vào Game {index + 1} (info_game_id)
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="text-base font-semibold">
+                      {item.match_id}
+                    </code>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void copyText("match_id", item.match_id)}
+                    >
+                      <Clipboard className="h-3 w-3 mr-1" />
+                      Copy
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              ))}
               <Button
                 type="button"
                 variant="secondary"
                 className="gap-2"
-                onClick={() => navigate(scoreControlUrl)}
+                onClick={() =>
+                  navigate(
+                    generatedItems[0]
+                      ? `/ops/score-control?infoGameId=${encodeURIComponent(generatedItems[0].match_id)}`
+                      : "/ops/score-control",
+                  )
+                }
               >
                 <ExternalLink className="h-4 w-4" />
                 Mở Score Control

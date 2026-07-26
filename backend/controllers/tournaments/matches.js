@@ -7,7 +7,7 @@ import { scheduleTournamentResultsRecalculate } from "../../utils/tournamentRank
 import {
   applyMatchProgression,
 } from "../../utils/bracketProgression.js";
-import { tryApplyStagedAovStats } from "../../utils/aovStagingDb.js";
+import { tryApplyStagedAovStats, ensureMatchAovStatsFromStaging } from "../../utils/aovStagingDb.js";
 import {
   fetchTftMatchData,
   fetchValorantMatchData,
@@ -789,15 +789,12 @@ matchRouter.post(
       return { error: "Không thể đọc dữ liệu game vừa tạo" };
     }
 
-    const existingRoomId = String(match.room_id ?? "").trim();
-    const shouldAutofillRoomId = !existingRoomId && gameNo === 1;
-    const roomIdToPersist =
-      roomIdFromPayload || (shouldAutofillRoomId ? infoGameId : null);
+    // Chỉ cập nhật room_id khi client gửi rõ room_id — không autofill từ info_game_id
+    // (trước đây copy aov:… / staging vào room_id gây nhầm)
+    let effectiveRoomId = String(match.room_id ?? "").trim() || null;
 
-    let effectiveRoomId = existingRoomId || null;
-
-    if (roomIdToPersist) {
-      const normalizedRoomId = String(roomIdToPersist).trim();
+    if (roomIdFromPayload) {
+      const normalizedRoomId = String(roomIdFromPayload).trim();
 
       if (normalizedRoomId) {
         await pool.query(
@@ -1120,11 +1117,21 @@ matchRouter.patch(
       [nextRoomId, matchId],
     );
 
+    let aovApply = null;
+    if (nextRoomId) {
+      try {
+        aovApply = await ensureMatchAovStatsFromStaging(matchId);
+      } catch {
+        aovApply = null;
+      }
+    }
+
     set.status = 200;
     return {
       message: "Cập nhật room_id thành công",
       data: {
         match: rows[0] ?? null,
+        aov_apply: aovApply,
       },
     };
   },
@@ -1251,11 +1258,21 @@ matchRouter.patch(
       [nextRoomId, matchId],
     );
 
+    let aovApply = null;
+    if (nextRoomId) {
+      try {
+        aovApply = await ensureMatchAovStatsFromStaging(matchId);
+      } catch {
+        aovApply = null;
+      }
+    }
+
     set.status = 200;
     return {
       message: "Cập nhật room_id thành công",
       data: {
         match: rows[0] ?? null,
+        aov_apply: aovApply,
       },
     };
   },

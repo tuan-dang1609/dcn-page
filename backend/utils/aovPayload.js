@@ -78,3 +78,25 @@ export const normalizeAovParsedPayload = (raw) => {
     },
   };
 };
+
+/** 1 object = 1 ván; mảng = nhiều ván; { games: [...] } cũng được. */
+export const normalizeAovImportBatch = (raw) => {
+  let list = [];
+
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (Array.isArray(raw?.games)) {
+    list = raw.games;
+  } else if (Array.isArray(raw?.data)) {
+    list = raw.data;
+  } else if (raw && typeof raw === "object") {
+    list = [raw];
+  }
+
+  return list
+    .map((item) => normalizeAovParsedPayload(item))
+    .filter(
+      (parsed) =>
+        parsed.players.blue.length > 0 || parsed.players.red.length > 0,
+    );
+};

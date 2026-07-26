@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -140,6 +141,15 @@ const normalizeInfoGameIdInput = (rawValue: string, provider?: string) => {
   const normalizedProvider = normalizeProviderKey(provider);
   const uuidPattern =
     /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+
+  // AOV staging: giữ/khôi phục prefix aov:
+  if (/^aov:/i.test(trimmed)) return trimmed;
+  if (
+    (normalizedProvider === "aov" || normalizedProvider === "lienquan") &&
+    /^[a-z0-9_-]{8,}$/i.test(trimmed)
+  ) {
+    return `aov:${trimmed}`;
+  }
 
   const uuidInText = trimmed.match(uuidPattern)?.[0] ?? "";
   if (normalizedProvider === "valorant" && uuidInText) {
@@ -335,6 +345,7 @@ const createEditGameIdDraft = (item: MatchGameIdRecord): EditGameIdDraft => ({
 const ScoreControlPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const { user, token, isLoading } = useAuth();
   const deepLinkHandledRef = useRef(false);
   const focusMatchIdRef = useRef<number | null>(null);
@@ -1067,12 +1078,33 @@ const ScoreControlPage = () => {
       const rankingScheduled = Boolean(
         response?.data?.data?.ranking_sync?.scheduled,
       );
+      const saved = response?.data?.data?.match;
+      const savedA = toNumber(saved?.score_a);
+      const savedB = toNumber(saved?.score_b);
 
       toast({
         title: "Cập nhật điểm thành công",
-        description: rankingScheduled
-          ? `Match #${match.id} đã lưu. BXH đang được cập nhật tự động.`
-          : `Match #${match.id} đã được cập nhật.`,
+        description:
+          savedA !== null && savedB !== null
+            ? `Match #${match.id}: ${savedA}-${savedB}${
+                rankingScheduled ? " · BXH đang cập nhật." : ""
+              }`
+            : rankingScheduled
+              ? `Match #${match.id} đã lưu. BXH đang được cập nhật tự động.`
+              : `Match #${match.id} đã được cập nhật.`,
+      });
+
+      const tournamentId = toNumber(tournamentIdInput);
+      if (tournamentId) {
+        await queryClient.invalidateQueries({
+          queryKey: ["tournament-match-list-all-brackets", tournamentId],
+        });
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["aov-match-detail", match.id],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["aov-match-detail", Number(match.id)],
       });
 
       const bracketId = toNumber(selectedBracketId);
