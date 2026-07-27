@@ -1,7 +1,7 @@
 export const BRACKET_BG_CLASS = "";
 
-export const BRACKET_MATCH_TITLE_H = 32;
-export const BRACKET_MATCH_FOOTER_H = 28;
+export const BRACKET_MATCH_TITLE_H = 34;
+export const BRACKET_MATCH_FOOTER_H = 30;
 
 export type BracketMatchDisplayStatus =
   | "upcoming"
@@ -18,22 +18,48 @@ export const getMatchCardConnectorY = (top: number, rowH: number): number =>
 export const getBracketMatchCardHeight = (rowH: number): number =>
   BRACKET_MATCH_TITLE_H + rowH * 2 + BRACKET_MATCH_FOOTER_H;
 
-export const normalizeBracketMatchStatus = (
+export const isBracketMatchCompletedStatus = (
   status?: string | null,
-): BracketMatchDisplayStatus => {
+): boolean => {
   const normalized = String(status ?? "")
     .trim()
     .toLowerCase();
+  return ["complete", "completed", "done", "finished"].includes(normalized);
+};
 
-  if (["complete", "completed", "done", "finished"].includes(normalized)) {
+export const isBracketMatchOngoingStatus = (
+  status?: string | null,
+): boolean => {
+  const normalized = String(status ?? "")
+    .trim()
+    .toLowerCase();
+  return ["ongoing", "live", "in_progress", "in-progress", "playing"].includes(
+    normalized,
+  );
+};
+
+const hasReachedScheduledTime = (dateScheduled?: string | null): boolean => {
+  const raw = String(dateScheduled ?? "").trim();
+  if (!raw) return false;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.getTime() <= Date.now();
+};
+
+export const normalizeBracketMatchStatus = (
+  status?: string | null,
+  dateScheduled?: string | null,
+): BracketMatchDisplayStatus => {
+  if (isBracketMatchCompletedStatus(status)) {
     return "completed";
   }
 
-  if (
-    ["ongoing", "live", "in_progress", "in-progress", "playing"].includes(
-      normalized,
-    )
-  ) {
+  if (isBracketMatchOngoingStatus(status)) {
+    return "ongoing";
+  }
+
+  // Tới giờ trận → hiện ĐANG DIỄN RA (kể cả DB còn scheduled)
+  if (hasReachedScheduledTime(dateScheduled)) {
     return "ongoing";
   }
 
@@ -42,8 +68,9 @@ export const normalizeBracketMatchStatus = (
 
 export const getBracketMatchStatusLabel = (
   status?: string | null,
+  dateScheduled?: string | null,
 ): string => {
-  const display = normalizeBracketMatchStatus(status);
+  const display = normalizeBracketMatchStatus(status, dateScheduled);
   if (display === "completed") return "ĐÃ KẾT THÚC";
   if (display === "ongoing") return "ĐANG DIỄN RA";
   return "SẮP DIỄN RA";
@@ -98,13 +125,13 @@ export const BRACKET_ROW_WRONG_CLASS =
   "bg-rose-950/40 text-rose-100 font-semibold border-l-[3px] border-l-rose-400";
 
 export const BRACKET_MATCH_TITLE_CLASS =
-  "flex h-8 shrink-0 items-center justify-center bg-[#D1D5DB] px-2 text-[10px] font-extrabold uppercase leading-tight tracking-wider text-neutral-900";
+  "flex h-[34px] shrink-0 items-center justify-center bg-[#D1D5DB] px-2 text-[12px] font-extrabold uppercase leading-tight tracking-wider text-neutral-900";
 
 export const BRACKET_HEADER_CLASS =
-  "bg-[#D1D5DB] px-4 py-2 text-xs font-extrabold uppercase tracking-widest text-neutral-900 text-center";
+  "bg-[#D1D5DB] px-4 py-2 text-sm font-extrabold uppercase tracking-widest text-neutral-900 text-center";
 
 export const BRACKET_STAGE_HEADER_CLASS =
-  "flex h-8 shrink-0 items-center justify-between bg-[#D1D5DB] px-3 text-[11px] font-extrabold uppercase tracking-widest text-neutral-900";
+  "flex h-9 shrink-0 items-center justify-between bg-[#D1D5DB] px-3 text-xs font-extrabold uppercase tracking-widest text-neutral-900";
 
 export const BRACKET_STAGE_WRAPPER_CLASS =
   "overflow-hidden border border-neutral-600 bg-[#141414] box-border";
@@ -118,7 +145,7 @@ export const BRACKET_OUTCOME_DOT_COLORS = {
 } as const;
 
 export const BRACKET_SIDE_TITLE_CLASS =
-  "text-sm font-extrabold uppercase tracking-widest text-white";
+  "text-base font-extrabold uppercase tracking-widest text-white";
 
 export const BRACKET_SIDE_TEAM_ROW_CLASS =
   "flex h-11 items-center gap-2 border border-neutral-600 bg-[#141414] px-3 transition-all duration-150";

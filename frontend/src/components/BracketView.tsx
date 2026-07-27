@@ -29,11 +29,12 @@ import {
   getBracketMatchCardHeight,
   getMatchCardConnectorY,
   getBracketRowStateClass,
+  isBracketMatchCompletedStatus,
 } from "@/components/bracketTheme";
 import { BracketMatchCardShell } from "@/components/BracketMatchCardShell";
 
-const CARD_W = 268;
-const ROW_H = 44;
+const CARD_W = 284;
+const ROW_H = 48;
 const ROW_BLOCK_H = ROW_H * 2;
 const CARD_H = getBracketMatchCardHeight(ROW_H);
 const CONN_W = 48;
@@ -175,18 +176,20 @@ const toDisplayMatches = (
       const p2Logo = (match as any)?.team_b?.logo_url ?? null;
 
       let winner: string | null = null;
-      if (winnerTeamId) {
-        // if winnerTeamId matches embedded team, use embedded name
-        if ((match as any)?.team_a?.id === winnerTeamId)
-          winner =
-            (match as any)?.team_a?.name ?? getTeamLabel(teamAId, teamNameById);
-        else if ((match as any)?.team_b?.id === winnerTeamId)
-          winner =
-            (match as any)?.team_b?.name ?? getTeamLabel(teamBId, teamNameById);
-        else winner = getTeamLabel(winnerTeamId, teamNameById);
-      } else if (scoreA !== null && scoreB !== null) {
-        if (scoreA > scoreB && teamAId) winner = p1Name;
-        if (scoreB > scoreA && teamBId) winner = p2Name;
+      if (isBracketMatchCompletedStatus(match.status)) {
+        if (winnerTeamId) {
+          // if winnerTeamId matches embedded team, use embedded name
+          if ((match as any)?.team_a?.id === winnerTeamId)
+            winner =
+              (match as any)?.team_a?.name ?? getTeamLabel(teamAId, teamNameById);
+          else if ((match as any)?.team_b?.id === winnerTeamId)
+            winner =
+              (match as any)?.team_b?.name ?? getTeamLabel(teamBId, teamNameById);
+          else winner = getTeamLabel(winnerTeamId, teamNameById);
+        } else if (scoreA !== null && scoreB !== null) {
+          if (scoreA > scoreB && teamAId) winner = p1Name;
+          if (scoreB > scoreA && teamBId) winner = p2Name;
+        }
       }
 
       return {
@@ -225,6 +228,10 @@ const getResolvedWinnerTeamId = (
     (pickedTeamId === match.teamAId || pickedTeamId === match.teamBId)
   ) {
     return pickedTeamId;
+  }
+
+  if (!isBracketMatchCompletedStatus(match.status)) {
+    return null;
   }
 
   if (
@@ -408,11 +415,11 @@ const PlayerRow = ({
         onPick(teamId);
       }}
     >
-      <span className="flex items-center gap-2 text-sm truncate flex-1">
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[15px]">
         <BracketTeamIcon teamId={teamId} logoUrl={logo_url} />
         {name}
       </span>
-      <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
+      <span className="ml-2 w-7 text-right text-base font-bold tabular-nums">
         {formatBracketSideScore(score, otherScore)}
       </span>
     </div>
@@ -461,15 +468,17 @@ const MatchCard = ({
   const pickStatus = realMatchId
     ? pickStatusByMatchId?.[realMatchId]
     : undefined;
-  const officialWinnerTeamId =
-    pickStatus?.winnerTeamId ??
-    (s1 !== null && s2 !== null
-      ? s1 > s2
-        ? teamAId
-        : s2 > s1
-          ? teamBId
-          : null
-      : null);
+  const isMatchCompleted = isBracketMatchCompletedStatus(match.status);
+  const officialWinnerTeamId = isMatchCompleted
+    ? pickStatus?.winnerTeamId ??
+      (s1 !== null && s2 !== null
+        ? s1 > s2
+          ? teamAId
+          : s2 > s1
+            ? teamBId
+            : null
+        : null)
+    : null;
 
   const resolvePickState = (teamId: number | null): PickVisualState | null => {
     if (!teamId || selectedTeamId !== teamId) return null;
@@ -492,11 +501,6 @@ const MatchCard = ({
   };
 
   const canPick = Boolean(onPickTeam && realMatchId);
-  const isMatchCompleted = ["complete", "completed"].includes(
-    String(match.status ?? "")
-      .trim()
-      .toLowerCase(),
-  );
 
   const content = (
     <>
@@ -506,7 +510,7 @@ const MatchCard = ({
         name={p1}
         score={s1}
         otherScore={s2}
-        isWinner={winner === p1}
+        isWinner={isMatchCompleted && winner === p1}
         isSelected={selectedTeamId === teamAId}
         pickState={resolvePickState(teamAId)}
         isHoveredTeam={hoveredTeamId === teamAId}
@@ -523,7 +527,7 @@ const MatchCard = ({
         name={p2}
         score={s2}
         otherScore={s1}
-        isWinner={winner === p2}
+        isWinner={isMatchCompleted && winner === p2}
         isSelected={selectedTeamId === teamBId}
         pickState={resolvePickState(teamBId)}
         isHoveredTeam={hoveredTeamId === teamBId}
@@ -721,10 +725,11 @@ const SingleElimBracket = ({
         matches: response.data?.data ?? [],
       };
     },
-    staleTime: Number.POSITIVE_INFINITY,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   const singleElimMatches = useMemo(

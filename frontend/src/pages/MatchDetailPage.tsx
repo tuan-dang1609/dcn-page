@@ -484,6 +484,12 @@ const enrichMatchWithLinkedProfiles = (
             linkedPlayer?.profile_picture ||
             linked.avatar ||
             player.avatar,
+          icon:
+            linkedPlayer?.profile_picture ||
+            linked.avatar ||
+            (isNumberedPlayerPlaceholder(player.icon)
+              ? undefined
+              : player.icon),
         };
       }),
     };
@@ -532,14 +538,18 @@ const enrichMatchWithLinkedProfiles = (
         String(row.ign ?? "").trim() ||
         row.name;
 
+      const avatar =
+        String(linkedPlayer?.profile_picture ?? "").trim() ||
+        String(hit?.profile_picture ?? "").trim() ||
+        String(row.avatar ?? "").trim() ||
+        undefined;
+
       return {
         ...row,
         name: displayName,
         originalIgn: row.matched_from_ign || row.originalIgn || undefined,
-        avatar:
-          linkedPlayer?.profile_picture ||
-          hit?.profile_picture ||
-          row.avatar,
+        avatar,
+        icon: avatar || (isNumberedPlayerPlaceholder(row.icon) ? undefined : row.icon),
       };
     };
 
@@ -873,6 +883,57 @@ const buildTeamTag = (name?: string | null, shortName?: string | null) => {
 const buildPlaceholderLogo = (teamTag: string) =>
   `https://placehold.co/80x80/1f2937/ffffff?text=${encodeURIComponent(teamTag)}`;
 
+/** Avatar số placehold.co — không dùng làm ảnh người chơi */
+const isNumberedPlayerPlaceholder = (url?: string | null): boolean => {
+  const raw = String(url ?? "").trim().toLowerCase();
+  if (!raw) return false;
+  return (
+    raw.includes("placehold.co/") &&
+    (/[?&]text=\d+(\b|&|$)/.test(raw) || /text=%3[0-9]/.test(raw))
+  );
+};
+
+const resolvePlayerAvatarUrl = (player: {
+  avatar?: string | null;
+  icon?: string | null;
+}): string | undefined => {
+  const avatar = String(player.avatar ?? "").trim();
+  if (avatar && !isNumberedPlayerPlaceholder(avatar)) return avatar;
+
+  const icon = String(player.icon ?? "").trim();
+  if (icon && !isNumberedPlayerPlaceholder(icon)) return icon;
+
+  return undefined;
+};
+
+const PlayerStatAvatar = ({
+  player,
+}: {
+  player: { avatar?: string | null; icon?: string | null; name?: string };
+}) => {
+  const [failed, setFailed] = useState(false);
+  const src = resolvePlayerAvatarUrl(player);
+  const initial =
+    String(player.name ?? "?").trim().charAt(0).toUpperCase() || "?";
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="h-5 w-5 shrink-0 rounded-sm object-cover sm:h-6 sm:w-6"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-neutral-800 text-[10px] font-bold text-neutral-300 sm:h-6 sm:w-6 sm:text-[11px]">
+      {initial}
+    </div>
+  );
+};
+
 const buildMatchDetailFromApi = ({
   match,
   tournament,
@@ -972,12 +1033,13 @@ const toTeamPlayerStat = (
 ) => {
   const normalizedNickname = String(player?.nickname ?? "").trim();
   const normalizedRiot = String(player?.riot_account ?? "").trim();
+  const avatar = String(player?.profile_picture ?? "").trim() || undefined;
 
   return {
     name: normalizedNickname || normalizedRiot || `Player ${fallbackIndex + 1}`,
     riotAccount: normalizedRiot || undefined,
-    icon: `https://placehold.co/24x24/111827/ffffff?text=${fallbackIndex + 1}`,
-    avatar: String(player?.profile_picture ?? "").trim() || undefined,
+    icon: avatar,
+    avatar,
   };
 };
 
@@ -1048,9 +1110,7 @@ const mergeTftApiIntoMatch = (
       return {
         name,
         riotAccount: riotAccount || undefined,
-        icon:
-          linkedAvatar ||
-          `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
+        icon: linkedAvatar || undefined,
         avatar: linkedAvatar,
         placement: toNumber(participant.placement) ?? 8,
         side: inferredSide,
@@ -1148,11 +1208,16 @@ const toAovPlayerStat = (
   const displayName = String(player.ign ?? "").trim() || `Player ${index + 1}`;
   const originalIgn =
     String(player.matched_from_ign ?? "").trim() || displayName;
+  const avatar =
+    String(
+      (player as { profile_picture?: string | null }).profile_picture ?? "",
+    ).trim() || undefined;
 
   return {
     name: displayName,
     originalIgn,
-    icon: `https://placehold.co/24x24/111827/ffffff?text=${index + 1}`,
+    icon: avatar,
+    avatar,
     kills: toNumber(player.kills) ?? 0,
     deaths: toNumber(player.deaths) ?? 0,
     assists: toNumber(player.assists) ?? 0,
@@ -3042,7 +3107,7 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
           <p className="mt-0.5 text-xs text-[#EEEEEE]">
             {hasNumericStats
               ? "Thống kê chi tiết từng người chơi (AOV / Liên Quân)"
-              : "Danh sách người chơi 2 đội (chưa có KDA — gắn lại match_id AOV nếu cần)"}
+              : "Danh sách người chơi 2 đội"}
           </p>
         </div>
         {games.length > 1 ? (
@@ -3116,13 +3181,7 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
                       >
                         <td className={MATCH_STAT_TD_NAME}>
                           <div className="flex min-w-0 max-w-full items-center gap-1.5">
-                            {p.avatar || p.icon ? (
-                              <img
-                                src={p.avatar || p.icon}
-                                alt=""
-                                className="h-5 w-5 shrink-0 rounded-sm object-cover sm:h-6 sm:w-6"
-                              />
-                            ) : null}
+                            <PlayerStatAvatar player={p} />
                             <span
                               className="block min-w-0 truncate text-[11px] font-semibold text-white"
                               title={

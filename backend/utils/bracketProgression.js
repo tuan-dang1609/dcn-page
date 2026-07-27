@@ -334,11 +334,23 @@ export const applyMatchProgression = async ({
   let nextMatch = null;
   let loserNextMatch = null;
 
-  if (propagateWinner && winnerTeamId) {
+  const status = String(updatedMatch?.status ?? "")
+    .trim()
+    .toLowerCase();
+  const isCompleted = ["completed", "complete", "done", "finished"].includes(
+    status,
+  );
+
+  // Chỉ đẩy đội thắng/thua sang trận sau khi status = finished/completed
+  if (!isCompleted || !winnerTeamId) {
+    return { nextMatch, loserNextMatch };
+  }
+
+  if (propagateWinner) {
     nextMatch = await propagateWinnerToNextMatch(updatedMatch, winnerTeamId);
   }
 
-  if (propagateLoser && winnerTeamId) {
+  if (propagateLoser) {
     loserNextMatch = await propagateLoserToLoserBracket({
       updatedMatch,
       winnerTeamId,

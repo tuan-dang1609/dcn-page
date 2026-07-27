@@ -43,6 +43,7 @@ import {
   getBracketMatchCardHeight,
   getMatchCardConnectorY,
   getBracketRowStateClass,
+  isBracketMatchCompletedStatus,
 } from "@/components/bracketTheme";
 import { BracketMatchCardShell } from "@/components/BracketMatchCardShell";
 
@@ -108,8 +109,8 @@ type DisplayMatch = {
   winner: string | null;
 };
 
-const CARD_W = 272;
-const ROW_H = 46;
+const CARD_W = 288;
+const ROW_H = 50;
 const ROW_BLOCK_H = ROW_H * 2;
 const CARD_H = getBracketMatchCardHeight(ROW_H);
 const CONN_W = 48;
@@ -154,6 +155,11 @@ const getResolvedWinnerTeamId = (
       !match.teamBId;
 
     if (canUsePickedTeam) return pickedTeamId;
+  }
+
+  // Chỉ xác định đội thắng / đi tiếp khi trận đã kết thúc
+  if (!isBracketMatchCompletedStatus(match.status)) {
+    return null;
   }
 
   if (
@@ -512,11 +518,11 @@ const PlayerRow = ({
         onPick(teamId);
       }}
     >
-      <span className="flex items-center gap-2 text-sm truncate flex-1">
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[15px]">
         <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
         {name}
       </span>
-      <span className="text-sm font-bold ml-2 w-6 text-right tabular-nums">
+      <span className="ml-2 w-7 text-right text-base font-bold tabular-nums">
         {formatBracketSideScore(score, otherScore)}
       </span>
     </div>
@@ -546,7 +552,7 @@ const AdvancesSlot = ({
       style={{ width: CARD_W, height: BRACKET_MATCH_TITLE_H + ROW_H }}
     >
       <div
-        className="flex shrink-0 items-center justify-center bg-[#D1D5DB] px-2.5 text-[10px] font-extrabold leading-tight tracking-wider text-neutral-900"
+        className="flex shrink-0 items-center justify-center bg-[#D1D5DB] px-2.5 text-[12px] font-extrabold leading-tight tracking-wider text-neutral-900"
         style={{ height: BRACKET_MATCH_TITLE_H }}
       >
         Đi tiếp
@@ -563,7 +569,7 @@ const AdvancesSlot = ({
         }
         onMouseLeave={() => onHoverTeam(null)}
       >
-        <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-sm font-semibold">
+        <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[15px] font-semibold">
           <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
           {teamName || "TBD"}
         </span>
@@ -602,15 +608,17 @@ const MatchCard = ({
   const pickStatus = realMatchId
     ? pickStatusByMatchId?.[realMatchId]
     : undefined;
-  const officialWinnerTeamId =
-    pickStatus?.winnerTeamId ??
-    (match.s1 !== null && match.s2 !== null
-      ? match.s1 > match.s2
-        ? match.teamAId
-        : match.s2 > match.s1
-          ? match.teamBId
-          : null
-      : null);
+  const isMatchCompleted = isBracketMatchCompletedStatus(match.status);
+  const officialWinnerTeamId = isMatchCompleted
+    ? pickStatus?.winnerTeamId ??
+      (match.s1 !== null && match.s2 !== null
+        ? match.s1 > match.s2
+          ? match.teamAId
+          : match.s2 > match.s1
+            ? match.teamBId
+            : null
+        : null)
+    : null;
 
   const resolvePickState = (teamId: number | null): PickVisualState | null => {
     if (!teamId || selectedTeamId !== teamId) return null;
@@ -633,11 +641,6 @@ const MatchCard = ({
   };
 
   const canPick = Boolean(onPickTeam && realMatchId);
-  const isMatchCompleted = ["complete", "completed"].includes(
-    String(match.status ?? "")
-      .trim()
-      .toLowerCase(),
-  );
 
   const content = (
     <>
@@ -647,7 +650,7 @@ const MatchCard = ({
         name={match.p1}
         score={match.s1}
         otherScore={match.s2}
-        isWinner={match.winner === match.p1}
+        isWinner={isMatchCompleted && match.winner === match.p1}
         isSelected={selectedTeamId === match.teamAId}
         pickState={resolvePickState(match.teamAId)}
         isHoveredTeam={hoveredTeamId === match.teamAId}
@@ -664,7 +667,7 @@ const MatchCard = ({
         name={match.p2}
         score={match.s2}
         otherScore={match.s1}
-        isWinner={match.winner === match.p2}
+        isWinner={isMatchCompleted && match.winner === match.p2}
         isSelected={selectedTeamId === match.teamBId}
         pickState={resolvePickState(match.teamBId)}
         isHoveredTeam={hoveredTeamId === match.teamBId}
@@ -716,7 +719,6 @@ const ElbowConnector = ({
   toY,
   hasHover,
   active,
-  activeStroke,
 }: {
   fromX: number;
   fromY: number;
@@ -724,8 +726,6 @@ const ElbowConnector = ({
   toY: number;
   hasHover: boolean;
   active: boolean;
-  /** Khi hover hành trình: ưu tiên màu đội nếu có */
-  activeStroke?: string | null;
 }) => {
   const strokePad = 4;
   const left = Math.min(fromX, toX);
@@ -747,7 +747,6 @@ const ElbowConnector = ({
     Math.abs(fromY - toY) < 0.5
       ? `M ${sX} ${sY} H ${eX}`
       : `M ${sX} ${sY} H ${midX} V ${eY} H ${eX}`;
-  const hiStroke = activeStroke || BRACKET_CONN_ACTIVE_STROKE;
 
   return (
     <svg
@@ -769,7 +768,7 @@ const ElbowConnector = ({
         <path
           d={path}
           fill="none"
-          stroke={hiStroke}
+          stroke={BRACKET_CONN_ACTIVE_STROKE}
           strokeWidth={3}
         />
       )}
@@ -952,8 +951,9 @@ const DoubleElimBracket = ({
     },
     staleTime: 0,
     refetchOnMount: true,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    refetchInterval: 30_000,
   });
 
   const baseDisplayMatches = useMemo<DisplayMatch[]>(() => {
@@ -982,13 +982,16 @@ const DoubleElimBracket = ({
         const p2 = match.team_b?.name ?? getTeamLabel(teamBId, teamNameById);
 
         let winner: string | null = null;
-        if (winnerTeamId) {
-          if (toNumber(match.team_a?.id) === winnerTeamId) winner = p1;
-          else if (toNumber(match.team_b?.id) === winnerTeamId) winner = p2;
-          else winner = getTeamLabel(winnerTeamId, teamNameById);
-        } else if (scoreA !== null && scoreB !== null) {
-          if (scoreA > scoreB) winner = p1;
-          if (scoreB > scoreA) winner = p2;
+        const isCompleted = isBracketMatchCompletedStatus(match.status);
+        if (isCompleted) {
+          if (winnerTeamId) {
+            if (toNumber(match.team_a?.id) === winnerTeamId) winner = p1;
+            else if (toNumber(match.team_b?.id) === winnerTeamId) winner = p2;
+            else winner = getTeamLabel(winnerTeamId, teamNameById);
+          } else if (scoreA !== null && scoreB !== null) {
+            if (scoreA > scoreB) winner = p1;
+            if (scoreB > scoreA) winner = p2;
+          }
         }
 
         return {
@@ -1294,10 +1297,10 @@ const DoubleElimBracket = ({
       Math.max(y3 + CARD_H + HEADER_H, yAdvanceLower + advanceSlotH) + 16;
 
     const resolveAdvanceTeam = (match: DisplayMatch) => {
-      const winnerId = getResolvedWinnerTeamId(
-        match,
-        selectedTeamByMatchId,
-      );
+      // Chỉ xác định đội đi tiếp khi trận finished — không dùng pickem / ongoing
+      const winnerId = isBracketMatchCompletedStatus(match.status)
+        ? getResolvedWinnerTeamId(match)
+        : null;
       if (!winnerId) {
         return {
           teamId: null as number | null,
@@ -1463,7 +1466,6 @@ const DoubleElimBracket = ({
               upperAdvance.teamId,
               fourTeamAdvanceSpecial.upperFinal.id,
             )}
-            activeStroke={upperAdvance.color}
           />
           <ElbowConnector
             fromX={outX1}
@@ -1486,7 +1488,6 @@ const DoubleElimBracket = ({
               lowerAdvance.teamId,
               fourTeamAdvanceSpecial.decider.id,
             )}
-            activeStroke={lowerAdvance.color}
           />
         </div>
       </div>,
