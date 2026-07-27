@@ -409,6 +409,26 @@ matchRouter.get(
       return { error: "bracket_id không hợp lệ" };
     }
 
+    // Tới giờ trận → tự chuyển scheduled → ongoing
+    await pool.query(
+      `
+      UPDATE matches
+      SET status = 'ongoing'
+      WHERE bracket_id = $1
+        AND date_scheduled IS NOT NULL
+        AND date_scheduled <= NOW()
+        AND LOWER(TRIM(COALESCE(status, ''))) IN (
+          'scheduled',
+          'upcoming',
+          'pending',
+          'not_started',
+          'not-started',
+          ''
+        )
+      `,
+      [bracketId],
+    );
+
     const { rows } = await pool.query(
       `
       SELECT m.id,
@@ -1363,8 +1383,20 @@ matchRouter.patch(
 
     if (!permission.ok) return permission.error;
 
+    const status = String(body?.status ?? "completed").trim() || "completed";
+    const statusNormalized = status.toLowerCase();
+    const isCompletedStatus = [
+      "completed",
+      "complete",
+      "done",
+      "finished",
+    ].includes(statusNormalized);
+
     let winnerTeamId = toNumber(body?.winner_team_id);
-    if (winnerTeamId === null) {
+    if (!isCompletedStatus) {
+      // Ongoing / scheduled: lưu điểm nhưng chưa xác định đội thắng / đi tiếp
+      winnerTeamId = null;
+    } else if (winnerTeamId === null) {
       if (scoreA > scoreB) winnerTeamId = toNumber(match.team_a_id);
       else if (scoreB > scoreA) winnerTeamId = toNumber(match.team_b_id);
       else winnerTeamId = null;
@@ -1380,8 +1412,6 @@ matchRouter.patch(
         ? null
         : String(nextRoomIdRaw).trim() || null
       : String(match.room_id ?? "").trim() || null;
-
-    const status = body?.status ?? "completed";
 
     const { rows: updatedRows } = await pool.query(
       `
@@ -1399,8 +1429,10 @@ matchRouter.patch(
 
     const updatedMatch = updatedRows[0] ?? null;
 
-    const shouldPropagateWinner = body?.propagate_winner !== false;
-    const shouldPropagateLoser = body?.propagate_loser !== false;
+    const shouldPropagateWinner =
+      isCompletedStatus && body?.propagate_winner !== false;
+    const shouldPropagateLoser =
+      isCompletedStatus && body?.propagate_loser !== false;
 
     const { nextMatch, loserNextMatch } = await applyMatchProgression({
       updatedMatch,

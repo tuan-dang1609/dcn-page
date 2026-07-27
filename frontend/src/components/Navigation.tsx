@@ -74,16 +74,6 @@ const Navigation = ({ tournamentId }: NavigationProps) => {
         <Select
           value={selectedValue}
           onValueChange={(value) => {
-            if (value === basePath && tournamentId != null) {
-              try {
-                sessionStorage.setItem(
-                  `skip-auto-bracket:${tournamentId}`,
-                  "1",
-                );
-              } catch {
-                // ignore
-              }
-            }
             navigate(value);
           }}
         >
@@ -113,18 +103,6 @@ const Navigation = ({ tournamentId }: NavigationProps) => {
             end={link.to === basePath}
             onMouseEnter={() => handlePrefetch(link.tab)}
             onFocus={() => handlePrefetch(link.tab)}
-            onClick={() => {
-              if (link.to === basePath && tournamentId != null) {
-                try {
-                  sessionStorage.setItem(
-                    `skip-auto-bracket:${tournamentId}`,
-                    "1",
-                  );
-                } catch {
-                  // ignore
-                }
-              }
-            }}
             className={({ isActive }) =>
               `${TOURNAMENT_NAV_LINK_BASE} ${
                 isActive

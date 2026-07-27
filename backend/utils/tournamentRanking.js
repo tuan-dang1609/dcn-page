@@ -272,13 +272,34 @@ const buildTeamStats = ({ teamIds, matches }) => {
   return stats;
 };
 
+const isNonCompletedMatchStatus = (status) => {
+  const normalized = String(status ?? "")
+    .trim()
+    .toLowerCase();
+  return [
+    "scheduled",
+    "upcoming",
+    "pending",
+    "not_started",
+    "not-started",
+    "ongoing",
+    "live",
+    "in_progress",
+    "in-progress",
+    "playing",
+  ].includes(normalized);
+};
+
 const sortCompletedMatches = (matches) =>
   matches
     .filter((match) => {
       const teamA = toNumber(match.team_a_id);
       const teamB = toNumber(match.team_b_id);
       const winner = toNumber(match.winner_team_id);
-      return teamA && teamB && winner;
+      if (!teamA || !teamB || !winner) return false;
+      // Ongoing/scheduled: chưa tính loại dù còn winner_team_id cũ
+      if (isNonCompletedMatchStatus(match.status)) return false;
+      return true;
     })
     .slice()
     .sort((a, b) => {
@@ -308,6 +329,57 @@ const getMatchRoundShape = (matches) => {
     .join(",");
 };
 
+/** Tìm bracket double-elim 4 đội / 2 đội đi tiếp theo shape trận. */
+const findFourTeamAdvanceBracketId = (matches) => {
+  const byBracket = new Map();
+
+  for (const match of matches) {
+    const bracketId = toNumber(match.bracket_id);
+    if (!bracketId) continue;
+    if (!byBracket.has(bracketId)) byBracket.set(bracketId, []);
+    byBracket.get(bracketId).push(match);
+  }
+
+  for (const [bracketId, bracketMatches] of byBracket.entries()) {
+    if (getMatchRoundShape(bracketMatches) === FOUR_TEAM_ADVANCE_ROUND_SHAPE) {
+      return bracketId;
+    }
+  }
+
+  if (getMatchRoundShape(matches) === FOUR_TEAM_ADVANCE_ROUND_SHAPE) {
+    return toNumber(matches[0]?.bracket_id);
+  }
+
+  return null;
+};
+
+const isFourTeamAdvanceMatchSet = (matches) => {
+  if (!matches?.length) return false;
+  if (getMatchRoundShape(matches) === FOUR_TEAM_ADVANCE_ROUND_SHAPE) {
+    return true;
+  }
+  if (findFourTeamAdvanceBracketId(matches)) return true;
+
+  // Fallback: 4 đội / tối đa 5 trận / 4 vòng (advance, không chung kết tổng)
+  const teams = new Set();
+  const rounds = new Set();
+  for (const match of matches) {
+    const roundNumber = toNumber(match.round_number);
+    if (roundNumber) rounds.add(roundNumber);
+    const teamA = toNumber(match.team_a_id);
+    const teamB = toNumber(match.team_b_id);
+    if (teamA) teams.add(teamA);
+    if (teamB) teams.add(teamB);
+  }
+  const maxRound = rounds.size ? Math.max(...rounds) : 0;
+  return (
+    teams.size === 4 &&
+    matches.length <= 5 &&
+    maxRound === 4 &&
+    rounds.size >= 3
+  );
+};
+
 const normalizeBracketStageLabel = (raw) => {
   const value = String(raw ?? "").trim();
   if (!value) return null;
@@ -334,8 +406,12 @@ const normalizeBracketStageLabel = (raw) => {
     .join("-");
 };
 
-const getEliminationBranchLabel = (roundNumber, roundShape) => {
-  if (roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE) {
+const getEliminationBranchLabel = (roundNumber, roundShape, matches = null) => {
+  const useFourTeamLabels =
+    roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE ||
+    (matches ? isFourTeamAdvanceMatchSet(matches) : false);
+
+  if (useFourTeamLabels) {
     const labels = {
       1: "Trận mở màn",
       2: "Nhánh thắng",
@@ -347,9 +423,9 @@ const getEliminationBranchLabel = (roundNumber, roundShape) => {
   return roundNumber ? `Vòng ${roundNumber}` : null;
 };
 
-const formatElimLabel = (bracketLabel, roundNumber, roundShape) => {
+const formatElimLabel = (bracketLabel, roundNumber, roundShape, matches = null) => {
   const stage = normalizeBracketStageLabel(bracketLabel);
-  const branch = getEliminationBranchLabel(roundNumber, roundShape);
+  const branch = getEliminationBranchLabel(roundNumber, roundShape, matches);
 
   // Play-in / Play-off: ưu tiên tên vòng trong bracket (dễ đọc hơn "playin · …")
   if (stage === "Play-in" || stage === "Play-off") {
@@ -367,9 +443,8 @@ const resolveEliminationLossThreshold = ({
   hasLosersBracket,
   matches,
 }) => {
-  const roundShape = getMatchRoundShape(matches);
   // DE advance / double-elim: thua 1 trận chưa bị loại (còn nhánh thua / quyết định)
-  if (roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE) return 2;
+  if (isFourTeamAdvanceMatchSet(matches)) return 2;
   if (hasLosersBracket) return 2;
   return 1;
 };
@@ -380,10 +455,25 @@ const buildEliminationRanking = ({
   eliminationLossThreshold,
   bracketLabel = null,
 }) => {
-  const completedMatches = sortCompletedMatches(matches);
+  const fourTeamBracketId = findFourTeamAdvanceBracketId(matches);
+  const rankingMatches =
+    fourTeamBracketId &&
+    getMatchRoundShape(matches) !== FOUR_TEAM_ADVANCE_ROUND_SHAPE
+      ? matches.filter(
+          (match) => toNumber(match.bracket_id) === fourTeamBracketId,
+        )
+      : matches;
+  const completedMatches = sortCompletedMatches(rankingMatches);
   const stats = buildTeamStats({ teamIds, matches: completedMatches });
-  const roundShape = getMatchRoundShape(matches);
-  const lossThreshold = Math.max(1, Number(eliminationLossThreshold) || 1);
+  const roundShape = getMatchRoundShape(rankingMatches);
+  const lossThreshold = Math.max(
+    1,
+    Number(eliminationLossThreshold) ||
+      resolveEliminationLossThreshold({
+        hasLosersBracket: false,
+        matches: rankingMatches,
+      }),
+  );
 
   const teamLosses = new Map(teamIds.map((teamId) => [teamId, 0]));
   const eliminatedTeams = new Set();
@@ -446,7 +536,12 @@ const buildEliminationRanking = ({
         placement_end: placementEnd,
         placement_label: placementLabel,
         elim_round: elimRound,
-        elim_label: formatElimLabel(bracketLabel, elimRound, roundShape),
+        elim_label: formatElimLabel(
+          bracketLabel,
+          elimRound,
+          roundShape,
+          rankingMatches,
+        ),
       });
     }
 
@@ -1073,10 +1168,52 @@ export const recalculateTournamentResults = async (tournamentId) => {
         params: [normalizedTournamentId],
       };
 
-  const { rows: matchRows } = await pool.query(
+  const { rows: matchRowsRaw } = await pool.query(
     matchesQuery.text,
     matchesQuery.params,
   );
+
+  let matchRows = matchRowsRaw;
+
+  // Chưa chọn ranking bracket: ưu tiên bracket DE 4 đội / 2 đội đi tiếp
+  if (!rankingBracketId) {
+    const fourTeamBracketId = findFourTeamAdvanceBracketId(matchRows);
+    if (fourTeamBracketId) {
+      rankingBracketId = fourTeamBracketId;
+      matchRows = matchRows.filter(
+        (match) => toNumber(match.bracket_id) === fourTeamBracketId,
+      );
+
+      const { rows: bracketRows } = await pool.query(
+        `
+        SELECT
+          b.id,
+          b.name,
+          b.stage,
+          COALESCE(f.has_losers_bracket, false) AS has_losers_bracket
+        FROM brackets b
+        LEFT JOIN formats f ON f.id = b.format_id
+        WHERE b.id = $1 AND b.tournament_id = $2
+        LIMIT 1
+        `,
+        [fourTeamBracketId, normalizedTournamentId],
+      );
+
+      if (bracketRows.length) {
+        const stage = String(bracketRows[0].stage ?? "").trim();
+        const name = String(bracketRows[0].name ?? "").trim();
+        const stageNorm = normalizeBracketStageLabel(stage);
+        const nameNorm = normalizeBracketStageLabel(name);
+        bracketLabel =
+          stageNorm === "Play-in" || stageNorm === "Play-off"
+            ? stageNorm
+            : nameNorm || stageNorm || name || stage || null;
+        bracketHasLosers = true;
+      } else {
+        bracketHasLosers = true;
+      }
+    }
+  }
 
   if (!bracketLabel) {
     const bracketIdFromMatches = toNumber(matchRows[0]?.bracket_id);
@@ -1109,7 +1246,10 @@ export const recalculateTournamentResults = async (tournamentId) => {
           teamIds,
           matches: matchRows,
           eliminationLossThreshold: resolveEliminationLossThreshold({
-            hasLosersBracket: bracketHasLosers || hasLosersBracket,
+            hasLosersBracket:
+              bracketHasLosers ||
+              hasLosersBracket ||
+              isFourTeamAdvanceMatchSet(matchRows),
             matches: matchRows,
           }),
           bracketLabel,

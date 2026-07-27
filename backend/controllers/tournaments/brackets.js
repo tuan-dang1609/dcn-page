@@ -2,6 +2,10 @@ import { Elysia } from "elysia";
 import { randomInt } from "node:crypto";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
+import {
+  setTournamentRankingBracketId,
+  scheduleTournamentResultsRecalculate,
+} from "../../utils/tournamentRanking.js";
 
 const bracketRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Brackets";
@@ -1735,6 +1739,16 @@ bracketRouter.post(
       };
       note =
         "Double-elimination 4 đội dạng advance: winner Upper Bracket và winner Decider đi tiếp (không có chung kết tổng).";
+
+      try {
+        await setTournamentRankingBracketId({
+          tournamentId,
+          bracketId: Number(bracket.id),
+        });
+        scheduleTournamentResultsRecalculate(tournamentId);
+      } catch {
+        // ranking bracket là optional — không chặn tạo bracket
+      }
     } else if (teamIds.length === 6) {
       const compactSixResult =
         await generateCompactSixTeamDoubleEliminationMatches({
