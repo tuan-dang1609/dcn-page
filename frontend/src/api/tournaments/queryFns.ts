@@ -1,5 +1,6 @@
 import {
   getBracketsByTournamentId,
+  getTournamentPlayerStats,
   getTournamentResults,
   getTournamentTeamPlayers,
   type Bracket,
@@ -13,6 +14,9 @@ const toNumber = (value: unknown): number | null => {
 
 export const tournamentLeaderboardQueryKey = (tournamentId?: number | string) =>
   ["tournament-leaderboard", tournamentId] as const;
+
+export const tournamentPlayerStatsQueryKey = (tournamentId?: number | string) =>
+  ["tournament-player-stats", tournamentId] as const;
 
 export const tournamentBracketsQueryKey = (tournamentId?: number | string) =>
   ["tournament-brackets", tournamentId] as const;
@@ -32,6 +36,13 @@ export const fetchTournamentLeaderboardEnvelope = async (
   tournamentId: number | string,
 ) => {
   const response = await getTournamentResults(tournamentId);
+  return response.data;
+};
+
+export const fetchTournamentPlayerStatsEnvelope = async (
+  tournamentId: number | string,
+) => {
+  const response = await getTournamentPlayerStats(tournamentId);
   return response.data;
 };
 

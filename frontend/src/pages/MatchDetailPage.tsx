@@ -8,6 +8,7 @@ import type { RoundBanPickPayload } from "@/api/banpick";
 import { MapCard } from "@/components/MapCard";
 import { SideSelectModal } from "@/components/SideSelectModal";
 import PageLoader from "@/components/PageLoader";
+import { TournamentSubpageHeader } from "@/components/TournamentSubpageHeader";
 import { useRoundBanPickSocket } from "@/hooks/useRoundBanPickSocket";
 import {
   getValorantMatchData,
@@ -44,14 +45,14 @@ import {
   MATCH_ROSTER_PANEL_CLASS,
   MATCH_SCOREBOARD_WRAPPER_CLASS,
   TOURNAMENT_PAGE_BG_CLASS,
-  TOURNAMENT_PAGE_TITLE_CLASS,
   TOURNAMENT_TABLE_HEADER_CLASS,
   TOURNAMENT_TABLE_HEADER_ROW_CLASS,
   TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS,
   TOURNAMENT_TEAM_TAG_BADGE_CLASS,
 } from "@/components/tournamentTheme";
 
-const MATCH_STAT_PANEL = "overflow-hidden";
+const MATCH_STAT_PANEL =
+  "overflow-hidden border border-neutral-700 bg-[#141414]";
 const MATCH_STAT_TH =
   "px-2 py-1.5 text-center text-[11px] font-extrabold uppercase tracking-wider text-neutral-900 bg-[#D1D5DB]";
 const MATCH_STAT_TH_NAME =
@@ -1947,15 +1948,15 @@ const MapScoreRow = ({
   const bgImg = mapImages[map.mapName];
 
   return (
-    <div className="relative h-12 overflow-hidden rounded-xl bg-card/70 sm:h-14">
+    <div className="relative h-12 overflow-hidden border border-neutral-700 bg-[#141414] sm:h-14">
       <div className="absolute inset-0">
         <img src={bgImg} alt="" className="h-full w-full object-cover" />
-        <div className="absolute inset-0 bg-background/80 backdrop-blur-[1px]" />
+        <div className="absolute inset-0 bg-[#0a0a0a]/80" />
       </div>
 
       <div className="relative z-10 grid h-full w-full grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-4">
         <div className="flex items-center gap-2 sm:gap-3">
-          <img src={team1.logo} alt="" className="h-5 w-5 rounded" />
+          <img src={team1.logo} alt="" className="h-5 w-5 object-cover" />
           <span
             className={`text-base font-black tabular-nums sm:text-lg ${t1Win ? "text-primary" : "text-muted-foreground"}`}
           >
@@ -1973,7 +1974,7 @@ const MapScoreRow = ({
           >
             {map.team2Score}
           </span>
-          <img src={team2.logo} alt="" className="h-5 w-5 rounded" />
+          <img src={team2.logo} alt="" className="h-5 w-5 object-cover" />
         </div>
       </div>
     </div>
@@ -2219,15 +2220,21 @@ const MatchTeamRosterStatHeader = ({
       </div>
     )}
     <div className="min-w-0">
-      <p className="truncate text-sm font-extrabold uppercase tracking-wide text-neutral-900">
+      <p className="truncate text-sm font-extrabold uppercase tracking-wide text-neutral-900 md:hidden">
+        {team.tag || team.name}
+      </p>
+      <p className="hidden truncate text-sm font-extrabold uppercase tracking-wide text-neutral-900 md:block">
         {team.name}
       </p>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-600">
-        {team.tag}
-        {showAllParticipants && playerCount > 0
-          ? ` · ${playerCount} người`
-          : ""}
-      </p>
+      {showAllParticipants && playerCount > 0 ? (
+        <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-600">
+          {playerCount} người
+        </p>
+      ) : team.tag && team.name !== team.tag ? (
+        <p className="hidden text-[10px] font-bold uppercase tracking-wider text-neutral-600 md:block">
+          {team.tag}
+        </p>
+      ) : null}
     </div>
   </div>
 );
@@ -2880,7 +2887,7 @@ const FPSStatTable = ({
             <button
               key={`${tab}-${i}`}
               onClick={() => setActiveTab(i)}
-              className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
+              className={`border px-5 py-2 text-xs font-semibold transition-all ${
                 currentTab === i
                   ? "bg-foreground text-background border-foreground"
                   : "bg-transparent border-border text-[#EEEEEE] hover:text-foreground hover:border-foreground/30"
@@ -3008,7 +3015,10 @@ const FPSStatTable = ({
                           alt={roster.teamTag}
                           className="w-5 h-5 rounded-sm"
                         />
-                        <span className="truncate text-sm font-extrabold uppercase tracking-wide">
+                        <span className="truncate text-sm font-extrabold uppercase tracking-wide md:hidden">
+                          {roster.teamTag || roster.teamName}
+                        </span>
+                        <span className="hidden truncate text-sm font-extrabold uppercase tracking-wide md:inline">
                           {roster.teamName}
                         </span>
                       </div>
@@ -3117,7 +3127,7 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
                 key={game.label}
                 type="button"
                 onClick={() => setActiveTab(i)}
-                className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition-all ${
+                className={`border px-4 py-1.5 text-xs font-semibold transition-all ${
                   activeTab === i
                     ? "border-foreground bg-foreground text-background"
                     : "border-border bg-transparent text-[#EEEEEE] hover:text-foreground"
@@ -3151,7 +3161,10 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
                           alt={roster.teamTag}
                           className="h-5 w-5 shrink-0 rounded-sm"
                         />
-                        <span className="truncate text-xs font-extrabold uppercase tracking-wide sm:text-sm">
+                        <span className="truncate text-xs font-extrabold uppercase tracking-wide sm:text-sm md:hidden">
+                          {roster.teamTag || roster.teamName}
+                        </span>
+                        <span className="hidden truncate text-xs font-extrabold uppercase tracking-wide sm:text-sm md:inline">
                           {roster.teamName}
                         </span>
                       </div>
@@ -3241,7 +3254,7 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
             <button
               key={tab}
               onClick={() => setActiveTab(i)}
-              className={`px-5 py-2 text-xs font-semibold rounded-full border transition-all ${
+              className={`border px-5 py-2 text-xs font-semibold transition-all ${
                 activeTab === i
                   ? "bg-foreground text-background border-foreground"
                   : "bg-transparent border-border text-[#EEEEEE] hover:text-foreground"
@@ -3274,7 +3287,10 @@ const MOBAStatTable = ({ match }: { match: MatchDetail }) => {
                           alt={roster.teamTag}
                           className="w-5 h-5 shrink-0 rounded-sm"
                         />
-                        <span className="truncate text-sm font-extrabold uppercase tracking-wide">
+                        <span className="truncate text-sm font-extrabold uppercase tracking-wide md:hidden">
+                          {roster.teamTag || roster.teamName}
+                        </span>
+                        <span className="hidden truncate text-sm font-extrabold uppercase tracking-wide md:inline">
                           {roster.teamName}
                         </span>
                       </div>
@@ -3343,7 +3359,10 @@ const TFTStatTable = ({ match }: { match: MatchDetail }) => (
               alt={roster.teamTag}
               className="w-5 h-5 rounded"
             />
-            <span className="text-[11px] font-bold text-foreground">
+            <span className="text-[11px] font-bold uppercase text-foreground md:hidden">
+              {roster.teamTag || roster.teamName}
+            </span>
+            <span className="hidden text-[11px] font-bold uppercase text-foreground md:inline">
               {roster.teamName}
             </span>
           </div>
@@ -3525,22 +3544,23 @@ const MatchDetailPage = () => {
     [sortedMatches, numId, isLobbyRoute],
   );
 
-  const { data: linkedTeamPlayers } = useQuery({
-    queryKey: ["match-linked-players", numId],
-    enabled: Boolean(numId),
-    staleTime: 1000 * 60,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const response = await getMatchLinkedPlayers(numId!);
-      const payload = response.data?.data;
+  const { data: linkedTeamPlayers, isLoading: isLinkedPlayersLoading } =
+    useQuery({
+      queryKey: ["match-linked-players", numId],
+      enabled: Boolean(numId),
+      staleTime: 1000 * 60,
+      refetchOnWindowFocus: false,
+      queryFn: async () => {
+        const response = await getMatchLinkedPlayers(numId!);
+        const payload = response.data?.data;
 
-      return {
-        team1Players: payload?.team1?.players ?? [],
-        team2Players: payload?.team2?.players ?? [],
-        allPlayers: payload?.all_players ?? [],
-      };
-    },
-  });
+        return {
+          team1Players: payload?.team1?.players ?? [],
+          team2Players: payload?.team2?.players ?? [],
+          allPlayers: payload?.all_players ?? [],
+        };
+      },
+    });
 
   const linkedTeamContext = useMemo(() => {
     const context = createEmptyLinkedTeamContext();
@@ -3731,7 +3751,7 @@ const MatchDetailPage = () => {
     return undefined;
   }, [matchGameIds, preferredProvider]);
 
-  const { data: valorantApiData } = useQuery({
+  const { data: valorantApiData, isLoading: isValorantStatsLoading } = useQuery({
     queryKey: ["valorant-match-detail", valorantApiMatchIds],
     enabled:
       preferredProvider === "val" &&
@@ -3954,22 +3974,37 @@ const MatchDetailPage = () => {
     isLobbyRoute && isValorantMatch && isMatchCompleted;
   const shouldShowLobbyUnsupportedNotice = isLobbyRoute && !isValorantMatch;
 
+  // Kết quả sau trận: chờ data load xong mới hiện (AOV/VAL có API stats)
+  const isWaitingPostMatchStats =
+    shouldShowPostMatchData &&
+    ((shouldFetchAovStats &&
+      (isAovStatsLoading || isLinkedPlayersLoading)) ||
+      (Boolean(valorantApiMatchIds?.length) &&
+        (isValorantStatsLoading || isLinkedPlayersLoading)));
+
+  if (isWaitingPostMatchStats) {
+    return <PageLoader label="Đang tải dữ liệu sau trận..." />;
+  }
+
   return (
     <div className={`min-h-screen ${TOURNAMENT_PAGE_BG_CLASS}`}>
-      <div className="border-b border-neutral-700 bg-[#141414] text-white">
-        <div className="mx-auto px-4 md:px-8 py-3 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-2 md:gap-3">
-          <div className="order-2 md:order-1 flex items-center gap-2 min-w-0">
+      <TournamentSubpageHeader
+        title={match.tournamentName}
+        subtitle={`${match.roundName} · ${match.format}`}
+        bannerUrl={tournament?.banner_url}
+        leftSlot={
+          <div className="flex min-w-0 items-center gap-2">
             <Link
               to={backTo}
-              className="inline-flex h-8 items-center gap-1.5 rounded border border-neutral-600 px-2.5 text-neutral-300 hover:text-white hover:border-neutral-500 transition-colors text-xs font-semibold"
+              className="inline-flex h-8 items-center gap-1.5 rounded border border-neutral-600 bg-black/30 px-2.5 text-xs font-semibold text-neutral-300 backdrop-blur-sm transition-colors hover:border-neutral-500 hover:text-white"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
+              <ArrowLeft className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Nhánh đấu</span>
             </Link>
             {prevDetail ? (
-              <div className="inline-flex items-center gap-2 min-w-0">
-                <div className="text-right leading-tight">
-                  <p className="text-[10px] font-extrabold uppercase  text-[#EEEEEE]">
+              <div className="inline-flex min-w-0 items-center gap-2">
+                <div className="hidden text-right leading-tight sm:block">
+                  <p className="text-[10px] font-extrabold uppercase text-[#EEEEEE]">
                     Prev
                   </p>
                   <p className="text-[10px] text-[#EEEEEE]">
@@ -3978,7 +4013,7 @@ const MatchDetailPage = () => {
                 </div>
                 <Link
                   to={buildMatchLink(prevDetail.id)}
-                  className="inline-flex h-8 items-center rounded-md border border-border/70 /25 px-2 hover:/40 transition-colors shrink-0"
+                  className="inline-flex h-8 shrink-0 items-center rounded-md border border-neutral-600 bg-black/30 px-2 transition-colors hover:border-neutral-500"
                 >
                   <img
                     src={
@@ -3987,14 +4022,14 @@ const MatchDetailPage = () => {
                       match.team1.logo
                     }
                     alt="prev-team"
-                    className="w-4 h-4 rounded-sm"
+                    className="h-4 w-4 rounded-sm"
                   />
-                  <span className="mx-2 h-4 w-px bg-border/70" />
-                  <span className="text-[13px] font-black tabular-nums text-foreground">
+                  <span className="mx-2 h-4 w-px bg-neutral-600" />
+                  <span className="text-[13px] font-black tabular-nums text-white">
                     {toNumber(prevDetail.score_a) ?? 0}:
                     {toNumber(prevDetail.score_b) ?? 0}
                   </span>
-                  <span className="mx-2 h-4 w-px bg-border/70" />
+                  <span className="mx-2 h-4 w-px bg-neutral-600" />
                   <img
                     src={
                       prevDetail.team_b?.logo_url ||
@@ -4002,78 +4037,68 @@ const MatchDetailPage = () => {
                       match.team2.logo
                     }
                     alt="prev-opponent"
-                    className="w-4 h-4 rounded-sm"
+                    className="h-4 w-4 rounded-sm"
                   />
                 </Link>
               </div>
             ) : null}
           </div>
-
-          <div className="order-1 md:order-2 text-center">
-            <p className={`${TOURNAMENT_PAGE_TITLE_CLASS} text-sm md:text-base`}>
-              {match.tournamentName}
-            </p>
-            <p className="text-[11px] text-neutral-400 mt-0.5">
-              {match.roundName} · {match.format}
-            </p>
-          </div>
-
-          <div className="order-3 flex justify-end items-center gap-2 min-w-0">
-            {nextDetail ? (
-              <div className="inline-flex items-center gap-2 min-w-0">
-                <Link
-                  to={buildMatchLink(nextDetail.id)}
-                  className="inline-flex h-8 items-center rounded-md border border-border/70 /25 px-2 hover:/40 transition-colors shrink-0"
-                >
-                  <img
-                    src={
-                      nextDetail.team_a?.logo_url ||
-                      nextDetail.team_b?.logo_url ||
-                      match.team1.logo
-                    }
-                    alt="next-team"
-                    className="w-4 h-4 rounded-sm"
-                  />
-                  <span className="mx-2 h-4 w-px bg-border/70" />
-                  <span className="text-[13px] font-black tabular-nums text-foreground">
-                    {toNumber(nextDetail.score_a) ?? 0}:
-                    {toNumber(nextDetail.score_b) ?? 0}
-                  </span>
-                  <span className="mx-2 h-4 w-px bg-border/70" />
-                  <img
-                    src={
-                      nextDetail.team_b?.logo_url ||
-                      nextDetail.team_a?.logo_url ||
-                      match.team2.logo
-                    }
-                    alt="next-opponent"
-                    className="w-4 h-4 rounded-sm"
-                  />
-                </Link>
-                <div className="text-left leading-tight">
-                  <p className="text-[10px] font-extrabold uppercase  text-[#EEEEEE]">
-                    Next
-                  </p>
-                  <p className="text-[10px] text-[#EEEEEE]">
-                    {formatNavDate(nextDetail.date_scheduled)}
-                  </p>
-                </div>
+        }
+        rightSlot={
+          nextDetail ? (
+            <div className="inline-flex min-w-0 items-center gap-2">
+              <Link
+                to={buildMatchLink(nextDetail.id)}
+                className="inline-flex h-8 shrink-0 items-center rounded-md border border-neutral-600 bg-black/30 px-2 transition-colors hover:border-neutral-500"
+              >
+                <img
+                  src={
+                    nextDetail.team_a?.logo_url ||
+                    nextDetail.team_b?.logo_url ||
+                    match.team1.logo
+                  }
+                  alt="next-team"
+                  className="h-4 w-4 rounded-sm"
+                />
+                <span className="mx-2 h-4 w-px bg-neutral-600" />
+                <span className="text-[13px] font-black tabular-nums text-white">
+                  {toNumber(nextDetail.score_a) ?? 0}:
+                  {toNumber(nextDetail.score_b) ?? 0}
+                </span>
+                <span className="mx-2 h-4 w-px bg-neutral-600" />
+                <img
+                  src={
+                    nextDetail.team_b?.logo_url ||
+                    nextDetail.team_a?.logo_url ||
+                    match.team2.logo
+                  }
+                  alt="next-opponent"
+                  className="h-4 w-4 rounded-sm"
+                />
+              </Link>
+              <div className="hidden text-left leading-tight sm:block">
+                <p className="text-[10px] font-extrabold uppercase text-[#EEEEEE]">
+                  Next
+                </p>
+                <p className="text-[10px] text-[#EEEEEE]">
+                  {formatNavDate(nextDetail.date_scheduled)}
+                </p>
               </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
+            </div>
+          ) : null
+        }
+      />
 
       <div className="border-b border-neutral-800 bg-[#0f0f0f]">
         <div className={MATCH_SCOREBOARD_WRAPPER_CLASS}>
-          {/* Mobile: điểm nổi giữa, tag + logo 2 bên; Desktop: 3 cột */}
+          {/* Mobile: điểm nổi giữa, shortname + logo 2 bên */}
           <div className="flex flex-col gap-3 py-4 md:hidden">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
               <div className="flex min-w-0 flex-col items-center gap-1.5 text-center">
                 <img
                   src={match.team1.logo}
                   alt={match.team1.tag}
-                  className="h-11 w-11 shrink-0 rounded-md object-cover"
+                  className="h-11 w-11 shrink-0 object-cover"
                 />
                 <span className="max-w-full truncate px-0.5 text-[11px] font-extrabold uppercase leading-tight tracking-wide text-white">
                   {match.team1.tag}
@@ -4102,7 +4127,7 @@ const MatchDetailPage = () => {
                 <img
                   src={match.team2.logo}
                   alt={match.team2.tag}
-                  className="h-11 w-11 shrink-0 rounded-md object-cover"
+                  className="h-11 w-11 shrink-0 object-cover"
                 />
                 <span className="max-w-full truncate px-0.5 text-[11px] font-extrabold uppercase leading-tight tracking-wide text-white">
                   {match.team2.tag}
@@ -4111,6 +4136,7 @@ const MatchDetailPage = () => {
             </div>
           </div>
 
+          {/* Desktop: tên đầy đủ */}
           <div className="hidden grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-5 py-3 md:grid">
             <div className="flex items-center justify-end gap-3 px-1 py-1">
               <div className="min-w-0 text-right">
@@ -4121,7 +4147,7 @@ const MatchDetailPage = () => {
               <img
                 src={match.team1.logo}
                 alt={match.team1.tag}
-                className="h-9 w-9 shrink-0"
+                className="h-9 w-9 shrink-0 object-cover"
               />
             </div>
 
@@ -4146,7 +4172,7 @@ const MatchDetailPage = () => {
               <img
                 src={match.team2.logo}
                 alt={match.team2.tag}
-                className="h-9 w-9 shrink-0"
+                className="h-9 w-9 shrink-0 object-cover"
               />
               <div className="min-w-0 text-left">
                 <span className="block text-sm font-extrabold uppercase tracking-wide text-white">

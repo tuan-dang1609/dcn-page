@@ -10,6 +10,7 @@ import {
   recalculateTournamentResults,
   setTournamentRankingBracketId,
 } from "../../utils/tournamentRanking.js";
+import { getTournamentPlayerStatsLeaderboard } from "../../utils/aovMatchStatsDb.js";
 
 const tournamentRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Tournaments";
@@ -508,6 +509,38 @@ tournamentRouter.get(
         },
       ],
     },
+  },
+);
+
+tournamentRouter.get(
+  "/:tournament_id/player-stats",
+  async ({ params, set }) => {
+    const tournamentId = Number(params.tournament_id);
+
+    if (!Number.isFinite(tournamentId) || tournamentId <= 0) {
+      set.status = 400;
+      return { error: "tournament_id không hợp lệ" };
+    }
+
+    try {
+      const rows = await getTournamentPlayerStatsLeaderboard(tournamentId);
+      set.status = 200;
+      return {
+        min_games: 3,
+        data: rows,
+      };
+    } catch (error) {
+      logger.error("[player-stats] Failed to aggregate", {
+        tournamentId,
+        error: error?.message,
+      });
+      set.status = 500;
+      return { error: "Không tổng hợp được BXH cá nhân" };
+    }
+  },
+  {
+    tags: [TAG],
+    summary: "Get individual AOV player stats leaderboard for a tournament",
   },
 );
 

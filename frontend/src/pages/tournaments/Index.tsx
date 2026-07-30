@@ -5,6 +5,7 @@ import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
 import PageLoader from "@/components/PageLoader";
+import { TournamentSubpageHeader } from "@/components/TournamentSubpageHeader";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
 import {
   useTournamentPrefetch,
@@ -12,6 +13,14 @@ import {
 } from "@/hooks/useTournamentPrefetch";
 import { TOURNAMENT_PAGE_BG_CLASS } from "@/components/tournamentTheme";
 import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
+
+const TAB_SUBTITLE: Record<TournamentTab, string> = {
+  overview: "Tổng quan",
+  participants: "Danh sách",
+  bracket: "Nhánh đấu",
+  leaderboard: "BXH",
+  rule: "Luật",
+};
 
 const Layout = () => {
   const isTournamentHome = Boolean(useMatch("/tournament/:game/:slug"));
@@ -47,6 +56,7 @@ const Layout = () => {
   const location = useLocation();
 
   const tournamentTitle = tournament?.name?.trim() || "Giải đấu";
+  const bannerUrl = tournament?.banner_url ?? null;
 
   useEffect(() => {
     const pageTitle = isMatchDetailPage
@@ -80,8 +90,8 @@ const Layout = () => {
 
   if (!isLoading && !tournament && error) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="max-w-lg text-center space-y-3">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="max-w-lg space-y-3 text-center">
           <h1 className="text-2xl font-bold">Không tìm thấy giải đấu</h1>
           <p className="text-muted-foreground">
             URL: /tournament/{game}/{slug}
@@ -113,7 +123,7 @@ const Layout = () => {
               <Navigation tournamentId={null} />
             </div>
           </div>
-          <div className="px-4 md:px-8 pb-10">
+          <div className="px-4 pb-10 md:px-8">
             <PageLoader label="Đang tải giải đấu..." fullScreen={false} />
           </div>
         </div>
@@ -121,19 +131,20 @@ const Layout = () => {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      <div className="space-y-8">
-        <HeroBanner tournament={tournament} />
-        <div className="flex justify-center px-4 md:px-8">
-          <div className="w-full max-w-4xl">
-            <Navigation tournamentId={tournament?.id} />
+  // Overview: full hero. Other tabs: compact header + banner background.
+  if (isTournamentHome) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="space-y-8">
+          <HeroBanner tournament={tournament} />
+          <div className="flex justify-center px-4 md:px-8">
+            <div className="w-full max-w-4xl">
+              <Navigation tournamentId={tournament?.id} />
+            </div>
           </div>
-        </div>
-        <div className="px-4 md:px-8 pb-10">
-          {isTournamentHome ? (
+          <div className="px-4 pb-10 md:px-8">
             <div
-              className={`grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px] lg:gap-8 ${TOURNAMENT_PAGE_BG_CLASS}`}
+              className={`grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8 xl:grid-cols-[minmax(0,1fr)_400px] ${TOURNAMENT_PAGE_BG_CLASS}`}
             >
               <div className="min-w-0 space-y-6">
                 <InfoGrid tournament={tournament} isLoading={isLoading} />
@@ -143,11 +154,29 @@ const Layout = () => {
                 <Sidebar tournament={tournament} isLoading={isLoading} />
               </div>
             </div>
-          ) : (
-            <div className={TOURNAMENT_PAGE_BG_CLASS}>
-              <Outlet context={{ tournament, isLoading, refetch }} />
-            </div>
-          )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="space-y-6">
+        <TournamentSubpageHeader
+          title={tournamentTitle}
+          subtitle={TAB_SUBTITLE[activeTab]}
+          bannerUrl={bannerUrl}
+        />
+        <div className="flex justify-center px-4 md:px-8">
+          <div className="w-full max-w-4xl">
+            <Navigation tournamentId={tournament?.id} />
+          </div>
+        </div>
+        <div className="px-4 pb-10 md:px-8">
+          <div className={TOURNAMENT_PAGE_BG_CLASS}>
+            <Outlet context={{ tournament, isLoading, refetch }} />
+          </div>
         </div>
       </div>
     </div>

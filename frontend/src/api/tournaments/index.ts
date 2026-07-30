@@ -549,6 +549,31 @@ export interface TournamentResultEnvelope {
   data: TournamentTeamResult[];
 }
 
+export interface TournamentPlayerStatRow {
+  rank: number | null;
+  ign: string;
+  display_name: string;
+  user_id: number | null;
+  profile_picture: string | null;
+  team_id: number | null;
+  team_name: string | null;
+  team_short_name: string | null;
+  team_logo_url: string | null;
+  games_played: number;
+  qualified: boolean;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  kda: number | null;
+  avg_performance: number | null;
+  avg_gold: number | null;
+}
+
+export interface TournamentPlayerStatsEnvelope {
+  min_games: number;
+  data: TournamentPlayerStatRow[];
+}
+
 export interface TournamentAchievementEnvelope {
   ranking_bracket_id?: number | null;
   data: TournamentTeamAchievement[];
@@ -557,6 +582,11 @@ export interface TournamentAchievementEnvelope {
 export const getTournamentResults = (tournamentId: number | string) =>
   axios.get<TournamentResultEnvelope>(
     `${tournamentsBaseUrl}/${tournamentId}/results`,
+  );
+
+export const getTournamentPlayerStats = (tournamentId: number | string) =>
+  axios.get<TournamentPlayerStatsEnvelope>(
+    `${tournamentsBaseUrl}/${tournamentId}/player-stats`,
   );
 
 export const getTournamentAchievements = (tournamentId: number | string) =>

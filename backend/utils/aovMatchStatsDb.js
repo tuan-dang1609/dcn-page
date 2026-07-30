@@ -1,5 +1,9 @@
 import { pool } from "./db.js";
-import { assignAovPlayersAcrossTeams } from "./aovIgnMatch.js";
+import {
+  assignAovPlayersAcrossTeams,
+  matchAovIgnToPlayer,
+  normalizeAovIgn,
+} from "./aovIgnMatch.js";
 
 const toNumber = (value) => {
   if (value === null || value === undefined) return null;
@@ -574,4 +578,303 @@ export const getMatchStatsByMatchId = async (matchId) => {
   }
 
   return games;
+};
+
+const normalizeIgnKey = (value) => normalizeAovIgn(value);
+
+const parseRawPayload = (raw) => {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  if (typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Tổng hợp stats người chơi AOV theo tournament (gom theo user/IGN).
+ * Dùng cho BXH cá nhân.
+ */
+export const getTournamentPlayerStatsLeaderboard = async (tournamentId) => {
+  const normalizedTournamentId = toNumber(tournamentId);
+  if (!normalizedTournamentId) return [];
+
+  await ensureAovStatsTables();
+
+  const { rows: statRows } = await pool.query(
+    `
+    SELECT
+      ps.ign,
+      ps.kills,
+      ps.deaths,
+      ps.assists,
+      ps.performance_score,
+      ps.gold,
+      ps.team_side,
+      ps.raw_payload,
+      m.team_a_id,
+      m.team_b_id
+    FROM match_game_player_stats ps
+    INNER JOIN match_games mg ON mg.id = ps.match_game_id
+    INNER JOIN matches m ON m.id = mg.match_id
+    WHERE m.tournament_id = $1
+      AND TRIM(COALESCE(ps.ign, '')) <> ''
+    `,
+    [normalizedTournamentId],
+  );
+
+  const { rows: playerRows } = await pool.query(
+    `
+    SELECT DISTINCT ON (u.id)
+      u.id AS user_id,
+      u.username,
+      u.nickname,
+      u.profile_picture,
+      u.riot_account,
+      t.id AS team_id,
+      t.name AS team_name,
+      t.short_name AS team_short_name,
+      t.logo_url AS team_logo_url
+    FROM tournament_teams tt
+    INNER JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+    INNER JOIN users u ON u.id = ttp.user_id
+    LEFT JOIN teams t ON t.id = tt.team_id
+    WHERE tt.tournament_id = $1
+    ORDER BY u.id ASC, ttp.id ASC
+    `,
+    [normalizedTournamentId],
+  );
+
+  const { rows: teamRows } = await pool.query(
+    `
+    SELECT t.id, t.name, t.short_name, t.logo_url
+    FROM tournament_teams tt
+    INNER JOIN teams t ON t.id = tt.team_id
+    WHERE tt.tournament_id = $1
+    `,
+    [normalizedTournamentId],
+  );
+
+  const teamById = new Map(
+    teamRows.map((team) => [Number(team.id), team]),
+  );
+  const rosterPlayers = playerRows.map((player) => ({
+    ...player,
+    id: player.user_id,
+  }));
+
+  const createBucket = ({
+    ign,
+    display_name,
+    user_id = null,
+    profile_picture = null,
+    team_id = null,
+    team_name = null,
+    team_short_name = null,
+    team_logo_url = null,
+  }) => ({
+    ign: String(ign ?? "").trim(),
+    display_name: String(display_name ?? "").trim() || String(ign ?? "").trim(),
+    user_id,
+    profile_picture,
+    team_id,
+    team_name,
+    team_short_name,
+    team_logo_url,
+    games_played: 0,
+    kills: 0,
+    deaths: 0,
+    assists: 0,
+    performance_sum: 0,
+    performance_count: 0,
+    gold_sum: 0,
+    gold_count: 0,
+  });
+
+  const buckets = new Map();
+
+  // Seed toàn bộ roster giải — kể cả chưa chơi ván nào
+  for (const player of rosterPlayers) {
+    const displayName =
+      String(player.nickname ?? "").trim() ||
+      String(player.username ?? "").trim() ||
+      `User ${player.user_id}`;
+    buckets.set(`user:${player.user_id}`, createBucket({
+      ign: displayName,
+      display_name: displayName,
+      user_id: player.user_id,
+      profile_picture: player.profile_picture ?? null,
+      team_id: player.team_id ?? null,
+      team_name: player.team_name ?? null,
+      team_short_name: player.team_short_name ?? null,
+      team_logo_url: player.team_logo_url ?? null,
+    }));
+  }
+
+  if (!statRows.length && !buckets.size) return [];
+
+  const resolveTeamFromMatchSide = (row) => {
+    const side = String(row.team_side ?? "").toLowerCase();
+    const teamId =
+      side === "blue"
+        ? toNumber(row.team_a_id)
+        : side === "red"
+          ? toNumber(row.team_b_id)
+          : null;
+    if (!teamId) return null;
+    return teamById.get(teamId) ?? null;
+  };
+
+  const resolveProfile = (row) => {
+    const raw = parseRawPayload(row.raw_payload);
+    const candidates = [
+      row.ign,
+      raw?.display_ign,
+      raw?.matched_from_ign,
+      raw?.ign,
+    ]
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean);
+
+    for (const candidate of candidates) {
+      const hit = matchAovIgnToPlayer(candidate, rosterPlayers, {
+        minScore: 0.72,
+      });
+      if (hit?.player) return hit.player;
+    }
+    return null;
+  };
+
+  for (const row of statRows) {
+    const profile = resolveProfile(row);
+    const matchTeam = resolveTeamFromMatchSide(row);
+    const ign = String(row.ign ?? "").trim();
+    const bucketKey = profile?.user_id
+      ? `user:${profile.user_id}`
+      : `ign:${normalizeIgnKey(ign) || ign.toLowerCase()}`;
+
+    let bucket = buckets.get(bucketKey);
+    if (!bucket) {
+      bucket = createBucket({
+        ign,
+        display_name:
+          String(profile?.nickname ?? "").trim() ||
+          String(profile?.username ?? "").trim() ||
+          ign,
+        user_id: profile?.user_id ?? null,
+        profile_picture: profile?.profile_picture ?? null,
+        team_id: profile?.team_id ?? matchTeam?.id ?? null,
+        team_name: profile?.team_name ?? matchTeam?.name ?? null,
+        team_short_name:
+          profile?.team_short_name ?? matchTeam?.short_name ?? null,
+        team_logo_url: profile?.team_logo_url ?? matchTeam?.logo_url ?? null,
+      });
+      buckets.set(bucketKey, bucket);
+    }
+
+    if (!bucket.user_id && profile?.user_id) {
+      bucket.user_id = profile.user_id;
+      bucket.display_name =
+        String(profile.nickname ?? "").trim() ||
+        String(profile.username ?? "").trim() ||
+        bucket.display_name;
+      bucket.profile_picture = profile.profile_picture ?? bucket.profile_picture;
+    }
+    if (!bucket.profile_picture && profile?.profile_picture) {
+      bucket.profile_picture = profile.profile_picture;
+    }
+    if (!bucket.team_id) {
+      const teamSource = profile?.team_id
+        ? profile
+        : matchTeam
+          ? {
+              team_id: matchTeam.id,
+              team_name: matchTeam.name,
+              team_short_name: matchTeam.short_name,
+              team_logo_url: matchTeam.logo_url,
+            }
+          : null;
+      if (teamSource) {
+        bucket.team_id = teamSource.team_id ?? teamSource.id ?? null;
+        bucket.team_name = teamSource.team_name ?? teamSource.name ?? null;
+        bucket.team_short_name =
+          teamSource.team_short_name ?? teamSource.short_name ?? null;
+        bucket.team_logo_url =
+          teamSource.team_logo_url ?? teamSource.logo_url ?? null;
+      }
+    }
+
+    bucket.games_played += 1;
+    bucket.kills += Number(row.kills ?? 0);
+    bucket.deaths += Number(row.deaths ?? 0);
+    bucket.assists += Number(row.assists ?? 0);
+    if (row.performance_score != null && Number.isFinite(Number(row.performance_score))) {
+      bucket.performance_sum += Number(row.performance_score);
+      bucket.performance_count += 1;
+    }
+    if (row.gold != null && Number.isFinite(Number(row.gold))) {
+      bucket.gold_sum += Number(row.gold);
+      bucket.gold_count += 1;
+    }
+  }
+
+  const MIN_GAMES = 3;
+
+  const leaderboard = Array.from(buckets.values()).map((bucket) => {
+    const gamesPlayed = bucket.games_played;
+    const qualified = gamesPlayed >= MIN_GAMES;
+    const kills = bucket.kills;
+    const deaths = bucket.deaths;
+    const assists = bucket.assists;
+    const kda = deaths > 0 ? (kills + assists) / deaths : kills + assists;
+    const avgPerformance =
+      bucket.performance_count > 0
+        ? bucket.performance_sum / bucket.performance_count
+        : null;
+    const avgGold =
+      bucket.gold_count > 0 ? bucket.gold_sum / bucket.gold_count : null;
+
+    return {
+      ign: bucket.ign,
+      display_name: bucket.display_name,
+      user_id: bucket.user_id,
+      profile_picture: bucket.profile_picture,
+      team_id: toNumber(bucket.team_id),
+      team_name: bucket.team_name,
+      team_short_name: bucket.team_short_name,
+      team_logo_url: bucket.team_logo_url,
+      games_played: gamesPlayed,
+      qualified,
+      kills: qualified ? kills : null,
+      deaths: qualified ? deaths : null,
+      assists: qualified ? assists : null,
+      kda: qualified ? Number(kda.toFixed(2)) : null,
+      avg_performance:
+        qualified && avgPerformance != null
+          ? Number(avgPerformance.toFixed(2))
+          : null,
+      avg_gold:
+        qualified && avgGold != null ? Math.round(avgGold) : null,
+      _sort_avg: qualified ? avgPerformance ?? -1 : -2,
+      _sort_kda: qualified ? kda : -1,
+    };
+  });
+
+  leaderboard.sort((a, b) => {
+    if (a.qualified !== b.qualified) return a.qualified ? -1 : 1;
+    if (b._sort_avg !== a._sort_avg) return b._sort_avg - a._sort_avg;
+    if (b._sort_kda !== a._sort_kda) return b._sort_kda - a._sort_kda;
+    if (b.games_played !== a.games_played) return b.games_played - a.games_played;
+    return String(a.display_name).localeCompare(String(b.display_name), "vi");
+  });
+
+  return leaderboard.map((row, index) => {
+    const { _sort_avg, _sort_kda, ...rest } = row;
+    return {
+      ...rest,
+      rank: row.qualified ? index + 1 : null,
+    };
+  });
 };

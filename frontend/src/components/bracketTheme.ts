@@ -1,7 +1,7 @@
 export const BRACKET_BG_CLASS = "";
 
-export const BRACKET_MATCH_TITLE_H = 34;
-export const BRACKET_MATCH_FOOTER_H = 30;
+export const BRACKET_MATCH_TITLE_H = 28;
+export const BRACKET_MATCH_FOOTER_H = 26;
 
 export type BracketMatchDisplayStatus =
   | "upcoming"
@@ -125,7 +125,7 @@ export const BRACKET_ROW_WRONG_CLASS =
   "bg-rose-950/40 text-rose-100 font-semibold border-l-[3px] border-l-rose-400";
 
 export const BRACKET_MATCH_TITLE_CLASS =
-  "flex h-[34px] shrink-0 items-center justify-center bg-[#D1D5DB] px-2 text-[12px] font-extrabold uppercase leading-tight tracking-wider text-neutral-900";
+  "flex h-[28px] shrink-0 items-center justify-center bg-[#D1D5DB] px-2 text-[10px] font-extrabold uppercase leading-tight tracking-wide text-neutral-900";
 
 export const BRACKET_HEADER_CLASS =
   "bg-[#D1D5DB] px-4 py-2 text-sm font-extrabold uppercase tracking-widest text-neutral-900 text-center";
