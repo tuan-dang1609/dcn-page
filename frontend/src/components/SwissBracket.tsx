@@ -103,8 +103,8 @@ type TeamProgress = {
   state: "advanced" | "eliminated" | "pending";
 };
 
-const CARD_W = 284;
-const ROW_H = 48;
+const CARD_W = 252;
+const ROW_H = 42;
 const CARD_H = getBracketMatchCardHeight(ROW_H);
 const STAGE_HEADER_H = 32;
 const STAGE_HEADER_GAP = 12;
@@ -465,11 +465,11 @@ const PlayerRow = ({
         onPick(teamId);
       }}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[15px]">
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[13px]">
         <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
         {name}
       </span>
-      <span className="ml-2 w-7 text-right text-base font-bold tabular-nums">
+      <span className="ml-2 w-6 text-right text-sm font-bold tabular-nums">
         {formatBracketSideScore(score, otherScore)}
       </span>
     </div>

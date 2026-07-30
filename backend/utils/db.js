@@ -103,6 +103,7 @@ export const sql = {
 
 export const pool = {
   query: async (text, params = []) => queryWithRetry(text, params),
+  connect: () => poolInstance.connect(),
   transaction: async (callback) => {
     const client = await poolInstance.connect();
     try {
@@ -125,6 +126,9 @@ export const pool = {
     }
   },
   close: async () => {
+    await poolInstance.end();
+  },
+  end: async () => {
     await poolInstance.end();
   },
 };

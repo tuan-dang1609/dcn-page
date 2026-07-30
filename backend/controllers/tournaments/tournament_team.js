@@ -531,6 +531,110 @@ teamTourRoute.post(
 );
 
 teamTourRoute.delete(
+  "/:tournament_id/register-solo",
+  async ({ params, set, user }) => {
+    const tournamentId = Number(params.tournament_id);
+    const userId = Number(user?.id);
+
+    if (!userId) {
+      set.status = 403;
+      return { message: "Bạn cần đăng nhập để hủy đăng ký" };
+    }
+
+    const { rows: tournamentRows } = await pool.query(
+      `
+      SELECT
+        id,
+        register_start,
+        register_end,
+        COALESCE(NULLIF(TRIM(to_jsonb(t)->>'registration_mode'), ''), 'org') AS registration_mode
+      FROM tournaments t
+      WHERE id = $1
+      `,
+      [tournamentId],
+    );
+
+    if (tournamentRows.length === 0) {
+      set.status = 404;
+      return { message: "Không tìm thấy giải đấu" };
+    }
+
+    const tournament = tournamentRows[0];
+    if (String(tournament.registration_mode) !== "individual") {
+      set.status = 400;
+      return {
+        message:
+          "Giải này không phải dạng đăng ký cá nhân. Hãy dùng hủy đăng ký theo đội.",
+      };
+    }
+
+    const registerStartMs = Number(new Date(tournament.register_start));
+    const registerEndMs = Number(new Date(tournament.register_end));
+    const now = Date.now();
+    const isRegistrationOpen =
+      Number.isFinite(registerStartMs) &&
+      Number.isFinite(registerEndMs) &&
+      now >= registerStartMs &&
+      now <= registerEndMs;
+
+    if (!isRegistrationOpen) {
+      set.status = 400;
+      return { message: "Ngoài thời gian đăng ký, không thể hủy đăng ký" };
+    }
+
+    const { rows: registrationRows } = await pool.query(
+      `
+      SELECT tt.id, tt.team_id
+      FROM tournament_teams tt
+      JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+      WHERE tt.tournament_id = $1
+        AND ttp.user_id = $2
+      LIMIT 1
+      `,
+      [tournamentId, userId],
+    );
+
+    if (registrationRows.length === 0) {
+      set.status = 404;
+      return { message: "Bạn chưa đăng ký giải này" };
+    }
+
+    const registrationId = Number(registrationRows[0].id);
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `DELETE FROM tournament_team_players WHERE tournament_team_id = $1`,
+        [registrationId],
+      );
+      await client.query(`DELETE FROM tournament_teams WHERE id = $1`, [
+        registrationId,
+      ]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      set.status = 500;
+      return {
+        message: error?.message || "Hủy đăng ký cá nhân thất bại",
+      };
+    } finally {
+      client.release();
+    }
+
+    void recalculateTournamentResults(tournamentId).catch(() => {});
+
+    set.status = 200;
+    return { message: "Đã hủy đăng ký cá nhân" };
+  },
+  {
+    tags: [TAG],
+    summary: "Unregister individual (solo) player from tournament",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+teamTourRoute.delete(
   "/:tournament_id/:team_id",
   async ({ params, set, user }) => {
     const tournamentId = Number(params.tournament_id);

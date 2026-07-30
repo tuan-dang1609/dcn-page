@@ -109,10 +109,11 @@ type DisplayMatch = {
   winner: string | null;
 };
 
-const CARD_W = 288;
-const ROW_H = 50;
+const CARD_W = 252;
+const ROW_H = 42;
 const ROW_BLOCK_H = ROW_H * 2;
 const CARD_H = getBracketMatchCardHeight(ROW_H);
+const CONN_GAP = 56;
 const CONN_W = 48;
 const ROUND_GAP = 24;
 const HEADER_H = 0;
@@ -518,11 +519,11 @@ const PlayerRow = ({
         onPick(teamId);
       }}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[15px]">
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[13px]">
         <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
         {name}
       </span>
-      <span className="ml-2 w-7 text-right text-base font-bold tabular-nums">
+      <span className="ml-2 w-6 text-right text-sm font-bold tabular-nums">
         {formatBracketSideScore(score, otherScore)}
       </span>
     </div>
@@ -552,7 +553,7 @@ const AdvancesSlot = ({
       style={{ width: CARD_W, height: BRACKET_MATCH_TITLE_H + ROW_H }}
     >
       <div
-        className="flex shrink-0 items-center justify-center bg-[#D1D5DB] px-2.5 text-[12px] font-extrabold leading-tight tracking-wider text-neutral-900"
+        className="flex shrink-0 items-center justify-center bg-[#D1D5DB] px-2 text-[10px] font-extrabold leading-tight tracking-wide text-neutral-900"
         style={{ height: BRACKET_MATCH_TITLE_H }}
       >
         Đi tiếp
@@ -569,7 +570,7 @@ const AdvancesSlot = ({
         }
         onMouseLeave={() => onHoverTeam(null)}
       >
-        <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[15px] font-semibold">
+        <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[13px] font-semibold">
           <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
           {teamName || "TBD"}
         </span>
@@ -1266,8 +1267,8 @@ const DoubleElimBracket = ({
 
   if (fourTeamAdvanceSpecial) {
     const x1 = 0;
-    const x2 = CARD_W + 72;
-    const x3 = x2 + CARD_W + 72;
+    const x2 = CARD_W + CONN_GAP;
+    const x3 = x2 + CARD_W + CONN_GAP;
 
     const y1A = 0;
     const y1B = CARD_H + 56;
@@ -1496,10 +1497,10 @@ const DoubleElimBracket = ({
 
   if (eightTeamSpecial) {
     const x1 = 0;
-    const x2 = x1 + CARD_W + 72;
-    const x3 = x2 + CARD_W + 72;
-    const x4 = x3 + CARD_W + 72;
-    const x5 = x4 + CARD_W + 72;
+    const x2 = x1 + CARD_W + CONN_GAP;
+    const x3 = x2 + CARD_W + CONN_GAP;
+    const x4 = x3 + CARD_W + CONN_GAP;
+    const x5 = x4 + CARD_W + CONN_GAP;
 
     const y1A = 0;
     const y1B = CARD_H + 28;
@@ -1846,10 +1847,10 @@ const DoubleElimBracket = ({
 
   if (sixTeamSpecial) {
     const x1 = 0;
-    const x2 = x1 + CARD_W + 72;
-    const x3 = x2 + CARD_W + 72;
-    const x4 = x3 + CARD_W + 72;
-    const x5 = x4 + CARD_W + 72;
+    const x2 = x1 + CARD_W + CONN_GAP;
+    const x3 = x2 + CARD_W + CONN_GAP;
+    const x4 = x3 + CARD_W + CONN_GAP;
+    const x5 = x4 + CARD_W + CONN_GAP;
 
     const y1A = 0;
     const y1B = CARD_H + 40;
@@ -2067,8 +2068,8 @@ const DoubleElimBracket = ({
 
   if (fourTeamSpecial) {
     const x1 = 0;
-    const x2 = CARD_W + 72;
-    const x5 = x2 + CARD_W + 72;
+    const x2 = CARD_W + CONN_GAP;
+    const x5 = x2 + CARD_W + CONN_GAP;
 
     const y1A = 0;
     const y1B = CARD_H + 68;

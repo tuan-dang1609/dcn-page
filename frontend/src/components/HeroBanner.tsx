@@ -30,6 +30,7 @@ import {
   getMyTeamInvites,
   type TeamInviteRecord,
 } from "@/api/teamInvites";
+import { unregisterSoloFromTournament } from "@/api/tournaments";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
 import TeamRosterDialog from "@/components/TeamRosterDialog";
 import { isRiotGameSlug } from "@/components/tournamentTheme";
@@ -50,13 +51,26 @@ interface HeroBannerProps {
       id?: number | string;
       team_id?: number | string;
       isCheckedIn?: boolean;
-      player_ids?: Array<number | string>;
+      player_ids?: Array<number | string> | string;
       name?: string;
       short_name?: string;
       logo_url?: string | null;
     }>;
   } | null;
 }
+
+const normalizePlayerIds = (raw: unknown): number[] => {
+  let value = raw;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => Number(item)).filter((id) => Number.isFinite(id));
+};
 
 const HeroBanner = ({ tournament }: HeroBannerProps) => {
   const { user, logout, isRegistered, setIsRegistered, token, refreshUser } =
@@ -70,6 +84,8 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     "individual";
   const [regOpen, setRegOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<"manage" | "roster">("manage");
+  const [soloUnregConfirmOpen, setSoloUnregConfirmOpen] = useState(false);
+  const [soloUnregistering, setSoloUnregistering] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [rosterTeamId, setRosterTeamId] = useState<number | string | null>(
     null,
@@ -108,13 +124,48 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     setRegOpen(true);
   };
 
+  const handleSoloUnregisterClick = () => {
+    setSoloUnregConfirmOpen(true);
+  };
+
+  const handleConfirmSoloUnregister = async () => {
+    if (!tournament?.id || !token) return;
+
+    setSoloUnregistering(true);
+    try {
+      await unregisterSoloFromTournament(tournament.id);
+      setIsRegistered(false);
+      setMyRegisteredTeamId(null);
+      setSoloUnregConfirmOpen(false);
+      toast.success("Đã hủy đăng ký");
+      window.location.reload();
+    } catch (error: unknown) {
+      const message =
+        axios.isAxiosError(error) &&
+        error.response?.data &&
+        typeof error.response.data === "object" &&
+        ("message" in error.response.data || "error" in error.response.data)
+          ? String(
+              (error.response.data as { message?: string; error?: string })
+                .message ??
+                (error.response.data as { message?: string; error?: string })
+                  .error,
+            )
+          : "Không thể hủy đăng ký cá nhân.";
+      toast.error(message);
+    } finally {
+      setSoloUnregistering(false);
+    }
+  };
+
   const handleOpenRoster = () => {
     const registered = tournament?.registered ?? [];
     const match = isIndividualMode
       ? registered.find((r) =>
-          (r.player_ids ?? []).some(
-            (playerId) => Number(playerId) === Number(user?.id),
-          ),
+          normalizePlayerIds(r.player_ids).some(
+            (playerId) => playerId === Number(user?.id),
+          ) ||
+          String(r.short_name ?? "").trim() === `S${Number(user?.id)}`,
         )
       : registered.find(
           (r) => Number(r.team_id) === Number(user?.team_id),
@@ -139,10 +190,12 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
 
     const registered = tournament?.registered ?? [];
     const myEntry = isIndividualMode
-      ? registered.find((team) =>
-          (team.player_ids ?? []).some(
-            (playerId) => Number(playerId) === Number(user.id),
-          ),
+      ? registered.find(
+          (team) =>
+            normalizePlayerIds(team.player_ids).some(
+              (playerId) => playerId === Number(user.id),
+            ) ||
+            String(team.short_name ?? "").trim() === `S${Number(user.id)}`,
         )
       : registered.find(
           (team) => Number(team.team_id) === Number(user?.team_id),
@@ -405,15 +458,16 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                   isRegistrationOpen || isRegistered ? (
                     <Button
                       size="sm"
-                      onClick={handleOpenRegistration}
+                      onClick={
+                        showUpdateRegistration
+                          ? handleSoloUnregisterClick
+                          : handleOpenRegistration
+                      }
                       className="h-11 px-4 sm:px-5 gap-2 text-sm sm:text-base font-semibold"
-                      variant={showUpdateRegistration ? "outline" : "default"}
+                      variant={showUpdateRegistration ? "destructive" : "default"}
                     >
                       {showUpdateRegistration ? (
-                        <>
-                          <RefreshCw className="w-4 h-4" />
-                          <span>Đã đăng ký</span>
-                        </>
+                        <span>Hủy đăng ký</span>
                       ) : (
                         <>
                           <Trophy className="w-4 h-4" />
@@ -531,7 +585,46 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
         requiredPlayerCount={tournament?.max_player_per_team}
         viewMode={dialogMode}
         registrationMode={tournament?.registration_mode}
+        alreadyRegistered={Boolean(myRegisteredTeamId || isRegistered)}
       />
+
+      <Dialog
+        open={soloUnregConfirmOpen}
+        onOpenChange={(nextOpen) => {
+          if (soloUnregistering) return;
+          setSoloUnregConfirmOpen(nextOpen);
+        }}
+      >
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-md gap-0 rounded-sm border-neutral-700 bg-[#141414] p-0 text-neutral-200 shadow-none sm:w-full sm:max-w-md">
+          <DialogHeader className="space-y-2 border-b border-neutral-700 px-4 py-4 text-left sm:px-5">
+            <DialogTitle className="text-sm font-extrabold uppercase tracking-widest text-white">
+              Xác nhận hủy đăng ký
+            </DialogTitle>
+            <DialogDescription className="text-sm text-neutral-400">
+              Bạn có chắc muốn hủy đăng ký giải {tournament?.name || "này"}?
+              Hành động này sẽ xóa bạn khỏi danh sách tham gia.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col-reverse gap-2 px-4 py-4 sm:flex-row sm:justify-end sm:px-5">
+            <Button
+              variant="outline"
+              onClick={() => setSoloUnregConfirmOpen(false)}
+              disabled={soloUnregistering}
+              className="rounded-sm border-neutral-600 bg-transparent text-neutral-200 hover:bg-neutral-900 hover:text-white"
+            >
+              Không
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleConfirmSoloUnregister()}
+              disabled={soloUnregistering}
+              className="rounded-sm"
+            >
+              {soloUnregistering ? "Đang hủy..." : "Có, hủy đăng ký"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <TeamRosterDialog
         open={rosterOpen}

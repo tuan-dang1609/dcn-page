@@ -3,13 +3,13 @@
 export const TOURNAMENT_PAGE_BG_CLASS = " text-neutral-200";
 
 export const TOURNAMENT_PAGE_TITLE_CLASS =
-  "text-xl font-extrabold uppercase tracking-widest text-white";
+  "text-xl font-extrabold uppercase tracking-normal text-white";
 
 export const TOURNAMENT_NAV_WRAPPER_CLASS =
   "w-full border border-neutral-700 bg-[#141414]";
 
 export const TOURNAMENT_NAV_LINK_BASE =
-  "flex min-h-9 flex-1 items-center justify-center px-2 py-2 text-center text-xs font-extrabold uppercase tracking-wide transition-colors";
+  "flex min-h-9 flex-1 items-center justify-center px-2 py-2 text-center text-xs font-extrabold uppercase tracking-normal transition-colors";
 
 export const TOURNAMENT_NAV_LINK_ACTIVE =
   "bg-[#2d2d2d] text-white";
@@ -18,7 +18,7 @@ export const TOURNAMENT_NAV_LINK_INACTIVE =
   "bg-transparent text-neutral-400 hover:bg-neutral-900 hover:text-white";
 
 export const TOURNAMENT_SUBTAB_BASE =
-  "px-4 py-2 text-xs font-extrabold uppercase tracking-wide transition-colors border border-neutral-700";
+  "px-4 py-2 text-xs font-extrabold uppercase tracking-normal transition-colors border border-neutral-700";
 
 export const TOURNAMENT_SUBTAB_ACTIVE =
   "bg-[#2d2d2d] text-white border-neutral-600";
@@ -30,7 +30,7 @@ export const TOURNAMENT_SUBTAB_GROUP_CLASS =
   "flex items-center gap-2 border border-neutral-700  px-2 py-1";
 
 export const TOURNAMENT_TABLE_HEADER_CLASS =
-  "bg-[#D1D5DB] text-neutral-900 text-xs font-extrabold uppercase tracking-widest";
+  "bg-[#D1D5DB] text-neutral-900 text-xs font-extrabold uppercase tracking-normal";
 
 /** Header row: override TableRow default hover so header stays flat gray. */
 export const TOURNAMENT_TABLE_HEADER_ROW_CLASS =
@@ -91,6 +91,12 @@ export const normalizeGameSlug = (value?: string | null) => {
 export const isRiotGameSlug = (value?: string | null) => {
   const key = normalizeGameSlug(value);
   return ["valorant", "lol", "tft", "wildrift"].includes(key);
+};
+
+/** BXH cá nhân (stats ván) hiện chỉ hỗ trợ Arena of Valor. */
+export const isAovGameSlug = (value?: string | null) => {
+  const key = normalizeGameSlug(value);
+  return ["aov", "arenaofvalor", "arena_of_valor", "lienquan"].includes(key);
 };
 
 export const TOURNAMENT_MEMBER_ROW_CLASS =

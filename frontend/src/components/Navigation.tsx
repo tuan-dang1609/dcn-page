@@ -77,7 +77,7 @@ const Navigation = ({ tournamentId }: NavigationProps) => {
             navigate(value);
           }}
         >
-          <SelectTrigger className="h-10 w-full border-neutral-600 bg-[#1a1a1a] text-xs font-extrabold uppercase tracking-wide text-white">
+          <SelectTrigger className="h-10 w-full border-neutral-600 bg-[#1a1a1a] text-xs font-extrabold uppercase tracking-normal text-white">
             <SelectValue placeholder={activeLabel}>{activeLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -85,7 +85,7 @@ const Navigation = ({ tournamentId }: NavigationProps) => {
               <SelectItem
                 key={link.to}
                 value={link.to}
-                className="text-xs font-bold uppercase tracking-wide"
+                className="text-xs font-bold uppercase tracking-normal"
                 onFocus={() => handlePrefetch(link.tab)}
               >
                 {link.label}

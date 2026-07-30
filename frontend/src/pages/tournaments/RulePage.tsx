@@ -80,7 +80,7 @@ const RulePage = () => {
 
       <div className={`overflow-hidden ${TOURNAMENT_PANEL_CLASS} text-neutral-100`}>
         <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="border-b border-white/10 /20 p-4 lg:border-b-0 lg:border-r lg:p-5">
+          <aside className="hidden border-b border-white/10 /20 p-4 lg:block lg:border-b-0 lg:border-r lg:p-5">
             <p className="mb-3 text-xs uppercase tracking-[0.18em] text-zinc-400">
               Mục lục
             </p>
