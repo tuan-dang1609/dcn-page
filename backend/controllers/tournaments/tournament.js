@@ -673,11 +673,16 @@ tournamentRouter.post(
     date_end, register_start, register_end, check_in_start, check_in_end, created_by, max_player_per_team, max_participate)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`;
 
+    const resolvedBannerUrl =
+      typeof banner_url === "string" && banner_url.trim()
+        ? banner_url.trim()
+        : null;
+
     const queryParams = [
       name,
       slug,
       game_id,
-      banner_url,
+      resolvedBannerUrl,
       season,
       date_start,
       date_end,
@@ -854,11 +859,16 @@ tournamentRouter.patch(
     WHERE id = $14
     RETURNING *`;
 
+    const resolvedBannerUrl =
+      typeof banner_url === "string" && banner_url.trim()
+        ? banner_url.trim()
+        : (findTournament[0]?.banner_url ?? null);
+
     const queryParams = [
       name,
       slug,
       game_id,
-      banner_url,
+      resolvedBannerUrl,
       season,
       date_start,
       date_end,

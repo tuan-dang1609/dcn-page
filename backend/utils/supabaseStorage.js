@@ -2,9 +2,18 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL ?? "").trim();
 const SUPABASE_SERVICE_ROLE_KEY = String(
   process.env.SUPABASE_SERVICE_ROLE_KEY ??
     process.env.SUPABASE_SERVICE_KEY ??
+    process.env.SUPABASE_SECRET_KEY ??
     "",
 ).trim();
 const SUPABASE_BUCKET = String(process.env.SUPABASE_BUCKET ?? "image").trim();
+const ALLOW_UPLOAD_BYPASS =
+  String(process.env.ALLOW_UPLOAD_BYPASS ?? "")
+    .trim()
+    .toLowerCase() === "true";
+const UPLOAD_BYPASS_URL = String(
+  process.env.UPLOAD_BYPASS_URL ??
+    "https://placehold.co/1200x400/1a1a1a/eeeeee/png?text=banner-bypass",
+).trim();
 
 const resolveProjectBaseUrl = (rawUrl) => {
   const trimmed = rawUrl.trim().replace(/\/+$/, "");
@@ -26,10 +35,13 @@ const resolveProjectBaseUrl = (rawUrl) => {
   return trimmed;
 };
 
+export const isSupabaseUploadConfigured = () =>
+  Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+
 const getSupabaseConfig = () => {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  if (!isSupabaseUploadConfigured()) {
     throw new Error(
-      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY). To skip upload temporarily, set ALLOW_UPLOAD_BYPASS=true.",
     );
   }
 
@@ -83,6 +95,16 @@ export const uploadImageBuffer = async ({
   contentType,
   userId = null,
 }) => {
+  if (!isSupabaseUploadConfigured()) {
+    if (ALLOW_UPLOAD_BYPASS) {
+      return UPLOAD_BYPASS_URL;
+    }
+
+    throw new Error(
+      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY). To skip upload temporarily, set ALLOW_UPLOAD_BYPASS=true.",
+    );
+  }
+
   const { projectBaseUrl, bucket, serviceRoleKey } = getSupabaseConfig();
   const objectPath = buildStoragePath(fileName, userId);
   const uploadUrl = `${projectBaseUrl}/storage/v1/object/${bucket}/${objectPath}`;
@@ -107,6 +129,13 @@ export const uploadImageBuffer = async ({
 
 export const deleteImageByPublicUrl = async (publicUrl) => {
   if (!String(publicUrl ?? "").trim()) return false;
+
+  if (!isSupabaseUploadConfigured()) {
+    if (ALLOW_UPLOAD_BYPASS) return true;
+    throw new Error(
+      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY).",
+    );
+  }
 
   const { projectBaseUrl, bucket, serviceRoleKey } = getSupabaseConfig();
   const parsed = parseSupabasePublicObject(publicUrl);

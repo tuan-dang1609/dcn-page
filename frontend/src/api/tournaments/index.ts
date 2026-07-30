@@ -91,6 +91,12 @@ export const registerSoloToTournament = (tournamentId: number | string) =>
     getAuthConfig(),
   );
 
+export const unregisterSoloFromTournament = (tournamentId: number | string) =>
+  axios.delete(
+    `${tournamentsBaseUrl}/teams/${tournamentId}/register-solo`,
+    getAuthConfig(),
+  );
+
 export const getMatchesByTournamentId = async (
   tournamentId: number | string,
 ) => {

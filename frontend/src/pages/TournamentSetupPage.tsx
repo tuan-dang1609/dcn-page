@@ -1358,10 +1358,17 @@ const TournamentSetupPage = () => {
             </p>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Upload banner</label>
+              <label className="text-sm font-medium">
+                Upload banner{" "}
+                <span className="font-normal text-muted-foreground">
+                  (không bắt buộc)
+                </span>
+              </label>
               <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border py-3 text-sm hover:bg-muted/40 transition-colors">
                 <Plus className="h-4 w-4" />
-                <span>{bannerFile ? bannerFile.name : "Chọn ảnh banner"}</span>
+                <span>
+                  {bannerFile ? bannerFile.name : "Chọn ảnh banner (tuỳ chọn)"}
+                </span>
                 <input
                   type="file"
                   className="hidden"
@@ -1371,6 +1378,9 @@ const TournamentSetupPage = () => {
                   }
                 />
               </label>
+              <p className="text-xs text-muted-foreground">
+                Có thể bỏ trống và vẫn lưu để sang bước tiếp theo.
+              </p>
             </div>
 
             <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
