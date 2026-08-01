@@ -168,7 +168,7 @@ export const updateTournament = (
 export interface MilestonePayload {
   id?: number;
   title: string;
-  context: string;
+  context?: string | null;
   milestone_time?: string | null;
   sort_order?: number;
 }
@@ -179,7 +179,7 @@ export const createMilestones = (
 ) =>
   axios.post(
     `${tournamentsBaseUrl}/milestones/${tournamentId}`,
-    payload,
+    Array.isArray(payload) ? { milestones: payload } : payload,
     getAuthConfig(),
   );
 
@@ -189,7 +189,7 @@ export const syncMilestones = (
 ) =>
   axios.patch(
     `${tournamentsBaseUrl}/milestones/${tournamentId}`,
-    payload,
+    Array.isArray(payload) ? { milestones: payload } : payload,
     getAuthConfig(),
   );
 

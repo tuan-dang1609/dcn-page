@@ -85,6 +85,8 @@ interface MilestoneDraft {
 
 const createEmptyMilestone = (): MilestoneDraft => ({
   clientKey: `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  // Never set id for new drafts — PATCH treats missing id as INSERT.
+  id: undefined,
   title: "",
   context: "",
   milestone_time: "",
@@ -526,9 +528,7 @@ const TournamentSetupPage = () => {
 
     setCompletedSteps({
       1: true,
-      2: nextMilestones.some(
-        (item) => item.title.trim() && item.context.trim(),
-      ),
+      2: nextMilestones.some((item) => item.title.trim()),
       3: nextRules.some((item) => item.title.trim() && item.content.trim()),
       4: nextPrizes.some(
         (item) => item.place_label.trim() && item.prize.trim(),
@@ -780,21 +780,25 @@ const TournamentSetupPage = () => {
     if (!tournamentId) return;
 
     const payload: MilestonePayload[] = milestones
-      .filter((item) => item.title.trim() && item.context.trim())
-      .map((item, index) => ({
-        ...(toNumber(item.id) ? { id: Number(item.id) } : {}),
-        title: item.title.trim(),
-        context: item.context.trim(),
-        sort_order: index,
-        ...(toGmt7OffsetDateTime(item.milestone_time)
-          ? { milestone_time: toGmt7OffsetDateTime(item.milestone_time) }
-          : {}),
-      }));
+      .filter((item) => item.title.trim())
+      .map((item, index) => {
+        const serverId = toNumber(item.id);
+
+        return {
+          ...(serverId !== null && serverId > 0 ? { id: serverId } : {}),
+          title: item.title.trim(),
+          context: item.context.trim(),
+          sort_order: index,
+          ...(toGmt7OffsetDateTime(item.milestone_time)
+            ? { milestone_time: toGmt7OffsetDateTime(item.milestone_time) }
+            : {}),
+        };
+      });
 
     if (!payload.length) {
       toast({
         title: "Milestones rỗng",
-        description: "Hãy nhập ít nhất 1 milestone hợp lệ (title + context).",
+        description: "Hãy nhập ít nhất 1 milestone có title.",
         variant: "destructive",
       });
       return;
@@ -803,11 +807,14 @@ const TournamentSetupPage = () => {
     setSubmitting(true);
 
     try {
-      // Always sync (patch) so order/inserts/deletes stay consistent.
-      const response =
-        milestoneMode === "post"
-          ? await createMilestones(tournamentId, payload)
-          : await syncMilestones(tournamentId, payload);
+      // Prefer PATCH sync when any row already has a server id, so new rows
+      // are inserted alongside updates (POST would only append duplicates).
+      const hasExistingIds = payload.some((item) => item.id != null);
+      const usePatch = milestoneMode === "patch" || hasExistingIds;
+
+      const response = usePatch
+        ? await syncMilestones(tournamentId, payload)
+        : await createMilestones(tournamentId, payload);
 
       const savedRows = Array.isArray(response.data?.data)
         ? response.data.data
@@ -841,7 +848,7 @@ const TournamentSetupPage = () => {
 
       toast({
         title: "Lưu milestones thành công",
-        description: `Đã ${milestoneMode === "post" ? "tạo" : "đồng bộ"} milestones cho tournament #${tournamentId}.`,
+        description: `Đã ${usePatch ? "đồng bộ" : "tạo"} milestones cho tournament #${tournamentId}.`,
       });
     } catch (error: any) {
       toast({
@@ -1544,17 +1551,10 @@ const TournamentSetupPage = () => {
                   <div className="grid gap-2 md:grid-cols-3">
                     <Input
                       value={item.id ?? ""}
-                      title="ID milestone để update (nếu có)"
-                      onChange={(event) =>
-                        setMilestones((prev) =>
-                          prev.map((row) =>
-                            row.clientKey === item.clientKey
-                              ? { ...row, id: event.target.value }
-                              : row,
-                          ),
-                        )
-                      }
-                      placeholder="id (để update, tùy chọn)"
+                      title="ID từ server (chỉ đọc) — milestone mới để trống để thêm mới"
+                      readOnly
+                      placeholder="id (tự có sau khi lưu)"
+                      className="bg-muted/40"
                       inputMode="numeric"
                     />
                     <Input

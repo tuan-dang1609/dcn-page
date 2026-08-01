@@ -455,21 +455,46 @@ teamTourRoute.post(
         [soloTeamName, profile.profile_picture ?? null, soloTeamId],
       );
     } else {
-      const { rows: createdTeams } = await pool.query(
-        `
-        INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id
-        `,
-        [
-          soloTeamName,
-          shortName,
-          profile.profile_picture ?? null,
-          "#94A3B8",
-          userId,
-        ],
-      );
-      soloTeamId = Number(createdTeams[0]?.id);
+      // Solo/TFT: no team color. Shared default hex violates
+      // teams_team_color_hex_unique — prefer NULL; fallback to per-user hex.
+      const soloColorFallback = `#${((userId * 2654435761) >>> 0)
+        .toString(16)
+        .padStart(8, "0")
+        .slice(0, 6)
+        .toUpperCase()}`;
+
+      try {
+        const { rows: createdTeams } = await pool.query(
+          `
+          INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
+          VALUES ($1, $2, $3, NULL, $4)
+          RETURNING id
+          `,
+          [soloTeamName, shortName, profile.profile_picture ?? null, userId],
+        );
+        soloTeamId = Number(createdTeams[0]?.id);
+      } catch (error) {
+        // 23502 = not_null_violation, 23505 = unique_violation
+        if (error?.code !== "23502" && error?.code !== "23505") {
+          throw error;
+        }
+
+        const { rows: createdTeams } = await pool.query(
+          `
+          INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id
+          `,
+          [
+            soloTeamName,
+            shortName,
+            profile.profile_picture ?? null,
+            soloColorFallback,
+            userId,
+          ],
+        );
+        soloTeamId = Number(createdTeams[0]?.id);
+      }
     }
 
     if (!soloTeamId) {
