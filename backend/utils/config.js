@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./loadEnv.js";
 
 const PORT = process.env.PORT;
 
@@ -7,6 +7,24 @@ const APP_BASE_URL =
 
 const FRONTEND_BASE_URL =
   process.env.FRONTEND_BASE_URL ?? "http://localhost:8080";
+
+const ALLOWED_FRONTEND_ORIGINS = [
+  FRONTEND_BASE_URL,
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_ORIGIN,
+  ...(String(process.env.ALLOWED_FRONTEND_ORIGINS ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)),
+]
+  .map((value) => {
+    try {
+      return new URL(value).origin;
+    } catch {
+      return null;
+    }
+  })
+  .filter(Boolean);
 
 const RIOT_CLIENT_ID = process.env.RIOT_CLIENT_ID ?? "";
 const RIOT_CLIENT_SECRET = process.env.RIOT_CLIENT_SECRET ?? "";
@@ -32,6 +50,7 @@ export default {
   PORT,
   APP_BASE_URL,
   FRONTEND_BASE_URL,
+  ALLOWED_FRONTEND_ORIGINS,
   RIOT_CLIENT_ID,
   RIOT_CLIENT_SECRET,
   RIOT_REDIRECT_URI,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { API_BASE } from "@/lib/apiBase";
-import { useNavigate, useLocation, useParams } from "react-router-dom";
+import { Link, useNavigate, useLocation, useParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   ArrowLeft,
@@ -73,8 +73,15 @@ const normalizePlayerIds = (raw: unknown): number[] => {
 };
 
 const HeroBanner = ({ tournament }: HeroBannerProps) => {
-  const { user, logout, isRegistered, setIsRegistered, token, refreshUser } =
-    useAuth();
+  const {
+    user,
+    logout,
+    isRegistered,
+    setIsRegistered,
+    token,
+    refreshUser,
+    isLoading: isAuthLoading,
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { game } = useParams();
@@ -123,6 +130,70 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     setDialogMode("manage");
     setRegOpen(true);
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const shouldOpenRegister = params.get("register") === "1";
+    const riotStatus = params.get("riot");
+
+    if (!shouldOpenRegister && !riotStatus) return;
+    if (isAuthLoading) return;
+    if (shouldOpenRegister && !user) return;
+
+    let cancelled = false;
+
+    const finish = async () => {
+      if (riotStatus === "connected") {
+        toast.success("Đã liên kết Riot", {
+          description: "Riot ID đã được cập nhật. Bạn có thể đăng ký ngay.",
+        });
+        try {
+          await refreshUser();
+        } catch {
+          // ignore refresh errors; modal still opens
+        }
+      } else if (riotStatus === "failed") {
+        toast.error("Liên kết Riot thất bại", {
+          description:
+            params.get("reason") || "Không thể lấy Riot ID từ Riot Sign On.",
+        });
+      }
+
+      if (cancelled) return;
+
+      if (shouldOpenRegister) {
+        setDialogMode("manage");
+        setRegOpen(true);
+      }
+
+      params.delete("register");
+      params.delete("riot");
+      params.delete("reason");
+      params.delete("gameName");
+      params.delete("tagName");
+      const nextSearch = params.toString();
+      navigate(
+        {
+          pathname: location.pathname,
+          search: nextSearch ? `?${nextSearch}` : "",
+        },
+        { replace: true },
+      );
+    };
+
+    void finish();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isAuthLoading,
+    location.pathname,
+    location.search,
+    navigate,
+    refreshUser,
+    user,
+  ]);
 
   const handleSoloUnregisterClick = () => {
     setSoloUnregConfirmOpen(true);
@@ -440,20 +511,27 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                   )}
                 </Button>
 
-                <div className="flex items-center gap-2 bg-card/80 backdrop-blur-sm border border-border rounded-lg px-3 py-2">
-                  <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center overflow-hidden">
-                    <Avatar className="w-7 h-7">
+                <Link
+                  to="/profile"
+                  title="Hồ sơ cá nhân"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card/80 px-3 py-2 backdrop-blur-sm transition-colors hover:border-neutral-500 hover:bg-card"
+                >
+                  <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-primary/15">
+                    <Avatar className="h-7 w-7">
                       <AvatarImage
                         src={user.profile_picture ?? undefined}
                         alt={user.nickname}
                       />
-                      <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
+                      <AvatarFallback className="bg-primary text-[10px] font-bold text-primary-foreground">
                         {(user.nickname || "U")[0]}
                       </AvatarFallback>
                     </Avatar>
                   </div>
-                  <span className="text-sm font-semibold">{user.nickname}</span>
-                </div>
+                  <span className="max-w-28 truncate text-sm font-semibold sm:max-w-40">
+                    {user.nickname}
+                  </span>
+                  
+                </Link>
                 {isIndividualMode ? (
                   isRegistrationOpen || isRegistered ? (
                     <Button

@@ -1,3 +1,5 @@
+import "./loadEnv.js";
+
 const SUPABASE_URL = String(process.env.SUPABASE_URL ?? "").trim();
 const SUPABASE_SERVICE_ROLE_KEY = String(
   process.env.SUPABASE_SERVICE_ROLE_KEY ??
@@ -12,8 +14,17 @@ const ALLOW_UPLOAD_BYPASS =
     .toLowerCase() === "true";
 const UPLOAD_BYPASS_URL = String(
   process.env.UPLOAD_BYPASS_URL ??
-    "https://placehold.co/1200x400/1a1a1a/eeeeee/png?text=banner-bypass",
+    "https://nybmykdjtkjaatepkfog.supabase.co/storage/v1/object/public/image/users/default-avatar-icon-of-social-media-user-vector.jpg",
 ).trim();
+
+let warnedMissingConfig = false;
+const warnMissingConfigOnce = () => {
+  if (warnedMissingConfig) return;
+  warnedMissingConfig = true;
+  console.warn(
+    "[supabaseStorage] SUPABASE_SERVICE_ROLE_KEY is empty. Uploads fall back to the default image until you set the key in .env (Supabase → Settings → API → service_role).",
+  );
+};
 
 const resolveProjectBaseUrl = (rawUrl) => {
   const trimmed = rawUrl.trim().replace(/\/+$/, "");
@@ -95,14 +106,10 @@ export const uploadImageBuffer = async ({
   contentType,
   userId = null,
 }) => {
-  if (!isSupabaseUploadConfigured()) {
-    if (ALLOW_UPLOAD_BYPASS) {
-      return UPLOAD_BYPASS_URL;
-    }
-
-    throw new Error(
-      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY). To skip upload temporarily, set ALLOW_UPLOAD_BYPASS=true.",
-    );
+  if (!isSupabaseUploadConfigured() || ALLOW_UPLOAD_BYPASS) {
+    // Key missing / bypass — don't block signup/register; use default image.
+    if (!isSupabaseUploadConfigured()) warnMissingConfigOnce();
+    return UPLOAD_BYPASS_URL;
   }
 
   const { projectBaseUrl, bucket, serviceRoleKey } = getSupabaseConfig();
@@ -130,11 +137,9 @@ export const uploadImageBuffer = async ({
 export const deleteImageByPublicUrl = async (publicUrl) => {
   if (!String(publicUrl ?? "").trim()) return false;
 
-  if (!isSupabaseUploadConfigured()) {
-    if (ALLOW_UPLOAD_BYPASS) return true;
-    throw new Error(
-      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY).",
-    );
+  if (!isSupabaseUploadConfigured() || ALLOW_UPLOAD_BYPASS) {
+    if (!isSupabaseUploadConfigured()) warnMissingConfigOnce();
+    return true;
   }
 
   const { projectBaseUrl, bucket, serviceRoleKey } = getSupabaseConfig();

@@ -1,9 +1,12 @@
 /** Shared tournament UI tokens — flat, square, dark palette (not pickem). */
 
-export const TOURNAMENT_PAGE_BG_CLASS = " text-neutral-200";
+export const TOURNAMENT_PAGE_BG_CLASS = "text-neutral-200";
 
 export const TOURNAMENT_PAGE_TITLE_CLASS =
   "text-xl font-extrabold uppercase tracking-normal text-white";
+
+export const TOURNAMENT_PAGE_HINT_CLASS =
+  "text-xs leading-relaxed text-neutral-500";
 
 export const TOURNAMENT_NAV_WRAPPER_CLASS =
   "w-full border border-neutral-700 bg-[#141414]";
@@ -11,8 +14,7 @@ export const TOURNAMENT_NAV_WRAPPER_CLASS =
 export const TOURNAMENT_NAV_LINK_BASE =
   "flex min-h-9 flex-1 items-center justify-center px-2 py-2 text-center text-xs font-extrabold uppercase tracking-normal transition-colors";
 
-export const TOURNAMENT_NAV_LINK_ACTIVE =
-  "bg-[#2d2d2d] text-white";
+export const TOURNAMENT_NAV_LINK_ACTIVE = "bg-[#2d2d2d] text-white";
 
 export const TOURNAMENT_NAV_LINK_INACTIVE =
   "bg-transparent text-neutral-400 hover:bg-neutral-900 hover:text-white";
@@ -24,13 +26,13 @@ export const TOURNAMENT_SUBTAB_ACTIVE =
   "bg-[#2d2d2d] text-white border-neutral-600";
 
 export const TOURNAMENT_SUBTAB_INACTIVE =
-  " text-neutral-400 hover:bg-neutral-900 hover:text-white";
+  "text-neutral-400 hover:bg-neutral-900 hover:text-white";
 
 export const TOURNAMENT_SUBTAB_GROUP_CLASS =
-  "flex items-center gap-2 border border-neutral-700  px-2 py-1";
+  "flex items-center gap-2 border border-neutral-700 px-2 py-1";
 
 export const TOURNAMENT_TABLE_HEADER_CLASS =
-  "bg-[#D1D5DB] text-neutral-900 text-xs font-extrabold uppercase tracking-normal";
+  "h-10 bg-[#D1D5DB] px-2 text-[11px] font-extrabold uppercase tracking-normal text-neutral-900 md:h-12 md:px-4 md:text-xs";
 
 /** Header row: override TableRow default hover so header stays flat gray. */
 export const TOURNAMENT_TABLE_HEADER_ROW_CLASS =
@@ -42,16 +44,23 @@ export const TOURNAMENT_TABLE_ROW_CLASS =
 export const TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS =
   "border-b border-neutral-800 bg-[#141414] text-neutral-200 transition-colors duration-150 hover:bg-[#1c1c1c]";
 
+export const TOURNAMENT_TABLE_CELL_CLASS =
+  "px-2 py-2.5 text-[13px] md:px-4 md:py-3.5 md:text-sm";
+
 export const TOURNAMENT_PANEL_CLASS =
   "border border-neutral-700 bg-[#141414]";
 
-export const TOURNAMENT_TABLE_MIN_CLASS = "w-full min-w-[680px]";
+/** Mobile: fit viewport. PC: keep wide table like reference. */
+export const TOURNAMENT_TABLE_MIN_CLASS = "w-full min-w-0 md:min-w-[680px]";
+
+export const DEFAULT_USER_AVATAR_URL =
+  "https://nybmykdjtkjaatepkfog.supabase.co/storage/v1/object/public/image/users/default-avatar-icon-of-social-media-user-vector.jpg";
 
 export const TOURNAMENT_TABLE_TAG_CLASS =
-  "text-sm font-extrabold uppercase tracking-widest text-white whitespace-nowrap";
+  "text-sm font-extrabold uppercase tracking-normal text-white whitespace-nowrap";
 
 export const TOURNAMENT_TEAM_TAG_BADGE_CLASS =
-  "inline-block py-1 text-sm font-extrabold uppercase tracking-widest text-white";
+  "inline-block py-1 text-sm font-extrabold uppercase tracking-normal text-white";
 
 /** Card-style tab (label + title), matches reference bracket nav */
 export const TOURNAMENT_TAB_CARD_BASE =
@@ -109,7 +118,7 @@ export const TOURNAMENT_SECTION_META_CLASS =
   "mt-1 text-xs font-bold uppercase tracking-wider text-neutral-500";
 
 export const TOURNAMENT_PANEL_TITLE_CLASS =
-  "px-4 py-3 text-xs font-extrabold uppercase tracking-widest text-neutral-400 border-b border-neutral-700 bg-[#1a1a1a]";
+  "border-b border-neutral-700 bg-[#1a1a1a] px-4 py-3 text-xs font-extrabold uppercase tracking-normal text-neutral-400";
 
 export const TOURNAMENT_INFO_ROW_CLASS =
   "flex items-center justify-between gap-4 border-b border-neutral-800 px-4 py-3.5 last:border-b-0";

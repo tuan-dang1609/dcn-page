@@ -10,9 +10,13 @@ import axios from "axios";
 import { ArrowLeft, Link2, Loader2, Save, Upload } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import PageLoader from "@/components/PageLoader";
+import {
+  clearRiotOAuthReturn,
+  buildRiotOAuthResumeUrl,
+  saveRiotOAuthReturn,
+} from "@/lib/riotOAuthReturn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "@/hooks/use-toast";
 import { uploadImageToSupabase } from "@/lib/supabaseUpload";
@@ -24,6 +28,21 @@ import {
   type TeamInviteRecord,
 } from "@/api/teamInvites";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
+import {
+  DEFAULT_USER_AVATAR_URL,
+  TOURNAMENT_PAGE_BG_CLASS,
+  TOURNAMENT_PAGE_HINT_CLASS,
+  TOURNAMENT_PAGE_TITLE_CLASS,
+  TOURNAMENT_PANEL_CLASS,
+  TOURNAMENT_PANEL_TITLE_CLASS,
+  TOURNAMENT_SECTION_META_CLASS,
+} from "@/components/tournamentTheme";
+
+const FIELD_LABEL_CLASS =
+  "mb-1.5 block text-xs font-extrabold uppercase tracking-wider text-neutral-400";
+
+const FIELD_INPUT_CLASS =
+  "h-11 rounded-none border-neutral-600 bg-[#1a1a1a] text-base text-white placeholder:text-neutral-500 focus-visible:ring-neutral-500 md:text-sm";
 
 const ProfilePage = () => {
   const navigate = useNavigate();
@@ -34,7 +53,6 @@ const ProfilePage = () => {
   const [profilePictureUrl, setProfilePictureUrl] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreviewFromFile, setAvatarPreviewFromFile] = useState("");
-  const [saving, setSaving] = useState(false);
   const [savingNickname, setSavingNickname] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [connectingRiot, setConnectingRiot] = useState(false);
@@ -75,6 +93,15 @@ const ProfilePage = () => {
     const reason = searchParams.get("reason");
 
     if (!riotStatus) return;
+
+    const resumeUrl = buildRiotOAuthResumeUrl(searchParams.toString());
+    clearRiotOAuthReturn();
+
+    // Backend prod may always return to /profile — bounce back to tournament if saved.
+    if (resumeUrl) {
+      navigate(resumeUrl, { replace: true });
+      return;
+    }
 
     if (riotStatus === "connected") {
       toast({
@@ -134,7 +161,7 @@ const ProfilePage = () => {
     avatarPreviewFromFile ||
     profilePictureUrl.trim() ||
     user?.profile_picture ||
-    undefined;
+    DEFAULT_USER_AVATAR_URL;
 
   const handleGoBack = () => {
     if (window.history.length > 1) {
@@ -193,8 +220,6 @@ const ProfilePage = () => {
 
     try {
       const nextProfilePicture = await uploadImageToSupabase(avatarFile);
-
-      // update local preview immediately and add cache buster so browser refetches
       const cacheBusted = `${nextProfilePicture}?v=${Date.now()}`;
       setProfilePictureUrl(cacheBusted);
 
@@ -204,7 +229,6 @@ const ProfilePage = () => {
         { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      // refresh user to keep server state in sync
       await refreshUser();
       setAvatarFile(null);
 
@@ -228,11 +252,19 @@ const ProfilePage = () => {
 
   const handleConnectRiot = async () => {
     setConnectingRiot(true);
+    saveRiotOAuthReturn("/profile", false);
 
     try {
       const response = await axios.get<{ url?: string; error?: string }>(
         `${API_BASE}/api/users/riot/connect`,
-        { withCredentials: true },
+        {
+          params: {
+            return_to: "/profile",
+            origin: window.location.origin,
+          },
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          withCredentials: true,
+        },
       );
 
       const redirectUrl = response.data?.url;
@@ -306,67 +338,71 @@ const ProfilePage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background px-4 py-8">
-      <div className="mx-auto w-full max-w-3xl space-y-6">
+    <div className={`min-h-screen px-4 py-8 ${TOURNAMENT_PAGE_BG_CLASS}`}>
+      <div className="mx-auto w-full max-w-3xl space-y-5">
         <button
+          type="button"
           onClick={handleGoBack}
-          className="flex items-center gap-2text-[#EEEEEE] hover:text-foreground text-sm transition-colors"
+          className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-400 transition-colors hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" />
           Quay lại
         </button>
 
-        <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
+        <section className={`${TOURNAMENT_PANEL_CLASS} p-5 sm:p-6`}>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-4">
-              <Avatar className="h-16 w-16 border border-border">
+              <Avatar className="h-16 w-16 rounded-none border border-neutral-600">
                 <AvatarImage
                   src={avatarPreview}
                   alt={nickname || user.nickname}
+                  className="rounded-none object-cover"
                 />
-                <AvatarFallback className="font-semibold">
+                <AvatarFallback className="rounded-none bg-[#2d2d2d] font-semibold text-white">
                   {initials || "US"}
                 </AvatarFallback>
               </Avatar>
               <div>
-                <h1 className="text-2xl font-bold leading-tight">
+                <h1 className={`${TOURNAMENT_PAGE_TITLE_CLASS} text-xl sm:text-2xl`}>
                   Hồ sơ cá nhân
                 </h1>
-                <p className="text-smtext-[#EEEEEE]">@{user.nickname}</p>
+                <p className="mt-1 text-sm font-semibold text-neutral-300">
+                  @{user.nickname || "chưa có nickname"}
+                </p>
               </div>
             </div>
-            <Badge variant={user.riot_account ? "default" : "secondary"}>
+            <span
+              className={`inline-flex w-fit items-center border px-3 py-1.5 text-[11px] font-extrabold uppercase tracking-wider ${
+                user.riot_account
+                  ? "border-neutral-500 bg-[#2d2d2d] text-white"
+                  : "border-neutral-700 bg-[#1a1a1a] text-neutral-400"
+              }`}
+            >
               {user.riot_account ? "Riot đã liên kết" : "Chưa liên kết Riot"}
-            </Badge>
+            </span>
           </div>
         </section>
 
         {!hasTeam && pendingInvites.length > 0 && (
-          <section className="rounded-2xl border border-border bg-card p-6 shadow-lg space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">Lời mời team</h2>
-                <p className="text-sm text-muted-foreground">
-                  Bạn có thể chấp nhận hoặc từ chối các lời mời đang chờ.
-                </p>
-              </div>
-              <Badge variant="secondary">{pendingInvites.length} pending</Badge>
+          <section className={`${TOURNAMENT_PANEL_CLASS} overflow-hidden`}>
+            <div className={TOURNAMENT_PANEL_TITLE_CLASS}>
+              Lời mời team · {pendingInvites.length} đang chờ
             </div>
-            <div className="grid gap-3">
+            <div className="space-y-0">
               {pendingInvites.map((invite) => (
                 <div
                   key={invite.id}
-                  className="rounded-lg border border-border bg-background p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shadow-sm"
+                  className="flex flex-col gap-3 border-b border-neutral-800 px-4 py-3.5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-xs font-bold uppercase shrink-0">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-xs font-bold uppercase text-white">
                       {(invite.team_short_name ?? invite.team_name ?? "T")[0]}
                     </div>
                     <div className="min-w-0">
-                      <p className="font-semibold truncate">
+                      <p className="truncate font-semibold text-white">
                         {invite.team_name}
                       </p>
-                      <p className="text-sm text-muted-foreground truncate">
+                      <p className="truncate text-sm text-neutral-400">
                         Mời bởi {invite.inviter_username}
                       </p>
                     </div>
@@ -374,17 +410,19 @@ const ProfilePage = () => {
 
                   <div className="flex gap-2 sm:shrink-0">
                     <Button
-                      variant="ghost"
+                      type="button"
+                      variant="outline"
                       onClick={() => handleDeclineInvite(invite.id)}
                       disabled={inviteActionId === invite.id}
-                      className="border border-border text-muted-foreground"
+                      className="rounded-none border-neutral-600 bg-transparent text-neutral-300 hover:bg-neutral-900 hover:text-white"
                     >
                       Từ chối
                     </Button>
                     <Button
+                      type="button"
                       onClick={() => handleAcceptInvite(invite.id)}
                       disabled={inviteActionId === invite.id}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      className="rounded-none bg-white text-neutral-900 hover:bg-neutral-200"
                     >
                       {inviteActionId === invite.id
                         ? "Đang xử lý..."
@@ -397,25 +435,36 @@ const ProfilePage = () => {
           </section>
         )}
 
-        <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">Thông tin cơ bản</h2>
-
-          <div className="space-y-4">
-            <form onSubmit={handleSaveNickname} className="space-y-2">
+        <section className={`${TOURNAMENT_PANEL_CLASS} overflow-hidden`}>
+          <div className={TOURNAMENT_PANEL_TITLE_CLASS}>Thông tin cơ bản</div>
+          <div className="space-y-6 p-5 sm:p-6">
+            <form onSubmit={handleSaveNickname} className="space-y-3">
               <div>
-                <label className="text-sm font-medium">Nickname</label>
+                <label htmlFor="profile-nickname" className={FIELD_LABEL_CLASS}>
+                  Nickname
+                </label>
                 <Input
+                  id="profile-nickname"
                   value={nickname}
                   onChange={(event) => setNickname(event.target.value)}
                   placeholder="Nhập nickname của bạn"
+                  className={FIELD_INPUT_CLASS}
+                  autoComplete="nickname"
                 />
+                <p className={`${TOURNAMENT_PAGE_HINT_CLASS} mt-1.5`}>
+                  Tên hiển thị trên giải đấu và bảng xếp hạng.
+                </p>
               </div>
 
-              <Button type="submit" disabled={savingNickname} className="gap-2">
+              <Button
+                type="submit"
+                disabled={savingNickname}
+                className="h-10 gap-2 rounded-none bg-white px-4 font-bold text-neutral-900 hover:bg-neutral-200"
+              >
                 {savingNickname ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Đang lưu nickname...
+                    Đang lưu...
                   </>
                 ) : (
                   <>
@@ -426,73 +475,96 @@ const ProfilePage = () => {
               </Button>
             </form>
 
-            <form onSubmit={handleUploadAvatar} className="space-y-2">
-              <div>
-                <label className="text-sm font-medium">Upload ảnh mới</label>
-                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border py-3 text-sm hover:bg-muted/40 transition-colors">
-                  <Upload className="h-4 w-4" />
-                  <span>
-                    {avatarFile ? avatarFile.name : "Chọn ảnh để upload"}
-                  </span>
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={(event) =>
-                      setAvatarFile(event.target.files?.[0] ?? null)
-                    }
-                  />
-                </label>
-              </div>
+            <div className="border-t border-neutral-800 pt-6">
+              <form onSubmit={handleUploadAvatar} className="space-y-3">
+                <div>
+                  <p className={FIELD_LABEL_CLASS}>Ảnh đại diện</p>
+                  <div className="mb-3 flex items-center gap-4">
+                    <Avatar className="h-14 w-14 rounded-none border border-neutral-600">
+                      <AvatarImage
+                        src={avatarPreview}
+                        alt="preview"
+                        className="rounded-none object-cover"
+                      />
+                      <AvatarFallback className="rounded-none bg-[#2d2d2d] text-white">
+                        {initials || "US"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <p className={TOURNAMENT_PAGE_HINT_CLASS}>
+                      JPG, PNG hoặc WEBP · tối đa 5MB
+                    </p>
+                  </div>
+                  <label className="flex cursor-pointer items-center justify-center gap-2 border border-dashed border-neutral-600 bg-[#1a1a1a] py-3.5 text-sm font-semibold text-neutral-200 transition-colors hover:border-neutral-500 hover:bg-[#222] hover:text-white">
+                    <Upload className="h-4 w-4 text-neutral-400" />
+                    <span>
+                      {avatarFile ? avatarFile.name : "Chọn ảnh để upload"}
+                    </span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(event) =>
+                        setAvatarFile(event.target.files?.[0] ?? null)
+                      }
+                    />
+                  </label>
+                </div>
 
-              <Button type="submit" disabled={savingAvatar} className="gap-2">
-                {savingAvatar ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Đang upload ảnh...
-                  </>
-                ) : (
-                  <>
-                    <Save className="h-4 w-4" />
-                    Cập nhật ảnh
-                  </>
-                )}
-              </Button>
-            </form>
+                <Button
+                  type="submit"
+                  disabled={savingAvatar || !avatarFile}
+                  className="h-10 gap-2 rounded-none bg-white px-4 font-bold text-neutral-900 hover:bg-neutral-200 disabled:border disabled:border-neutral-700 disabled:bg-neutral-800 disabled:text-neutral-500"
+                >
+                  {savingAvatar ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Đang upload...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      Cập nhật ảnh
+                    </>
+                  )}
+                </Button>
+              </form>
+            </div>
           </div>
         </section>
 
-        <section className="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-2">Riot Account</h2>
-          <p className="text-smtext-[#EEEEEE] mb-4">
-            Liên kết Riot Sign On để lấy Riot ID và dùng cho đăng ký giải đấu.
-          </p>
-
-          <div className="rounded-md border border-border bg-muted/30 p-4 mb-4">
-            <p className="text-smtext-[#EEEEEE]">Riot ID hiện tại</p>
-            <p className="font-semibold text-foreground mt-1">
-              {user.riot_account || "Chưa có"}
+        <section className={`${TOURNAMENT_PANEL_CLASS} overflow-hidden`}>
+          <div className={TOURNAMENT_PANEL_TITLE_CLASS}>Riot Account</div>
+          <div className="space-y-4 p-5 sm:p-6">
+            <p className={TOURNAMENT_PAGE_HINT_CLASS}>
+              Liên kết Riot Sign On để lấy Riot ID và dùng cho đăng ký giải đấu.
             </p>
-          </div>
 
-          <Button
-            type="button"
-            onClick={handleConnectRiot}
-            disabled={connectingRiot}
-            className="gap-2"
-          >
-            {connectingRiot ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Đang chuyển sang Riot...
-              </>
-            ) : (
-              <>
-                <Link2 className="h-4 w-4" />
-                {user.riot_account ? "Liên kết lại Riot" : "Kết nối Riot"}
-              </>
-            )}
-          </Button>
+            <div className="border border-neutral-700 bg-[#1a1a1a] px-4 py-3.5">
+              <p className={TOURNAMENT_SECTION_META_CLASS}>Riot ID hiện tại</p>
+              <p className="mt-1 text-base font-bold text-white">
+                {user.riot_account || "Chưa có"}
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              onClick={handleConnectRiot}
+              disabled={connectingRiot}
+              className="h-10 gap-2 rounded-none border border-neutral-600 bg-[#2d2d2d] px-4 font-bold text-white hover:border-neutral-500 hover:bg-neutral-700"
+            >
+              {connectingRiot ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Đang chuyển sang Riot...
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-4 w-4" />
+                  {user.riot_account ? "Liên kết lại Riot" : "Kết nối Riot"}
+                </>
+              )}
+            </Button>
+          </div>
         </section>
       </div>
     </div>
