@@ -69,7 +69,7 @@ const getInitials = (name?: string | null) => {
 
 /** Avatar in roster modal — fixed square so mobile table cells don't stretch it. */
 const ROSTER_MEMBER_AVATAR_CLASS =
-  "relative flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center overflow-hidden border border-neutral-600 bg-[#2d2d2d] text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-neutral-300 aspect-square";
+  "relative flex h-11 w-11 sm:h-12 sm:w-12 shrink-0 items-center justify-center overflow-hidden border border-neutral-600 bg-[#2d2d2d] text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-neutral-300 aspect-square";
 
 /** ~5 member rows visible; scales with viewport on mobile. */
 const ROSTER_BODY_MAX_HEIGHT_CLASS =

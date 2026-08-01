@@ -568,8 +568,8 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                   title="Hồ sơ cá nhân"
                   className="flex items-center gap-2 rounded-lg border border-border bg-card/80 px-3 py-2 backdrop-blur-sm transition-colors hover:border-neutral-500 hover:bg-card"
                 >
-                  <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-primary/15">
-                    <Avatar className="h-7 w-7">
+                  <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-primary/15">
+                    <Avatar className="h-9 w-9">
                       <AvatarImage
                         src={user.profile_picture ?? undefined}
                         alt={user.nickname}
@@ -611,7 +611,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                     className="h-10 rounded-full border border-border bg-card/80 backdrop-blur-sm px-3 py-2 flex items-center gap-2 max-w-55"
                     aria-label="Xem đồng đội trong giải"
                   >
-                    <Avatar className="h-6 w-6">
+                    <Avatar className="h-8 w-8">
                       <AvatarImage
                         src={user?.team?.logo_url ?? undefined}
                         alt={user?.team?.name ?? "Team"}
@@ -666,7 +666,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                     </Button>
                   ) : (
                     <div className="flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
-                      <Avatar className="h-6 w-6">
+                      <Avatar className="h-8 w-8">
                         <AvatarImage
                           src={user?.team?.logo_url ?? undefined}
                           alt={user?.team?.name ?? "Team"}

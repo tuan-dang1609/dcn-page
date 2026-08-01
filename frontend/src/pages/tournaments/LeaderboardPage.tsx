@@ -47,6 +47,7 @@ type LeaderboardOutletContext = {
   tournament?: {
     id?: number | string;
     short_name?: string;
+    registration_mode?: "org" | "individual" | string;
   };
   isLoading?: boolean;
 };
@@ -115,6 +116,9 @@ const LeaderboardPage = () => {
 
   const tournamentId = tournament?.id;
   const showPlayerLeaderboard = isAovGameSlug(game ?? tournament?.short_name);
+  const isIndividualMode =
+    String(tournament?.registration_mode ?? "org").toLowerCase() ===
+    "individual";
   const [view, setView] = useState<LeaderboardView>("teams");
   const [teamPage, setTeamPage] = useState(1);
   const [playerPage, setPlayerPage] = useState(1);
@@ -207,7 +211,7 @@ const LeaderboardPage = () => {
                   : TOURNAMENT_SUBTAB_INACTIVE
               }`}
             >
-              Đội
+              {isIndividualMode ? "Xếp hạng" : "Đội"}
             </button>
             <button
               type="button"
@@ -258,8 +262,15 @@ const LeaderboardPage = () => {
                     <TableHead
                       className={`${TOURNAMENT_TABLE_HEADER_CLASS} !text-left w-[40%] md:w-auto`}
                     >
-                      Đội
+                      {isIndividualMode ? "Thành viên" : "Đội"}
                     </TableHead>
+                    {isIndividualMode ? (
+                      <TableHead
+                        className={`${TOURNAMENT_TABLE_HEADER_CLASS} !text-left hidden whitespace-nowrap md:table-cell md:w-56`}
+                      >
+                        Riot ID
+                      </TableHead>
+                    ) : null}
                     <TableHead
                       className={`${TOURNAMENT_TABLE_HEADER_CLASS} !text-center w-[16%] md:w-24`}
                     >
@@ -319,26 +330,51 @@ const LeaderboardPage = () => {
                           <div className="flex min-w-0 items-center gap-2 md:gap-3">
                             <img
                               src={
+                                (isIndividualMode
+                                  ? row.primary_profile_picture
+                                  : null) ||
                                 row.logo_url ||
-                                "https://dongchuyennghiep.vercel.app/image/waiting.png"
+                                DEFAULT_USER_AVATAR_URL
                               }
                               alt=""
-                              className="h-8 w-8 shrink-0 object-cover md:h-10 md:w-10"
+                              className="h-10 w-10 shrink-0 object-cover md:h-12 md:w-12"
                             />
-                            <span className="truncate font-bold text-white">
-                              <span className="md:hidden">
-                                {row.short_name ||
-                                  row.name ||
-                                  `Team ${row.team_id}`}
+                            <div className="min-w-0 leading-snug">
+                              <span className="block truncate font-bold text-white">
+                                {isIndividualMode
+                                  ? row.primary_nickname ||
+                                    row.name ||
+                                    row.short_name ||
+                                    `Player ${row.team_id}`
+                                  : null}
+                                {!isIndividualMode ? (
+                                  <>
+                                    <span className="md:hidden">
+                                      {row.short_name ||
+                                        row.name ||
+                                        `Team ${row.team_id}`}
+                                    </span>
+                                    <span className="hidden md:inline">
+                                      {row.name ||
+                                        row.short_name ||
+                                        `Team ${row.team_id}`}
+                                    </span>
+                                  </>
+                                ) : null}
                               </span>
-                              <span className="hidden md:inline">
-                                {row.name ||
-                                  row.short_name ||
-                                  `Team ${row.team_id}`}
-                              </span>
-                            </span>
+                              {isIndividualMode && row.primary_riot_account ? (
+                                <span className="mt-0.5 block truncate text-[11px] font-medium text-neutral-400 md:hidden">
+                                  {row.primary_riot_account}
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         </TableCell>
+                        {isIndividualMode ? (
+                          <TableCell className="hidden px-4 py-4 text-sm font-semibold text-neutral-200 md:table-cell">
+                            {row.primary_riot_account || "—"}
+                          </TableCell>
+                        ) : null}
                         <TableCell className="!text-center px-2 py-2.5 text-[13px] font-bold text-primary tabular-nums md:px-4 md:py-4 md:text-sm">
                           {row.wins}
                         </TableCell>
@@ -434,7 +470,7 @@ const LeaderboardPage = () => {
                                 row.profile_picture || DEFAULT_USER_AVATAR_URL
                               }
                               alt=""
-                              className="h-7 w-7 shrink-0 object-cover"
+                              className="h-9 w-9 shrink-0 object-cover"
                             />
                             <div className="min-w-0 leading-snug">
                               <div
@@ -540,7 +576,7 @@ const LeaderboardPage = () => {
                                 row.profile_picture || DEFAULT_USER_AVATAR_URL
                               }
                               alt=""
-                              className="h-10 w-10 shrink-0 object-cover"
+                              className="h-12 w-12 shrink-0 object-cover"
                             />
                             <div className="min-w-0 leading-snug">
                               <div

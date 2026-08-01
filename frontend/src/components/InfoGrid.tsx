@@ -14,6 +14,7 @@ type TournamentInfo = {
   icon_game_url?: string;
   max_player_per_team?: number;
   max_participate?: number;
+  registration_mode?: "org" | "individual" | string;
   prizes?: Array<{ prize?: string }>;
   date_start?: string;
   date_end?: string;
@@ -81,6 +82,10 @@ const formatTotalPrize = (prizes?: Array<{ prize?: string }>) => {
 };
 
 const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
+  const isIndividualMode =
+    String(tournament?.registration_mode ?? "org").toLowerCase() ===
+    "individual";
+
   const infoItems: InfoItem[] = [
     {
       icon: Gamepad2,
@@ -93,15 +98,17 @@ const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
     },
     {
       icon: Users,
-      label: "Số người trong đội",
+      label: isIndividualMode ? "Hình thức" : "Số người trong đội",
       value: displayValue(
         isLoading,
-        String(tournament?.max_player_per_team ?? "—"),
+        isIndividualMode
+          ? "Cá nhân"
+          : String(tournament?.max_player_per_team ?? "—"),
       ),
     },
     {
       icon: UserCheck,
-      label: "Giới hạn",
+      label: isIndividualMode ? "Giới hạn thành viên" : "Giới hạn",
       value: displayValue(
         isLoading,
         String(tournament?.max_participate ?? "—"),

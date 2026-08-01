@@ -150,6 +150,7 @@ const loadTournamentInfo = async (tournamentId) => {
        t.logo_url,
        t.team_color_hex,
        u.nickname,
+       u.profile_picture,
        t.created_at,
        COALESCE(
          (to_jsonb(tt)->>'is_checked_in')::boolean,
@@ -168,7 +169,15 @@ const loadTournamentInfo = async (tournamentId) => {
          WHERE ttp2.tournament_team_id = tt.id
          ORDER BY ttp2.user_id
          LIMIT 1
-       ) AS primary_riot_account
+       ) AS primary_riot_account,
+       (
+         SELECT u2.profile_picture
+         FROM tournament_team_players ttp2
+         JOIN users u2 ON u2.id = ttp2.user_id
+         WHERE ttp2.tournament_team_id = tt.id
+         ORDER BY ttp2.user_id
+         LIMIT 1
+       ) AS primary_profile_picture
  FROM tournament_teams tt
  JOIN teams t ON t.id = tt.team_id
  JOIN users u ON u.id = t.created_by
