@@ -53,7 +53,12 @@ const SignupPage = () => {
       let logoUrl: string | null = null;
 
       if (avatarFile) {
-        logoUrl = await uploadImageToSupabase(avatarFile);
+        try {
+          logoUrl = await uploadImageToSupabase(avatarFile);
+        } catch {
+          // Upload optional — backend will use the default avatar.
+          logoUrl = null;
+        }
       }
 
       await axios.post(`${API_BASE}/api/users`, {
@@ -160,7 +165,7 @@ const SignupPage = () => {
               <label className="flex items-center justify-center gap-2 border border-dashed border-border rounded-md py-3 cursor-pointer hover:bg-muted/30 transition-colors">
                 <Upload className="w-4 h-4" />
                 <span className="text-sm">
-                  {avatarFile ? avatarFile.name : "Chọn ảnh để upload Supabase"}
+                  {avatarFile ? avatarFile.name : "Chọn ảnh"}
                 </span>
                 <input
                   type="file"

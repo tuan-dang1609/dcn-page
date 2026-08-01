@@ -26,6 +26,7 @@ import {
   X,
   Trash2,
   Link2 as LinkIcon,
+  Loader2,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
@@ -54,7 +55,7 @@ import {
   registerSoloToTournament,
   unregisterSoloFromTournament,
 } from "@/api/tournaments";
-import { Link } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 
 const normalizePlayerIds = (raw: unknown): number[] => {
   let value = raw;
@@ -171,6 +172,7 @@ const TournamentRegistration = ({
   alreadyRegistered = false,
 }: Props) => {
   const { user, token, isRegistered, setIsRegistered, refreshUser } = useAuth();
+  const location = useLocation();
   const isIndividualMode =
     String(registrationMode ?? "org").toLowerCase() === "individual";
   const isRosterView = viewMode === "roster";
@@ -178,6 +180,7 @@ const TournamentRegistration = ({
     "team" | "members" | "create-team" | "edit-team" | "team-members"
   >(isRosterView ? "members" : "team");
   const [soloSubmitting, setSoloSubmitting] = useState(false);
+  const [connectingRiot, setConnectingRiot] = useState(false);
   const [soloAlreadyRegistered, setSoloAlreadyRegistered] = useState(
     Boolean(alreadyRegistered || isRegistered),
   );
@@ -1020,7 +1023,7 @@ const TournamentRegistration = ({
     if (!riotAccount) {
       toast({
         title: "Thiếu Riot ID",
-        description: "Hãy liên kết Riot trên trang Profile trước khi đăng ký.",
+        description: "Hãy liên kết Riot trước khi đăng ký.",
         variant: "destructive",
       });
       return;
@@ -1079,6 +1082,53 @@ const TournamentRegistration = ({
     }
   };
 
+  const handleConnectRiot = async () => {
+    if (!token) {
+      toast({
+        title: "Chưa đăng nhập",
+        description: "Hãy đăng nhập trước khi liên kết Riot.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setConnectingRiot(true);
+
+    try {
+      const response = await axios.get<{ url?: string; error?: string }>(
+        `${API_BASE}/api/users/riot/connect`,
+        {
+          params: {
+            // Path only — avoid `?` in return_to (breaks some query parsers).
+            return_to: location.pathname,
+            open_register: "1",
+            origin: window.location.origin,
+          },
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      const redirectUrl = response.data?.url;
+      if (!redirectUrl) {
+        throw new Error(
+          response.data?.error || "Không tạo được URL Riot OAuth",
+        );
+      }
+
+      window.location.assign(redirectUrl);
+    } catch (error: any) {
+      setConnectingRiot(false);
+      toast({
+        title: "Không thể bắt đầu Riot Sign On",
+        description:
+          error?.response?.data?.error ||
+          error?.message ||
+          "Vui lòng thử lại sau.",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Keep hook order stable: guard only after all hooks are declared.
   if (!user) return null;
 
@@ -1125,8 +1175,8 @@ const TournamentRegistration = ({
 
             {!hasRiot ? (
               <div className="border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                Bạn chưa liên kết Riot. Vào Profile để kết nối Riot Sign On rồi
-                quay lại đăng ký.
+                Bạn chưa liên kết Riot. Nhấn &quot;Liên kết Riot&quot; để kết
+                nối Riot Sign On, sau đó quay lại đây để đăng ký.
               </div>
             ) : null}
           </div>
@@ -1141,13 +1191,21 @@ const TournamentRegistration = ({
             </Button>
             {!hasRiot ? (
               <Button
-                asChild
+                onClick={() => void handleConnectRiot()}
+                disabled={connectingRiot}
                 className="gap-2 rounded-sm bg-[#2d2d2d] text-white hover:bg-neutral-700"
               >
-                <Link to="/profile">
-                  <LinkIcon className="h-4 w-4" />
-                  Liên kết Riot
-                </Link>
+                {connectingRiot ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Đang chuyển sang Riot...
+                  </>
+                ) : (
+                  <>
+                    <LinkIcon className="h-4 w-4" />
+                    Liên kết Riot
+                  </>
+                )}
               </Button>
             ) : soloAlreadyRegistered ? (
               <Button

@@ -7,10 +7,7 @@ import {
   ArrowRight,
   Search,
   Crown,
-  Gamepad2,
-  Target,
   Shield,
-  UserPlus,
 } from "lucide-react";
 import {
   seriesInfo as fallbackSeriesInfo,
@@ -21,7 +18,6 @@ import {
   Tournament as UiTournament,
 } from "@/data/series";
 import PageLoader from "@/components/PageLoader";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 import {
@@ -29,6 +25,18 @@ import {
   type SeriesTournamentResponse,
 } from "@/api/series";
 import { useSeriesById } from "@/hooks/useSeriesById";
+import UserMenu from "@/components/UserMenu";
+import {
+  TOURNAMENT_PAGE_BG_CLASS,
+  TOURNAMENT_PAGE_HINT_CLASS,
+  TOURNAMENT_PAGE_TITLE_CLASS,
+  TOURNAMENT_PANEL_CLASS,
+  TOURNAMENT_SECTION_META_CLASS,
+  TOURNAMENT_SUBTAB_ACTIVE,
+  TOURNAMENT_SUBTAB_BASE,
+  TOURNAMENT_SUBTAB_INACTIVE,
+  TOURNAMENT_TABLE_HEADER_CLASS,
+} from "@/components/tournamentTheme";
 
 const fallbackTournaments: UiTournament[] = [];
 const fallbackTeams: UiTeam[] = [];
@@ -85,11 +93,11 @@ const mapApiTournamentToUi = (item: SeriesTournamentResponse): UiTournament => {
     gameIcon: "🎮",
     bannerUrl:
       item.banner_url ||
-      "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&h=340&fit=crop",
+      "https://dongchuyennghiep.vercel.app/image/waiting.png",
     status: getTournamentStatus(item.date_start, item.date_end),
     startDate: item.date_start ?? new Date().toISOString(),
     endDate: item.date_end ?? item.date_start ?? new Date().toISOString(),
-    prizePool: "Dang cap nhat",
+    prizePool: "Đang cập nhật",
     maxPlayers: Number(item.max_participate ?? 0),
     registeredPlayers: 0,
     organizer: "Dong Chuyen Nghiep",
@@ -134,36 +142,33 @@ const TournamentCard = ({
     <Link
       to={`/tournament/${t.short_name}/${t.slug}`}
       state={seriesSlug ? { fromSeriesSlug: seriesSlug } : undefined}
-      className="group bg-card border border-border rounded-2xl overflow-hidden hover:border-primary/30 transition-all duration-300 flex flex-col"
+      className={`group flex flex-col overflow-hidden transition-colors hover:border-neutral-500 ${TOURNAMENT_PANEL_CLASS}`}
     >
-      {/* Image */}
-      <div className="relative h-40 overflow-hidden">
+      <div className="relative h-40 overflow-hidden border-b border-neutral-800">
         <img
           src={t.bannerUrl}
           alt={t.title}
-          className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-700"
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
           loading="lazy"
         />
-        <div className="absolute inset-0 bg-linear-to-t from-card via-card/30 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/40 to-transparent" />
       </div>
 
-      {/* Body */}
-      <div className="p-4 flex flex-col flex-1">
-        <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-primary/80 mb-1.5">
+      <div className="flex flex-1 flex-col p-4">
+        <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
           {t.game}
         </p>
-        <h3 className="font-bold text-base leading-snug text-foreground mb-2 line-clamp-2 group-hover:text-primary transition-colors">
+        <h3 className="mb-2 line-clamp-2 text-base font-bold leading-snug text-white transition-colors group-hover:text-neutral-200">
           {t.title}
         </h3>
-        <p className="text-xstext-[#EEEEEE] leading-relaxed mb-4 line-clamp-2">
+        <p className="mb-4 line-clamp-2 text-xs leading-relaxed text-neutral-400">
           {t.description}
         </p>
 
-        {/* Meta */}
         <div className="mt-auto space-y-2.5">
           <div className="grid grid-cols-2 gap-2">
-            <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Calendar className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
+            <div className="flex items-center gap-2 text-xs text-neutral-400">
+              <Calendar className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
               <span>
                 {new Date(t.startDate).toLocaleDateString("vi-VN", {
                   day: "2-digit",
@@ -171,44 +176,42 @@ const TournamentCard = ({
                 })}
               </span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Shield className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
+            <div className="flex items-center gap-2 text-xs text-neutral-400">
+              <Shield className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
               <span>{t.format}</span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Trophy className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
+            <div className="flex items-center gap-2 text-xs text-neutral-400">
+              <Trophy className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
               <span>{t.prizePool}</span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-secondary-foreground">
-              <Users className="w-3.5 h-3.5text-[#EEEEEE] shrink-0" />
+            <div className="flex items-center gap-2 text-xs text-neutral-400">
+              <Users className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
               <span>
                 {t.teamSize} · {t.registered_count}/{t.maxPlayers}
               </span>
             </div>
           </div>
 
-          {/* Progress */}
-          <div className="w-full bg-secondary rounded-full h-1">
+          <div className="h-1 w-full bg-neutral-800">
             <div
-              className="bg-primary h-1 rounded-full transition-all duration-700"
+              className="h-1 bg-neutral-400 transition-all duration-500"
               style={{ width: `${fill}%` }}
             />
           </div>
 
-          {/* Winner badge or CTA */}
           {t.winner ? (
-            <div className="flex items-center gap-2 bg-primary/5 border border-primary/10 rounded-lg px-3 py-2">
-              <Crown className="w-3.5 h-3.5 text-primary" />
-              <span className="text-xs font-semibold text-primary">
+            <div className="flex items-center gap-2 border border-neutral-700 bg-[#1a1a1a] px-3 py-2">
+              <Crown className="h-3.5 w-3.5 text-neutral-300" />
+              <span className="text-xs font-semibold text-neutral-200">
                 Vô địch: {t.winner}
               </span>
             </div>
           ) : (
-            <div className="flex items-center justify-between text-xs font-semibold text-primary/70 group-hover:text-primary transition-colors pt-1">
+            <div className="flex items-center justify-between pt-1 text-xs font-semibold text-neutral-400 transition-colors group-hover:text-white">
               <span>
                 {t.status === "ongoing" ? "Xem trực tiếp" : "Xem chi tiết"}
               </span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
             </div>
           )}
         </div>
@@ -284,10 +287,8 @@ const SeriesPage = () => {
     return apiTeams.length ? apiTeams : fallbackTeams;
   }, [series]);
 
-  // duplicate teams for infinite marquee
   const marqueeTeams = [...participatingTeams, ...participatingTeams];
 
-  // Calculate leaderboard from completed tournaments only
   const completedTournamentIds = tournamentIds.filter((tid) => {
     const t = fallbackTournaments.find((x) => x.id === tid);
     return t?.status === "completed";
@@ -315,13 +316,15 @@ const SeriesPage = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6">
-        <div className="text-center max-w-md">
-          <p className="text-base font-semibold text-foreground mb-2">
-            Khong tai duoc du lieu series
+      <div
+        className={`flex min-h-screen items-center justify-center px-6 ${TOURNAMENT_PAGE_BG_CLASS}`}
+      >
+        <div className="max-w-md text-center">
+          <p className="mb-2 text-base font-semibold text-white">
+            Không tải được dữ liệu series
           </p>
-          <p className="text-smtext-[#EEEEEE]">
-            Vui long thu lai sau hoac kiem tra ket noi API `/api/series/
+          <p className={TOURNAMENT_PAGE_HINT_CLASS}>
+            Vui lòng thử lại sau hoặc kiểm tra kết nối API `/api/series/
             {seriesSlug}`.
           </p>
         </div>
@@ -330,32 +333,32 @@ const SeriesPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={`min-h-screen ${TOURNAMENT_PAGE_BG_CLASS}`}>
       {/* ═══ HERO ═══ */}
-      <section className="relative overflow-hidden border-b border-border">
-        {/* Subtle grid pattern */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: heroBannerUrl
-              ? `linear-gradient(to bottom, hsl(var(--background) / 0.82), hsl(var(--background) / 0.9)), url("${heroBannerUrl}")`
-              : "radial-gradient(circle at 1px 1px, hsl(var(--foreground)) 1px, transparent 0)",
-            backgroundSize: heroBannerUrl ? "cover" : "32px 32px",
-            backgroundPosition: "center",
-          }}
-        />
-        <div className="absolute top-0 left-0 w-150 h-150 bg-primary/5 rounded-full blur-[120px] -translate-x-1/2 -translate-y-1/2" />
+      <section className="relative overflow-hidden border-b border-neutral-800">
+        {heroBannerUrl ? (
+          <div
+            className="absolute inset-0 opacity-[0.18]"
+            style={{
+              backgroundImage: `linear-gradient(to bottom, #0a0a0a 10%, #0a0a0acc 55%, #0a0a0a), url("${heroBannerUrl}")`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }}
+          />
+        ) : null}
 
-        <div className="max-w-6xl mx-auto px-6 md:px-10 pt-16 pb-14 md:pt-24 md:pb-20 relative">
-          <h1 className="text-4xl md:text-6xl font-bold leading-[1.1] max-w-3xl mb-5 text-foreground">
+        <div className="relative mx-auto max-w-6xl px-6 pb-12 pt-14 md:px-10 md:pb-16 md:pt-20">
+          <div className="mb-6 flex justify-end">
+            <UserMenu />
+          </div>
+          <h1 className="mb-4 max-w-3xl text-3xl font-extrabold uppercase leading-tight tracking-normal text-white md:text-5xl">
             {seriesInfo.name}
           </h1>
-          <p className="text-muted-foreground max-w-lg text-sm md:text-base leading-relaxed mb-8">
+          <p className="mb-8 max-w-lg text-sm leading-relaxed text-neutral-400 md:text-base">
             {seriesInfo.description}
           </p>
 
-          {/* Stats row */}
-          <div className="flex items-center gap-8 md:gap-12">
+          <div className="flex flex-wrap items-end gap-8 md:gap-12">
             {[
               { val: seriesInfo.totalTournaments, label: "Giải đấu" },
               {
@@ -365,59 +368,58 @@ const SeriesPage = () => {
               { val: seriesInfo.totalPrize, label: "Giải thưởng VĐ tổng" },
             ].map((s) => (
               <div key={s.label}>
-                <p className="text-xl md:text-2xl font-bold text-foreground">
+                <p className="text-xl font-bold text-white md:text-2xl">
                   {s.val}
                 </p>
-                <p className="text-[10px] uppercase tracking-[0.15em] text-[#EEEEEE] mt-0.5">
-                  {s.label}
-                </p>
+                <p className={TOURNAMENT_SECTION_META_CLASS}>{s.label}</p>
               </div>
             ))}
           </div>
 
-          <div className="mt-6 rounded-md border border-border/60 bg-card/40 px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-muted-foreground">
-                Pick'em theo series: chon tournament, chon bracket, bam doi tren
-                bracket de du doan.
-              </p>
-              <Button asChild size="sm">
-                <Link to={`/series/${canonicalSeriesSlug}/pickem`}>
-                  Choi Pick'em
-                </Link>
-              </Button>
-            </div>
+          <div
+            className={`mt-6 flex flex-wrap items-center justify-between gap-3 px-4 py-3 ${TOURNAMENT_PANEL_CLASS}`}
+          >
+            <p className="text-sm text-neutral-400">
+              Pick&apos;em theo series: chọn tournament, chọn bracket, bấm đội
+              trên bracket để dự đoán.
+            </p>
+            <Link
+              to={`/series/${canonicalSeriesSlug}/pickem`}
+              className="inline-flex h-8 items-center border border-neutral-600 bg-[#2d2d2d] px-3 text-xs font-extrabold uppercase tracking-normal text-white transition-colors hover:border-neutral-500 hover:bg-neutral-700"
+            >
+              Chơi Pick&apos;em
+            </Link>
           </div>
         </div>
       </section>
 
       {/* ═══ TEAM LOGOS CAROUSEL ═══ */}
-      <Section className="border-b border-border py-8 overflow-hidden">
-        <div className="max-w-6xl mx-auto px-6 md:px-10 mb-5">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#EEEEEE]">
-            Đội tuyển tham gia
-          </p>
+      <Section className="overflow-hidden border-b border-neutral-800 py-8">
+        <div className="mx-auto mb-5 max-w-6xl px-6 md:px-10">
+          <p className={TOURNAMENT_SECTION_META_CLASS}>Đội tuyển tham gia</p>
         </div>
         <div className="relative overflow-hidden">
-          <div className="absolute left-0 top-0 bottom-0 w-20 bg-linear-to-r from-background to-transparent z-10" />
-          <div className="absolute right-0 top-0 bottom-0 w-20 bg-linear-to-l from-background to-transparent z-10" />
+          <div className="absolute bottom-0 left-0 top-0 z-10 w-16 bg-gradient-to-r from-[#0a0a0a] to-transparent" />
+          <div className="absolute bottom-0 right-0 top-0 z-10 w-16 bg-gradient-to-l from-[#0a0a0a] to-transparent" />
           <div className="marquee-track">
             {marqueeTeams.map((team, i) => (
               <div
                 key={`${team.shortName}-${i}`}
-                className="flex items-center gap-3 px-6 md:px-8 shrink-0"
+                className="flex shrink-0 items-center gap-3 px-6 md:px-8"
               >
                 <img
                   src={team.logoUrl}
                   alt={team.name}
-                  className="w-14 h-14  object-cover"
+                  className="h-14 w-14 object-cover"
                   loading="lazy"
                 />
                 <div>
-                  <p className="text-sm font-bold text-foreground whitespace-nowrap">
+                  <p className="whitespace-nowrap text-sm font-bold text-white">
                     {team.name}
                   </p>
-                  <p className="text-[10px] text-[#EEEEEE]">{team.shortName}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-neutral-500">
+                    {team.shortName}
+                  </p>
                 </div>
               </div>
             ))}
@@ -426,17 +428,18 @@ const SeriesPage = () => {
       </Section>
 
       {/* ═══ FILTERS ═══ */}
-      <div className="max-w-6xl mx-auto px-6 md:px-10 pt-10 pb-2">
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="flex gap-1.5 flex-wrap">
+      <div className="mx-auto max-w-6xl px-6 pb-2 pt-10 md:px-10">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap gap-1.5">
             {allGames.map((g) => (
               <button
                 key={g}
+                type="button"
                 onClick={() => setActiveFilter(g)}
-                className={`px-4 py-2 text-xs font-semibold rounded-xl transition-all duration-200 ${
+                className={`${TOURNAMENT_SUBTAB_BASE} ${
                   activeFilter === g
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-card border border-bordertext-[#EEEEEE] hover:text-foreground hover:border-primary/20"
+                    ? TOURNAMENT_SUBTAB_ACTIVE
+                    : TOURNAMENT_SUBTAB_INACTIVE
                 }`}
               >
                 {g}
@@ -444,26 +447,28 @@ const SeriesPage = () => {
             ))}
           </div>
           <div className="relative w-full sm:w-56">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4text-[#EEEEEE]" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" />
             <Input
               placeholder="Tìm giải đấu..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-9 text-sm bg-card border-border rounded-xl"
+              className="h-9 rounded-none border-neutral-700 bg-[#141414] pl-9 text-sm text-neutral-200 placeholder:text-neutral-500"
             />
           </div>
         </div>
       </div>
 
       {/* ═══ TOURNAMENTS ═══ */}
-      <main className="max-w-6xl mx-auto px-6 md:px-10 pb-8 space-y-14 mt-6">
+      <main className="mx-auto mt-6 max-w-6xl space-y-14 px-6 pb-8 md:px-10">
         {ongoing.length > 0 && (
           <Section>
-            <h2 className="text-lg font-bold mb-6 flex items-center gap-2.5">
-              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+            <h2
+              className={`${TOURNAMENT_PAGE_TITLE_CLASS} mb-6 flex items-center gap-2.5 text-lg`}
+            >
+              <span className="h-2 w-2 bg-primary" />
               Đang diễn ra
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 reveal-stagger visible">
+            <div className="reveal-stagger visible grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {ongoing.map((t) => (
                 <TournamentCard
                   key={t.id}
@@ -477,8 +482,10 @@ const SeriesPage = () => {
 
         {upcoming.length > 0 && (
           <Section>
-            <h2 className="text-lg font-bold mb-6">Sắp diễn ra</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 reveal-stagger visible">
+            <h2 className={`${TOURNAMENT_PAGE_TITLE_CLASS} mb-6 text-lg`}>
+              Sắp diễn ra
+            </h2>
+            <div className="reveal-stagger visible grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {upcoming.map((t) => (
                 <TournamentCard
                   key={t.id}
@@ -492,8 +499,10 @@ const SeriesPage = () => {
 
         {completed.length > 0 && (
           <Section>
-            <h2 className="text-lg font-bold mb-6">Đã kết thúc</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 reveal-stagger visible">
+            <h2 className={`${TOURNAMENT_PAGE_TITLE_CLASS} mb-6 text-lg`}>
+              Đã kết thúc
+            </h2>
+            <div className="reveal-stagger visible grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {completed.map((t) => (
                 <TournamentCard
                   key={t.id}
@@ -506,8 +515,8 @@ const SeriesPage = () => {
         )}
 
         {filtered.length === 0 && (
-          <div className="text-center py-20">
-            <p className="text-muted-foreground text-sm">
+          <div className="py-20 text-center">
+            <p className="text-sm text-neutral-500">
               Không tìm thấy giải đấu nào.
             </p>
           </div>
@@ -515,33 +524,27 @@ const SeriesPage = () => {
       </main>
 
       {/* ═══ LEADERBOARD ═══ */}
-      <Section className="border-t border-border">
-        <div className="max-w-6xl mx-auto px-6 md:px-10 py-14">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary/80 mb-1">
-                Season Ranking
-              </p>
-              <h2 className="text-2xl font-bold text-foreground">
-                Bảng xếp hạng tổng
-              </h2>
-              <p className="text-xstext-[#EEEEEE] mt-1">
-                Điểm tích lũy qua các giải · Giải thưởng chỉ dành cho nhà vô
-                địch tổng
-              </p>
-            </div>
-            <Target className="w-6 h-6text-[#EEEEEE]" />
+      <Section className="border-t border-neutral-800">
+        <div className="mx-auto max-w-6xl px-6 py-14 md:px-10">
+          <div className="mb-8">
+            <p className={TOURNAMENT_SECTION_META_CLASS}>Season Ranking</p>
+            <h2 className={`${TOURNAMENT_PAGE_TITLE_CLASS} mt-1 text-2xl`}>
+              Bảng xếp hạng tổng
+            </h2>
+            <p className={`${TOURNAMENT_PAGE_HINT_CLASS} mt-1`}>
+              Điểm tích lũy qua các giải · Giải thưởng chỉ dành cho nhà vô địch
+              tổng
+            </p>
           </div>
 
-          {/* Points legend */}
-          <div className="flex flex-wrap gap-3 mb-5">
+          <div className="mb-5 flex flex-wrap gap-3">
             {placementPoints.map((pts, i) => (
               <div
                 key={i}
-                className="flex items-center gap-1.5 text-[10px] text-[#EEEEEE]"
+                className="flex items-center gap-1.5 text-[10px] text-neutral-500"
               >
                 <span
-                  className={`font-bold ${i === 0 ? "text-primary" : "text-foreground"}`}
+                  className={`font-bold ${i === 0 ? "text-white" : "text-neutral-300"}`}
                 >
                   #{i + 1}
                 </span>
@@ -550,18 +553,21 @@ const SeriesPage = () => {
             ))}
           </div>
 
-          <div className="neo-box-square bg-card overflow-x-auto">
-            {/* Header */}
+          <div className={`${TOURNAMENT_PANEL_CLASS} overflow-x-auto`}>
             <div
-              className="grid gap-0 min-w-175"
+              className="grid min-w-175 gap-0"
               style={{
                 gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
               }}
             >
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase  text-[#EEEEEE] neo-leaderboard-header">
+              <div
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} !text-left border-b border-neutral-600`}
+              >
                 #
               </div>
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase  text-[#EEEEEE] neo-leaderboard-header">
+              <div
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} !text-left border-b border-neutral-600`}
+              >
                 Đội tuyển
               </div>
               {completedTournamentIds.map((tid) => {
@@ -569,19 +575,20 @@ const SeriesPage = () => {
                 return (
                   <div
                     key={tid}
-                    className="px-2 py-3 border-b border-border text-[10px] font-bold uppercase tracking-[0.08em] text-[#EEEEEE] text-center truncate neo-leaderboard-header"
+                    className={`${TOURNAMENT_TABLE_HEADER_CLASS} border-b border-neutral-600 !text-center truncate`}
                     title={t?.title}
                   >
-                    {t?.gameIcon}
+                    {t?.short_name || t?.game || tid}
                   </div>
                 );
               })}
-              <div className="px-3 py-3 border-b border-border text-[10px] font-bold uppercase  text-[#EEEEEE] text-right">
+              <div
+                className={`${TOURNAMENT_TABLE_HEADER_CLASS} border-b border-neutral-600 !text-right`}
+              >
                 Tổng
               </div>
             </div>
 
-            {/* Rows */}
             {sortedLeaderboard.map((entry, i) => {
               const team = fallbackTeams.find((t) => t.name === entry.team);
               const total = completedTournamentIds.reduce((sum, tid) => {
@@ -593,31 +600,35 @@ const SeriesPage = () => {
                     : 0)
                 );
               }, 0);
+              const rowBorder =
+                i < sortedLeaderboard.length - 1
+                  ? "border-b border-neutral-800"
+                  : "";
 
               return (
                 <div
                   key={entry.team}
-                  className="grid gap-0 min-w-175 items-center neo-leaderboard-row"
+                  className="grid min-w-175 items-center gap-0 bg-[#141414] transition-colors hover:bg-[#1c1c1c]"
                   style={{
                     gridTemplateColumns: `3rem 1fr repeat(${completedTournamentIds.length}, 4.5rem) 5rem`,
                   }}
                 >
                   <div
-                    className={`px-3 py-3.5 text-sm font-bold ${i === 0 ? "text-primary" : i < 3 ? "text-foreground" : "text-muted-foreground"} ${i < sortedLeaderboard.length - 1 ? "border-b border-border" : ""}`}
+                    className={`px-3 py-3.5 text-sm font-bold tabular-nums ${i === 0 ? "text-white" : i < 3 ? "text-neutral-200" : "text-neutral-500"} ${rowBorder}`}
                   >
                     {i + 1}
                   </div>
                   <div
-                    className={`px-3 py-3.5 flex items-center gap-3 min-w-0 ${i < sortedLeaderboard.length - 1 ? "border-b border-border" : ""}`}
+                    className={`flex min-w-0 items-center gap-3 px-3 py-3.5 ${rowBorder}`}
                   >
                     {team && (
                       <img
                         src={team.logoUrl}
                         alt={team.shortName}
-                        className="w-7 h-7 rounded-none object-cover border border-border shrink-0"
+                        className="h-7 w-7 shrink-0 border border-neutral-700 object-cover"
                       />
                     )}
-                    <span className="text-sm font-semibold text-foreground truncate">
+                    <span className="truncate text-sm font-semibold text-white">
                       {entry.team}
                     </span>
                   </div>
@@ -630,29 +641,27 @@ const SeriesPage = () => {
                     return (
                       <div
                         key={tid}
-                        className={`px-2 py-3.5 text-center ${i < sortedLeaderboard.length - 1 ? "border-b border-border" : ""}`}
+                        className={`px-2 py-3.5 text-center ${rowBorder}`}
                       >
                         {pts != null ? (
                           <div>
                             <span
-                              className={`text-xs font-bold ${placement === 1 ? "text-primary" : "text-foreground"}`}
+                              className={`text-xs font-bold tabular-nums ${placement === 1 ? "text-white" : "text-neutral-300"}`}
                             >
                               {pts}
                             </span>
-                            <span className="block text-[9px] text-[#EEEEEE]">
+                            <span className="block text-[9px] text-neutral-500">
                               #{placement}
                             </span>
                           </div>
                         ) : (
-                          <span className="text-xstext-[#EEEEEE]/50">—</span>
+                          <span className="text-xs text-neutral-600">—</span>
                         )}
                       </div>
                     );
                   })}
-                  <div
-                    className={`px-3 py-3.5 text-right ${i < sortedLeaderboard.length - 1 ? "border-b border-border" : ""}`}
-                  >
-                    <span className="text-sm font-bold text-primary">
+                  <div className={`px-3 py-3.5 text-right ${rowBorder}`}>
+                    <span className="text-sm font-bold tabular-nums text-white">
                       {total}
                     </span>
                   </div>

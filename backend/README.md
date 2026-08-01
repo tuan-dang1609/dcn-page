@@ -20,6 +20,8 @@ Required environment variables in `backend/.env`:
 
 ```env
 FRONTEND_BASE_URL="http://localhost:5173"
+# Optional extras if you have multiple frontend hosts:
+# ALLOWED_FRONTEND_ORIGINS="https://your-prod-frontend.com,https://your-preview.vercel.app"
 RIOT_CLIENT_ID="709323"
 RIOT_CLIENT_SECRET="mHsNYQM5BwDBuVBwYL8CVCLVKlf6d3yA498o00ZGz7B"
 RIOT_REDIRECT_URI="http://localhost:3000/api/users/riot/callback"
@@ -27,6 +29,8 @@ RIOT_ACCOUNT_API_BASE_URL="https://asia.api.riotgames.com"
 RIOT_AUTH_BASE_URL="https://auth.riotgames.com"
 RIOT_STATE_SECRET="replace-me"
 ```
+
+> Important: set `FRONTEND_BASE_URL` to the **live** frontend host (not a deleted Vercel deployment). Riot callback also stores the browser `origin` from `/riot/connect` so redirects return to the page the user started from (e.g. tournament register modal).
 
 Legacy aliases also supported (for older env files):
 

@@ -18,8 +18,53 @@ const normalizeNullableText = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const buildProfileRedirectUrl = (riot, reason = "", extras = {}) => {
-  const url = new URL("/profile", config.FRONTEND_BASE_URL);
+const sanitizeReturnTo = (value) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/")) return null;
+  if (trimmed.startsWith("//")) return null;
+  if (trimmed.includes("://")) return null;
+
+  // Only keep pathname — query flags are passed separately in OAuth state.
+  const pathname = trimmed.split("?")[0]?.split("#")[0] ?? "";
+  if (!pathname.startsWith("/")) return null;
+  return pathname;
+};
+
+const sanitizeOrigin = (value) => {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value.trim());
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    if (url.username || url.password) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+};
+
+const resolveFrontendOrigin = (candidate) => {
+  const sanitized = sanitizeOrigin(candidate);
+  if (sanitized) return sanitized;
+  return sanitizeOrigin(config.FRONTEND_BASE_URL) || "http://localhost:8080";
+};
+
+const isTruthyFlag = (value) => {
+  if (value === true || value === 1) return true;
+  if (typeof value !== "string") return false;
+  return ["1", "true", "yes", "y"].includes(value.trim().toLowerCase());
+};
+
+const buildFrontendRedirectUrl = (
+  returnTo,
+  riot,
+  reason = "",
+  extras = {},
+  origin = config.FRONTEND_BASE_URL,
+) => {
+  const safeReturnTo = sanitizeReturnTo(returnTo) || "/profile";
+  const safeOrigin = resolveFrontendOrigin(origin);
+  const url = new URL(safeReturnTo, safeOrigin);
   url.searchParams.set("riot", riot);
 
   if (reason) {
@@ -37,6 +82,18 @@ const buildProfileRedirectUrl = (riot, reason = "", extras = {}) => {
   });
 
   return url.toString();
+};
+
+const friendlyRiotError = (error) => {
+  const message = String(error?.message ?? error ?? "").toLowerCase();
+  if (
+    message.includes("users_riot_account_unique") ||
+    message.includes("duplicate key") ||
+    message.includes("unique constraint")
+  ) {
+    return "Riot ID này đã được liên kết với tài khoản khác";
+  }
+  return String(error?.message || "cannot complete riot sign on");
 };
 
 const buildRiotAuthorizeUrl = (state = "") => {
@@ -296,7 +353,7 @@ usersRouter.patch(
 
 usersRouter.get(
   "/riot/connect",
-  async ({ user, set }) => {
+  async ({ user, set, query, request }) => {
     if (!user) {
       set.status = 401;
       return { error: "token missing or invalid" };
@@ -307,9 +364,35 @@ usersRouter.get(
       return { error: "riot oauth is not configured" };
     }
 
-    const state = jwt.sign({ uid: Number(user.id) }, config.RIOT_STATE_SECRET, {
-      expiresIn: "10m",
-    });
+    const returnTo = sanitizeReturnTo(query?.return_to) || "/profile";
+    const openRegister = isTruthyFlag(query?.open_register);
+
+    let refererOrigin = null;
+    try {
+      const referer = request?.headers?.get?.("referer");
+      if (referer) refererOrigin = new URL(referer).origin;
+    } catch {
+      refererOrigin = null;
+    }
+
+    const requestOrigin =
+      sanitizeOrigin(query?.origin) ||
+      sanitizeOrigin(request?.headers?.get?.("origin")) ||
+      sanitizeOrigin(refererOrigin) ||
+      sanitizeOrigin(config.FRONTEND_BASE_URL);
+
+    const state = jwt.sign(
+      {
+        uid: Number(user.id),
+        returnTo,
+        origin: requestOrigin,
+        openRegister,
+      },
+      config.RIOT_STATE_SECRET,
+      {
+        expiresIn: "10m",
+      },
+    );
 
     set.status = 200;
     return {
@@ -344,18 +427,51 @@ usersRouter.get(
   async ({ query }) => {
     const oauthError = String(query?.error ?? "").trim();
     const oauthErrorDescription = String(query?.error_description ?? "").trim();
+    const state = String(query?.state ?? "").trim();
+
+    let returnTo = "/profile";
+    let origin = config.FRONTEND_BASE_URL;
+    let openRegister = false;
+
+    const redirectExtras = () =>
+      openRegister ? { register: "1" } : {};
+
+    if (state) {
+      try {
+        const decodedState = jwt.verify(state, config.RIOT_STATE_SECRET);
+        returnTo = sanitizeReturnTo(decodedState?.returnTo) || "/profile";
+        origin = resolveFrontendOrigin(decodedState?.origin);
+        openRegister = Boolean(decodedState?.openRegister);
+      } catch {
+        // Keep defaults when state is invalid; connection itself may still fail below.
+      }
+    }
 
     if (oauthError) {
       const reason = oauthErrorDescription || oauthError;
-      return Response.redirect(buildProfileRedirectUrl("failed", reason), 302);
+      return Response.redirect(
+        buildFrontendRedirectUrl(
+          returnTo,
+          "failed",
+          reason,
+          redirectExtras(),
+          origin,
+        ),
+        302,
+      );
     }
 
     const accessCode = String(query?.code ?? "").trim();
-    const state = String(query?.state ?? "").trim();
 
     if (!accessCode) {
       return Response.redirect(
-        buildProfileRedirectUrl("failed", "missing code"),
+        buildFrontendRedirectUrl(
+          returnTo,
+          "failed",
+          "missing code",
+          redirectExtras(),
+          origin,
+        ),
         302,
       );
     }
@@ -367,19 +483,53 @@ usersRouter.get(
       if (!state) {
         // Backward-compatible callback mode for older Riot Portal setups.
         return Response.redirect(
-          buildProfileRedirectUrl("connected", "", {
-            gameName: riot.gameName,
-            tagName: riot.tagLine,
-          }),
+          buildFrontendRedirectUrl(
+            returnTo,
+            "connected",
+            "",
+            {
+              ...redirectExtras(),
+              gameName: riot.gameName,
+              tagName: riot.tagLine,
+            },
+            origin,
+          ),
           302,
         );
       }
 
       const decodedState = jwt.verify(state, config.RIOT_STATE_SECRET);
       const userId = Number(decodedState?.uid);
+      returnTo = sanitizeReturnTo(decodedState?.returnTo) || returnTo;
+      origin = resolveFrontendOrigin(decodedState?.origin || origin);
+      openRegister = Boolean(decodedState?.openRegister);
 
       if (!Number.isFinite(userId)) {
         throw new Error("invalid state");
+      }
+
+      const { rows: existingOwners } = await pool.query(
+        `
+        SELECT id
+        FROM users
+        WHERE lower(riot_account) = lower($1)
+          AND id <> $2
+        LIMIT 1
+        `,
+        [riot.riotAccount, userId],
+      );
+
+      if (existingOwners.length > 0) {
+        return Response.redirect(
+          buildFrontendRedirectUrl(
+            returnTo,
+            "failed",
+            "Riot ID này đã được liên kết với tài khoản khác",
+            redirectExtras(),
+            origin,
+          ),
+          302,
+        );
       }
 
       await pool.query("UPDATE users SET riot_account = $1 WHERE id = $2", [
@@ -388,17 +538,27 @@ usersRouter.get(
       ]);
 
       return Response.redirect(
-        buildProfileRedirectUrl("connected", "", {
-          gameName: riot.gameName,
-          tagName: riot.tagLine,
-        }),
+        buildFrontendRedirectUrl(
+          returnTo,
+          "connected",
+          "",
+          {
+            ...redirectExtras(),
+            gameName: riot.gameName,
+            tagName: riot.tagLine,
+          },
+          origin,
+        ),
         302,
       );
     } catch (error) {
       return Response.redirect(
-        buildProfileRedirectUrl(
+        buildFrontendRedirectUrl(
+          returnTo,
           "failed",
-          error?.message || "cannot complete riot sign on",
+          friendlyRiotError(error),
+          redirectExtras(),
+          origin,
         ),
         302,
       );

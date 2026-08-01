@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -195,35 +195,47 @@ const UserMenu = () => {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-              <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-primary text-primary-foreground font-bold">
+            <Button
+              variant="ghost"
+              className="relative h-10 gap-2 rounded-none border border-neutral-600 bg-[#141414] px-2.5 hover:bg-[#1c1c1c] hover:text-white"
+              title="Tài khoản"
+            >
+              <Avatar className="h-7 w-7 rounded-none">
+                <AvatarImage
+                  src={(user as { profile_picture?: string | null }).profile_picture ?? undefined}
+                  alt={displayName}
+                  className="rounded-none object-cover"
+                />
+                <AvatarFallback className="rounded-none bg-[#2d2d2d] text-[10px] font-bold text-white">
                   {initials}
                 </AvatarFallback>
               </Avatar>
+              <span className="hidden max-w-24 truncate text-xs font-bold text-neutral-200 sm:inline">
+                {displayName}
+              </span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-56" align="end" forceMount>
+          <DropdownMenuContent className="w-56 rounded-none border-neutral-700 bg-[#141414]" align="end" forceMount>
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
-                <p className="text-sm font-bold leading-none">{displayName}</p>
-                <p className="text-xs leading-nonetext-[#EEEEEE]">
+                <p className="text-sm font-bold leading-none text-white">{displayName}</p>
+                <p className="text-xs leading-none text-neutral-500">
                   @{displayUsername}
                 </p>
               </div>
             </DropdownMenuLabel>
-            <DropdownMenuSeparator />
+            <DropdownMenuSeparator className="bg-neutral-800" />
             <DropdownMenuItem
-              className="cursor-pointer"
+              className="cursor-pointer focus:bg-neutral-900 focus:text-white"
               onClick={() => navigate("/profile")}
             >
               <User className="mr-2 h-4 w-4" />
-              <span>Trang cá nhân</span>
+              <span>Hồ sơ cá nhân</span>
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            <DropdownMenuSeparator className="bg-neutral-800" />
             <DropdownMenuItem
               onClick={handleLogout}
-              className="cursor-pointer text-destructive"
+              className="cursor-pointer text-red-400 focus:bg-neutral-900 focus:text-red-300"
             >
               <LogOut className="mr-2 h-4 w-4" />
               <span>Đăng xuất</span>

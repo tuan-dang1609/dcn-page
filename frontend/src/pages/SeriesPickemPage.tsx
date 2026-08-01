@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeriesById } from "@/hooks/useSeriesById";
 import { useToast } from "@/hooks/use-toast";
+import UserMenu from "@/components/UserMenu";
 
 const toNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") return null;
@@ -469,6 +470,7 @@ const SeriesPickemPage = () => {
 
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">Dung {totalCorrectCount}</Badge>
+            <UserMenu />
           </div>
         </div>
 

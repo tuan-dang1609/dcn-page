@@ -2,7 +2,7 @@
 // Use node-postgres (pg) instead of Bun.SQL — more reliable with Supabase
 // PgBouncer / connection poolers (avoids "bind message has N result formats
 // but query has M columns" protocol desync).
-import "dotenv/config";
+import "./loadEnv.js";
 import pg from "pg";
 
 const { Pool } = pg;

@@ -939,10 +939,12 @@ const buildMatchDetailFromApi = ({
   match,
   tournament,
   normalizedRouteGame,
+  bracketName,
 }: {
   match: Match;
   tournament?: TournamentBySlugResponse["info"];
   normalizedRouteGame: string;
+  bracketName?: string | null;
 }): MatchDetail => {
   const team1Name = match.team_a?.name || "TBD";
   const team2Name = match.team_b?.name || "TBD";
@@ -957,6 +959,7 @@ const buildMatchDetailFromApi = ({
   const matchNo = toNumber(match.match_no);
   const gameType = resolveGameType(normalizedRouteGame);
   const scheduledDate = String(match.date_scheduled ?? "").trim();
+  const resolvedBracketName = String(bracketName ?? "").trim();
 
   return {
     id: String(match.id),
@@ -967,7 +970,7 @@ const buildMatchDetailFromApi = ({
         : roundNumber
           ? `Round ${roundNumber}`
           : `Match ${match.id}`,
-    format: String(tournament?.format ?? ""),
+    format: resolvedBracketName || String(tournament?.format ?? ""),
     date:
       scheduledDate ||
       String(tournament?.date_start ?? "").slice(0, 10) ||
@@ -3490,12 +3493,13 @@ const MatchDetailPage = () => {
         ),
       queryFn: async () => {
         const bracketsResponse = await getBracketsByTournamentId(tournamentId!);
-        const bracketIds = (bracketsResponse.data?.data ?? [])
+        const brackets = bracketsResponse.data?.data ?? [];
+        const bracketIds = brackets
           .map((bracket) => toNumber(bracket.id))
           .filter((bracketId): bracketId is number => bracketId !== null);
 
         if (!bracketIds.length) {
-          return { matches: [] as Match[] };
+          return { matches: [] as Match[], brackets };
         }
 
         const matchResponses = await Promise.all(
@@ -3514,6 +3518,7 @@ const MatchDetailPage = () => {
 
         return {
           matches: dedupedMatches,
+          brackets,
         };
       },
     });
@@ -3645,14 +3650,24 @@ const MatchDetailPage = () => {
       !isCompletedMatchStatus(currentMatchRow?.status),
   });
 
+  const currentBracketName = useMemo(() => {
+    const bracketId = toNumber(currentMatchRow?.bracket_id);
+    if (!bracketId) return null;
+    const brackets = tournamentMatchBundle?.brackets ?? [];
+    const bracket = brackets.find((item) => toNumber(item.id) === bracketId);
+    const name = String(bracket?.name ?? "").trim();
+    return name || null;
+  }, [currentMatchRow?.bracket_id, tournamentMatchBundle?.brackets]);
+
   const baseMatch = useMemo(() => {
     if (!currentMatchRow) return null;
     return buildMatchDetailFromApi({
       match: currentMatchRow,
       tournament,
       normalizedRouteGame,
+      bracketName: currentBracketName,
     });
-  }, [currentMatchRow, tournament, normalizedRouteGame]);
+  }, [currentMatchRow, tournament, normalizedRouteGame, currentBracketName]);
 
   const { data: matchGameIds } = useQuery({
     queryKey: ["match-game-ids", numId],
@@ -3990,7 +4005,7 @@ const MatchDetailPage = () => {
     <div className={`min-h-screen ${TOURNAMENT_PAGE_BG_CLASS}`}>
       <TournamentSubpageHeader
         title={match.tournamentName}
-        subtitle={`${match.roundName} · ${match.format}`}
+        subtitle={[match.roundName, match.format].filter(Boolean).join(" · ")}
         bannerUrl={tournament?.banner_url}
         leftSlot={
           <div className="flex min-w-0 items-center gap-2">
