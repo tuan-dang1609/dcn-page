@@ -272,34 +272,14 @@ const buildTeamStats = ({ teamIds, matches }) => {
   return stats;
 };
 
-const isNonCompletedMatchStatus = (status) => {
-  const normalized = String(status ?? "")
-    .trim()
-    .toLowerCase();
-  return [
-    "scheduled",
-    "upcoming",
-    "pending",
-    "not_started",
-    "not-started",
-    "ongoing",
-    "live",
-    "in_progress",
-    "in-progress",
-    "playing",
-  ].includes(normalized);
-};
-
 const sortCompletedMatches = (matches) =>
   matches
     .filter((match) => {
       const teamA = toNumber(match.team_a_id);
       const teamB = toNumber(match.team_b_id);
       const winner = toNumber(match.winner_team_id);
-      if (!teamA || !teamB || !winner) return false;
-      // Ongoing/scheduled: chưa tính loại dù còn winner_team_id cũ
-      if (isNonCompletedMatchStatus(match.status)) return false;
-      return true;
+      // Winner đã ghi = trận đã có kết quả cho BXH (kể cả status còn ongoing do sót).
+      return Boolean(teamA && teamB && winner);
     })
     .slice()
     .sort((a, b) => {
@@ -1148,32 +1128,84 @@ export const recalculateTournamentResults = async (tournamentId) => {
     };
   }
 
-  const matchesQuery = rankingBracketId
-    ? {
-        text: `
-          SELECT id, round_number, match_no, team_a_id, team_b_id, winner_team_id, status, bracket_id
-          FROM matches
-          WHERE tournament_id = $1 AND bracket_id = $2
-          ORDER BY round_number ASC, match_no ASC, id ASC
-        `,
-        params: [normalizedTournamentId, rankingBracketId],
-      }
-    : {
-        text: `
-          SELECT id, round_number, match_no, team_a_id, team_b_id, winner_team_id, status, bracket_id
-          FROM matches
-          WHERE tournament_id = $1
-          ORDER BY round_number ASC, match_no ASC, id ASC
-        `,
-        params: [normalizedTournamentId],
-      };
+  const matchesQuery = {
+    text: `
+      SELECT
+        id,
+        round_number,
+        match_no,
+        team_a_id,
+        team_b_id,
+        winner_team_id,
+        status,
+        bracket_id,
+        score_a,
+        score_b,
+        COALESCE((to_jsonb(matches)->>'best_of')::int, 1) AS best_of
+      FROM matches
+      WHERE tournament_id = $1
+      ORDER BY round_number ASC, match_no ASC, id ASC
+    `,
+    params: [normalizedTournamentId],
+  };
 
-  const { rows: matchRowsRaw } = await pool.query(
+  const { rows: allMatchRows } = await pool.query(
     matchesQuery.text,
     matchesQuery.params,
   );
 
-  let matchRows = matchRowsRaw;
+  // Heal stale rows: có điểm đủ bo nhưng thiếu winner → BXH không cộng thắng/thua.
+  for (const match of allMatchRows) {
+    const teamAId = toNumber(match.team_a_id);
+    const teamBId = toNumber(match.team_b_id);
+    const scoreA = toNumber(match.score_a);
+    const scoreB = toNumber(match.score_b);
+    const existingWinner = toNumber(match.winner_team_id);
+    if (!teamAId || !teamBId || scoreA === null || scoreB === null) continue;
+    if (scoreA === scoreB) continue;
+
+    const bestOf = Math.max(1, toNumber(match.best_of) ?? 1);
+    const winsNeeded = Math.ceil(bestOf / 2);
+    if (Math.max(scoreA, scoreB) < winsNeeded) continue;
+
+    const inferredWinner = scoreA > scoreB ? teamAId : teamBId;
+    if (existingWinner === inferredWinner) {
+      const statusNorm = String(match.status ?? "").trim().toLowerCase();
+      if (
+        !["completed", "complete", "done", "finished"].includes(statusNorm)
+      ) {
+        match.status = "completed";
+        await pool.query(
+          `UPDATE matches SET status = 'completed' WHERE id = $1`,
+          [match.id],
+        );
+      }
+      continue;
+    }
+
+    if (existingWinner) continue;
+
+    match.winner_team_id = inferredWinner;
+    match.status = "completed";
+    await pool.query(
+      `
+      UPDATE matches
+      SET winner_team_id = $1,
+          status = 'completed'
+      WHERE id = $2
+      `,
+      [inferredWinner, match.id],
+    );
+  }
+
+  let matchRows = allMatchRows;
+
+  // Bracket được chọn để tính hạng/placement (có thể hẹp hơn toàn giải).
+  if (rankingBracketId) {
+    matchRows = allMatchRows.filter(
+      (match) => toNumber(match.bracket_id) === rankingBracketId,
+    );
+  }
 
   // Chưa chọn ranking bracket: ưu tiên bracket DE 4 đội / 2 đội đi tiếp
   if (!rankingBracketId) {
@@ -1266,18 +1298,36 @@ export const recalculateTournamentResults = async (tournamentId) => {
 
   const { rankings, isFinal } = rankingResult;
 
+  // Thắng/thua luôn lấy từ TOÀN BỘ trận có winner trong giải (không chỉ ranking bracket),
+  // để Score Control cập nhật điểm ở bracket khác vẫn hiện đúng trên BXH.
+  const overallStats = buildTeamStats({
+    teamIds,
+    matches: sortCompletedMatches(allMatchRows),
+  });
+  const rankingsWithOverallRecord = rankings.map((row) => {
+    const overall = overallStats.get(toNumber(row.team_id));
+    if (!overall) return row;
+    return {
+      ...row,
+      wins: overall.wins,
+      losses: overall.losses,
+      played: overall.played,
+      buchholz: overall.buchholz,
+    };
+  });
+
   const pointMap = await getSeriesPointMap(seriesId);
 
   await upsertTournamentResults({
     tournamentId: normalizedTournamentId,
-    rankings,
+    rankings: rankingsWithOverallRecord,
     pointMap,
     isFinal,
   });
 
   await rebuildAchievements({
     tournamentId: normalizedTournamentId,
-    rankings,
+    rankings: rankingsWithOverallRecord,
     isFinal,
   });
 
@@ -1289,8 +1339,8 @@ export const recalculateTournamentResults = async (tournamentId) => {
     format_type: formatType,
     has_losers_bracket: hasLosersBracket,
     ranking_bracket_id: rankingBracketId,
-    teams: rankings.length,
-    rankings,
+    teams: rankingsWithOverallRecord.length,
+    rankings: rankingsWithOverallRecord,
     is_final: isFinal,
   };
 };

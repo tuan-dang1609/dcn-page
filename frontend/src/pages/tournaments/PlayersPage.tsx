@@ -48,16 +48,11 @@ type PlayersOutletContext = {
     id?: number | string;
     short_name?: string;
     registration_mode?: "org" | "individual" | string;
-    register_start?: string;
-    register_end?: string;
-    check_in_start?: string;
-    check_in_end?: string;
     registered?: RegisteredTeam[];
     registered_count?: number;
     max_participate?: number;
   };
   isLoading?: boolean;
-  refetch?: () => Promise<unknown>;
 };
 
 const toNumber = (value: unknown) => {
@@ -65,6 +60,217 @@ const toNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+const CheckInBadge = ({ checkedIn }: { checkedIn: boolean }) => (
+  <span
+    className={`inline-block border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide whitespace-nowrap sm:px-2.5 sm:text-[11px] ${
+      checkedIn
+        ? "border-emerald-500/70 bg-emerald-950/40 text-emerald-200"
+        : "border-rose-500/60 bg-rose-950/30 text-rose-200"
+    }`}
+  >
+    {checkedIn ? "Đã check-in" : "Chưa"}
+  </span>
+);
+
+/** TFT solo / individual — UI riêng, không dùng chung layout đội. */
+const IndividualPlayersTable = ({
+  rows,
+  userId,
+  userRiotAccount,
+}: {
+  rows: RegisteredTeam[];
+  userId: number | null;
+  userRiotAccount: string;
+}) => (
+  <div className={`${TOURNAMENT_PANEL_CLASS} w-full overflow-x-auto`}>
+    <Table className="w-full min-w-0">
+      <TableHeader>
+        <TableRow className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-10 text-center whitespace-nowrap sm:w-12`}
+          >
+            #
+          </TableHead>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} min-w-0 whitespace-nowrap`}
+          >
+            Thành viên
+          </TableHead>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} min-w-[9rem] whitespace-nowrap`}
+          >
+            Riot ID
+          </TableHead>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-24 text-center whitespace-nowrap sm:w-28`}
+          >
+            Check-in
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((participant, index) => {
+          const myUserId = userId;
+          const riotId = String(participant.primary_riot_account ?? "").trim();
+          const isMine =
+            myUserId !== null &&
+            (String(participant.short_name ?? "").trim() === `S${myUserId}` ||
+              (Boolean(userRiotAccount) &&
+                riotId.toLowerCase() === userRiotAccount.toLowerCase()));
+          const displayName =
+            participant.nickname || participant.name || "—";
+          const avatarSrc =
+            participant.primary_profile_picture ||
+            participant.profile_picture ||
+            participant.logo_url ||
+            DEFAULT_USER_AVATAR_URL;
+
+          return (
+            <TableRow
+              key={`${participant.id ?? participant.team_id}-${displayName}`}
+              className={`${TOURNAMENT_TABLE_ROW_CLASS}${
+                isMine ? " border-l-[3px] border-l-neutral-400" : ""
+              }`}
+            >
+              <TableCell
+                className={`${TOURNAMENT_TABLE_CELL_CLASS} text-center font-semibold text-neutral-400 tabular-nums`}
+              >
+                {String(index + 1).padStart(2, "0")}
+              </TableCell>
+              <TableCell className={TOURNAMENT_TABLE_CELL_CLASS}>
+                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+                  <img
+                    src={avatarSrc}
+                    alt={displayName}
+                    className="h-9 w-9 shrink-0 rounded-sm object-cover sm:h-10 sm:w-10"
+                  />
+                  <span className="block min-w-0 truncate font-semibold text-white">
+                    {displayName}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell className={TOURNAMENT_TABLE_CELL_CLASS}>
+                <span className="block max-w-[16rem] truncate font-semibold text-neutral-200">
+                  {riotId || "—"}
+                </span>
+              </TableCell>
+              <TableCell
+                className={`${TOURNAMENT_TABLE_CELL_CLASS} text-center`}
+              >
+                <CheckInBadge checkedIn={Boolean(participant.isCheckedIn)} />
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  </div>
+);
+
+/** Giải đồng đội — giữ UI gốc (# / Đội / Tag / Check-in). */
+const TeamPlayersTable = ({
+  rows,
+  userTeamId,
+  selectedTournamentTeamId,
+  onOpenTeam,
+}: {
+  rows: RegisteredTeam[];
+  userTeamId: number | null;
+  selectedTournamentTeamId: number | null;
+  onOpenTeam: (tournamentTeamId: number | null) => void;
+}) => (
+  <div className={`${TOURNAMENT_PANEL_CLASS} w-full overflow-x-auto`}>
+    <Table className={TOURNAMENT_TABLE_MIN_CLASS}>
+      <TableHeader>
+        <TableRow className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-10 text-center whitespace-nowrap sm:w-12`}
+          >
+            #
+          </TableHead>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} min-w-0 whitespace-nowrap`}
+          >
+            Đội
+          </TableHead>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} hidden w-20 whitespace-nowrap sm:table-cell`}
+          >
+            Tag
+          </TableHead>
+          <TableHead
+            className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-24 text-center whitespace-nowrap sm:w-28`}
+          >
+            Check-in
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((participant, index) => {
+          const tournamentTeamId = toNumber(participant.id);
+          const isMine =
+            userTeamId !== null &&
+            toNumber(participant.team_id) === userTeamId;
+          const isCheckedIn = Boolean(participant.isCheckedIn);
+
+          return (
+            <TableRow
+              key={`${participant.id ?? participant.team_id}-${participant.name ?? "team"}`}
+              className={`${TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS} cursor-pointer ${
+                tournamentTeamId === selectedTournamentTeamId
+                  ? "bg-[#1c1c1c]"
+                  : ""
+              } ${isMine ? "border-l-[3px] border-l-neutral-400" : ""}`}
+              onClick={() => onOpenTeam(tournamentTeamId)}
+            >
+              <TableCell
+                className={`${TOURNAMENT_TABLE_CELL_CLASS} text-center font-semibold text-neutral-400 tabular-nums`}
+              >
+                {String(index + 1).padStart(2, "0")}
+              </TableCell>
+              <TableCell className={TOURNAMENT_TABLE_CELL_CLASS}>
+                <div className="flex min-w-0 items-center gap-2">
+                  <img
+                    src={participant.logo_url || TOURNAMENT_LOGO}
+                    alt={participant.name || "Team logo"}
+                    className="h-7 w-7 shrink-0 object-contain sm:h-8 sm:w-8"
+                  />
+                  <div className="min-w-0 leading-snug">
+                    <span className="block truncate font-semibold text-white">
+                      {participant.name || "—"}
+                    </span>
+                    {participant.short_name ? (
+                      <span className="mt-0.5 block text-[10px] font-semibold uppercase text-neutral-500 sm:hidden">
+                        {participant.short_name}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </TableCell>
+              <TableCell
+                className={`${TOURNAMENT_TABLE_CELL_CLASS} hidden sm:table-cell`}
+              >
+                {participant.short_name ? (
+                  <span className={TOURNAMENT_TEAM_TAG_BADGE_CLASS}>
+                    {participant.short_name}
+                  </span>
+                ) : (
+                  <span className={TOURNAMENT_TABLE_TAG_CLASS}>—</span>
+                )}
+              </TableCell>
+              <TableCell
+                className={`${TOURNAMENT_TABLE_CELL_CLASS} text-center`}
+              >
+                <CheckInBadge checkedIn={isCheckedIn} />
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  </div>
+);
 
 const PlayersPage = () => {
   const { tournament, isLoading } = useOutletContext<PlayersOutletContext>();
@@ -96,7 +302,6 @@ const PlayersPage = () => {
   }, [apiPlayersRaw, selectedTournamentTeamId]);
 
   const openTeamModal = (tournamentTeamId: number | null) => {
-    if (isIndividualMode) return;
     if (tournamentTeamId === null) return;
     setSelectedTournamentTeamId(tournamentTeamId);
     setIsTeamModalOpen(true);
@@ -106,6 +311,10 @@ const PlayersPage = () => {
     tournament?.registered_count ?? apiPlayersRaw.length ?? 0;
   const maxParticipate = tournament?.max_participate ?? null;
   const unitLabel = isIndividualMode ? "thành viên" : "đội";
+  const userId = Number.isFinite(Number(user?.id)) ? Number(user?.id) : null;
+  const userTeamId = Number.isFinite(Number(user?.team_id))
+    ? Number(user?.team_id)
+    : null;
 
   return (
     <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
@@ -144,172 +353,20 @@ const PlayersPage = () => {
       ) : null}
 
       {!isLoading && apiPlayersRaw.length > 0 ? (
-        <div className={`${TOURNAMENT_PANEL_CLASS} w-full overflow-x-auto`}>
-          <Table
-            className={
-              isIndividualMode ? "w-full min-w-0 table-fixed" : "w-full min-w-0"
-            }
-          >
-            {isIndividualMode ? (
-              <colgroup>
-                <col className="w-12" />
-                <col />
-                <col className="hidden w-52 sm:table-column md:w-60" />
-                <col className="w-28" />
-              </colgroup>
-            ) : null}
-            <TableHeader>
-              <TableRow className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
-                <TableHead
-                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-12 text-center whitespace-nowrap`}
-                >
-                  #
-                </TableHead>
-                <TableHead
-                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} min-w-0 whitespace-nowrap`}
-                >
-                  {isIndividualMode ? "Thành viên" : "Đội"}
-                </TableHead>
-                {isIndividualMode ? (
-                  <TableHead
-                    className={`${TOURNAMENT_TABLE_HEADER_CLASS} hidden whitespace-nowrap sm:table-cell`}
-                  >
-                    Riot ID
-                  </TableHead>
-                ) : (
-                  <TableHead
-                    className={`${TOURNAMENT_TABLE_HEADER_CLASS} hidden w-20 whitespace-nowrap sm:table-cell`}
-                  >
-                    Tag
-                  </TableHead>
-                )}
-                <TableHead
-                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} whitespace-nowrap`}
-                >
-                  Check-in
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {apiPlayersRaw.map((participant, index) => {
-                const tournamentTeamId = toNumber(participant.id);
-                const myUserId = Number(user?.id);
-                const isMySolo =
-                  isIndividualMode &&
-                  Number.isFinite(myUserId) &&
-                  (String(participant.short_name ?? "").trim() ===
-                    `S${myUserId}` ||
-                    (Boolean(user?.riot_account) &&
-                      String(participant.primary_riot_account ?? "")
-                        .trim()
-                        .toLowerCase() ===
-                        String(user?.riot_account ?? "")
-                          .trim()
-                          .toLowerCase()));
-                const isMyTeam =
-                  !isIndividualMode &&
-                  toNumber(participant.team_id) === Number(user?.team_id);
-                const highlightMine = isIndividualMode ? isMySolo : isMyTeam;
-                const isCheckedIn = Boolean(participant.isCheckedIn);
-                const displayName = isIndividualMode
-                  ? participant.nickname || participant.name || "—"
-                  : participant.name || "—";
-                const avatarSrc = isIndividualMode
-                  ? participant.primary_profile_picture ||
-                    participant.profile_picture ||
-                    participant.logo_url ||
-                    DEFAULT_USER_AVATAR_URL
-                  : participant.logo_url || TOURNAMENT_LOGO;
-                const riotId = String(
-                  participant.primary_riot_account ?? "",
-                ).trim();
-
-                const checkInBadge = (
-                  <span
-                    className={`inline-block shrink-0 border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide whitespace-nowrap sm:text-[11px] ${
-                      isCheckedIn
-                        ? "border-emerald-500/70 bg-emerald-950/40 text-emerald-200"
-                        : "border-rose-500/60 bg-rose-950/30 text-rose-200"
-                    }`}
-                  >
-                    {isCheckedIn ? "Đã check-in" : "Chưa"}
-                  </span>
-                );
-
-                return (
-                  <TableRow
-                    key={`${participant.id ?? participant.team_id}-${participant.name ?? "team"}`}
-                    className={`${
-                      isIndividualMode
-                        ? TOURNAMENT_TABLE_ROW_CLASS
-                        : `${TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS} cursor-pointer`
-                    } ${
-                      !isIndividualMode &&
-                      tournamentTeamId === selectedTournamentTeamId
-                        ? "bg-[#1c1c1c]"
-                        : ""
-                    } ${highlightMine ? "border-l-[3px] border-l-neutral-400" : ""}`}
-                    onClick={() => openTeamModal(tournamentTeamId)}
-                  >
-                    <TableCell
-                      className={`${TOURNAMENT_TABLE_CELL_CLASS} text-center font-semibold text-neutral-400 tabular-nums`}
-                    >
-                      {String(index + 1).padStart(2, "0")}
-                    </TableCell>
-                    <TableCell className={`${TOURNAMENT_TABLE_CELL_CLASS} min-w-0`}>
-                      <div className="flex min-w-0 items-center gap-3">
-                        <img
-                          src={avatarSrc}
-                          alt={displayName}
-                          className="h-11 w-11 shrink-0 rounded-sm object-cover sm:h-12 sm:w-12"
-                        />
-                        <div className="min-w-0 leading-snug">
-                          <span className="block truncate text-[15px] font-semibold text-white">
-                            {displayName}
-                          </span>
-                          {isIndividualMode && riotId ? (
-                            <span className="mt-0.5 block truncate text-[12px] font-medium text-neutral-400 sm:hidden">
-                              {riotId}
-                            </span>
-                          ) : null}
-                          {!isIndividualMode && participant.short_name ? (
-                            <span className="mt-0.5 block text-[10px] font-semibold uppercase text-neutral-500 sm:hidden">
-                              {participant.short_name}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </TableCell>
-                    {isIndividualMode ? (
-                      <TableCell
-                        className={`${TOURNAMENT_TABLE_CELL_CLASS} hidden sm:table-cell`}
-                      >
-                        <span className="inline-block max-w-[14rem] truncate text-sm font-semibold text-neutral-200 md:max-w-[16rem]">
-                          {riotId || "—"}
-                        </span>
-                      </TableCell>
-                    ) : (
-                      <TableCell
-                        className={`${TOURNAMENT_TABLE_CELL_CLASS} hidden sm:table-cell`}
-                      >
-                        {participant.short_name ? (
-                          <span className={TOURNAMENT_TEAM_TAG_BADGE_CLASS}>
-                            {participant.short_name}
-                          </span>
-                        ) : (
-                          <span className={TOURNAMENT_TABLE_TAG_CLASS}>—</span>
-                        )}
-                      </TableCell>
-                    )}
-                    <TableCell className={TOURNAMENT_TABLE_CELL_CLASS}>
-                      {checkInBadge}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+        isIndividualMode ? (
+          <IndividualPlayersTable
+            rows={apiPlayersRaw}
+            userId={userId}
+            userRiotAccount={String(user?.riot_account ?? "").trim()}
+          />
+        ) : (
+          <TeamPlayersTable
+            rows={apiPlayersRaw}
+            userTeamId={userTeamId}
+            selectedTournamentTeamId={selectedTournamentTeamId}
+            onOpenTeam={openTeamModal}
+          />
+        )
       ) : null}
 
       {!isIndividualMode ? (

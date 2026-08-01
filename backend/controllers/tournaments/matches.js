@@ -1383,24 +1383,64 @@ matchRouter.patch(
 
     if (!permission.ok) return permission.error;
 
-    const status = String(body?.status ?? "completed").trim() || "completed";
-    const statusNormalized = status.toLowerCase();
-    const isCompletedStatus = [
+    const statusRaw = String(body?.status ?? "completed").trim() || "completed";
+    let status = statusRaw;
+    let statusNormalized = status.toLowerCase();
+    let isCompletedStatus = [
       "completed",
       "complete",
       "done",
       "finished",
     ].includes(statusNormalized);
 
-    let winnerTeamId = toNumber(body?.winner_team_id);
+    const teamAId = toNumber(match.team_a_id);
+    const teamBId = toNumber(match.team_b_id);
+    const bestOf = Math.max(1, toNumber(match.best_of) ?? 1);
+    const winsNeeded = Math.ceil(bestOf / 2);
+    const hasDecisiveScore =
+      scoreA !== scoreB && teamAId !== null && teamBId !== null;
+    const seriesDecided =
+      hasDecisiveScore && Math.max(scoreA, scoreB) >= winsNeeded;
+
+    // Series đã đủ bo (vd BO3 tới 2) → luôn completed để BXH có thắng/thua.
+    // Trận chưa start mà đã nhập điểm phân thắng bại cũng promote.
+    const isNotStartedStatus = [
+      "scheduled",
+      "upcoming",
+      "pending",
+      "not_started",
+      "not-started",
+    ].includes(statusNormalized);
+
+    if (
+      !isCompletedStatus &&
+      (seriesDecided || (isNotStartedStatus && hasDecisiveScore))
+    ) {
+      status = "completed";
+      statusNormalized = "completed";
+      isCompletedStatus = true;
+    }
+
+    let winnerTeamId = Object.prototype.hasOwnProperty.call(
+      body ?? {},
+      "winner_team_id",
+    )
+      ? toNumber(body.winner_team_id)
+      : null;
+    const winnerExplicitlyProvided = Object.prototype.hasOwnProperty.call(
+      body ?? {},
+      "winner_team_id",
+    );
+
     if (!isCompletedStatus) {
-      // Ongoing / scheduled: lưu điểm nhưng chưa xác định đội thắng / đi tiếp
+      // Mid-series (vd 1-0 BO3): lưu điểm, chưa ghi winner cho BXH.
       winnerTeamId = null;
-    } else if (winnerTeamId === null) {
-      if (scoreA > scoreB) winnerTeamId = toNumber(match.team_a_id);
-      else if (scoreB > scoreA) winnerTeamId = toNumber(match.team_b_id);
+    } else if (!winnerExplicitlyProvided) {
+      if (scoreA > scoreB) winnerTeamId = teamAId;
+      else if (scoreB > scoreA) winnerTeamId = teamBId;
       else winnerTeamId = null;
     }
+    // else: keep explicit winner_team_id from body (including null = no winner)
 
     const hasRoomIdValue =
       body?.room_id !== undefined ||
@@ -1441,11 +1481,20 @@ matchRouter.patch(
       propagateLoser: shouldPropagateLoser,
     });
 
-    let rankingSync = { ok: true, scheduled: true };
-    triggerRankingRecalculate(Number(match.tournament_id), {
-      match_id: matchId,
-      source: "patch_match_score",
-    });
+    let rankingSync = { ok: true, scheduled: false, synced: false };
+    try {
+      await scheduleTournamentResultsRecalculate(Number(match.tournament_id));
+      rankingSync = { ok: true, scheduled: false, synced: true };
+    } catch (error) {
+      logger.error("[ranking-sync] Failed to recalculate after score update", {
+        tournament_id: Number(match.tournament_id),
+        match_id: matchId,
+        source: "patch_match_score",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      rankingSync = { ok: false, scheduled: false, synced: false };
+      // Still return score save success; ranking can be refreshed via GET /results
+    }
 
     set.status = 200;
     return {
