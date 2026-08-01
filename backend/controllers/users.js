@@ -62,7 +62,7 @@ const buildFrontendRedirectUrl = (
   extras = {},
   origin = config.FRONTEND_BASE_URL,
 ) => {
-  const safeReturnTo = sanitizeReturnTo(returnTo) || "/profile";
+  const safeReturnTo = sanitizeReturnTo(returnTo);
   const safeOrigin = resolveFrontendOrigin(origin);
   const url = new URL(safeReturnTo, safeOrigin);
   url.searchParams.set("riot", riot);
@@ -364,7 +364,7 @@ usersRouter.get(
       return { error: "riot oauth is not configured" };
     }
 
-    const returnTo = sanitizeReturnTo(query?.return_to) || "/profile";
+    const returnTo = sanitizeReturnTo(query?.return_to);
     const openRegister = isTruthyFlag(query?.open_register);
 
     let refererOrigin = null;
