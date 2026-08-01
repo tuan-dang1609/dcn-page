@@ -66,7 +66,6 @@ const defaultAllowedOrigins = [
   "http://127.0.0.1:3000",
   "http://localhost:3001",
   "http://127.0.0.1:3001",
-  "https://dcnpagetest.vercel.app",
   "https://dcn-page.vercel.app",
   "https://dcntournament.vercel.app",
   "https://dcn-page.onrender.com",

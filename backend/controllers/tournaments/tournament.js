@@ -122,7 +122,15 @@ const loadTournamentInfo = async (tournamentId) => {
   ] = await Promise.all([
     pool
       .query(
-        "SELECT id, title, context, milestone_time FROM milestones WHERE tournament_id = $1 ORDER BY milestone_time",
+        `
+        SELECT id, title, context, milestone_time
+        FROM milestones
+        WHERE tournament_id = $1
+        ORDER BY
+          COALESCE((to_jsonb(milestones)->>'sort_order')::int, 2147483647) ASC,
+          milestone_time ASC NULLS LAST,
+          id ASC
+        `,
         [tournament.id],
       )
       .catch(() => ({ rows: [] })),

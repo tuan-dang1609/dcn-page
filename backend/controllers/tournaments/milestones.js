@@ -4,6 +4,26 @@ import middleware from "../../utils/middleware.js";
 const milestoneRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Milestones";
 
+let ensureMilestonesSchemaPromise = null;
+
+const ensureMilestonesSchema = async () => {
+  if (!ensureMilestonesSchemaPromise) {
+    ensureMilestonesSchemaPromise = pool
+      .query(
+        `
+        ALTER TABLE milestones
+          ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+        `,
+      )
+      .catch((error) => {
+        ensureMilestonesSchemaPromise = null;
+        throw error;
+      });
+  }
+
+  return ensureMilestonesSchemaPromise;
+};
+
 const normalizeMilestonePayload = (body) => {
   if (Array.isArray(body)) {
     return body;
@@ -23,6 +43,8 @@ const normalizeMilestonePayload = (body) => {
 milestoneRouter.post(
   "/:id",
   async ({ params, body, set, user }) => {
+    await ensureMilestonesSchema();
+
     const tournamentId = Number(params.id);
 
     if (!user) {
@@ -49,20 +71,33 @@ milestoneRouter.post(
       }
     }
 
+    const { rows: orderRows } = await pool.query(
+      `
+      SELECT COALESCE(MAX(sort_order), -1)::int AS max_order
+      FROM milestones
+      WHERE tournament_id = $1
+      `,
+      [tournamentId],
+    );
+    const startOrder = Number(orderRows[0]?.max_order ?? -1) + 1;
+
     const values = [];
     const placeholders = payload.map((item, index) => {
-      const base = index * 4;
+      const base = index * 5;
       values.push(
         item.title,
         item.context,
         tournamentId,
         item.milestone_time ?? null,
+        Number.isFinite(Number(item.sort_order))
+          ? Number(item.sort_order)
+          : startOrder + index,
       );
-      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
+      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
     });
 
     const query = `
-    INSERT INTO milestones (title, context, tournament_id, milestone_time)
+    INSERT INTO milestones (title, context, tournament_id, milestone_time, sort_order)
     VALUES ${placeholders.join(", ")}
     RETURNING *;
   `;
@@ -101,6 +136,7 @@ milestoneRouter.post(
                     title: { type: "string" },
                     context: { type: "string" },
                     milestone_time: { type: "string", format: "date-time" },
+                    sort_order: { type: "integer" },
                   },
                 },
                 {
@@ -115,34 +151,11 @@ milestoneRouter.post(
                         type: "string",
                         format: "date-time",
                       },
+                      sort_order: { type: "integer" },
                     },
                   },
                 },
               ],
-            },
-            examples: {
-              singleSample: {
-                value: {
-                  title: "Check-in",
-                  context: "Đến sớm 15 phút và xác nhận danh sách đội.",
-                  milestone_time: "2026-03-01T07:45:00.000Z",
-                },
-              },
-              multiSample: {
-                value: [
-                  {
-                    title: "Vòng bảng",
-                    context:
-                      "Thi đấu BO1.\nMỗi đội đánh 4 trận trong ngày đầu tiên.",
-                    milestone_time: "2026-03-01T09:00:00.000Z",
-                  },
-                  {
-                    title: "Playoff",
-                    context: "Top 8 vào nhánh loại trực tiếp BO3.",
-                    milestone_time: "2026-03-05T09:00:00.000Z",
-                  },
-                ],
-              },
             },
           },
         },
@@ -154,6 +167,8 @@ milestoneRouter.post(
 milestoneRouter.patch(
   "/:id",
   async ({ params, body, set, user }) => {
+    await ensureMilestonesSchema();
+
     const tournamentId = Number(params.id);
 
     if (!user) {
@@ -213,11 +228,15 @@ milestoneRouter.patch(
     const insertItems = [];
     const incomingIds = [];
 
-    for (const item of payload) {
+    for (const [index, item] of payload.entries()) {
       if (!item?.title || !item?.context) {
         set.status = 400;
         return { error: "Mỗi milestone phải có title và context" };
       }
+
+      const sortOrder = Number.isFinite(Number(item.sort_order))
+        ? Number(item.sort_order)
+        : index;
 
       const rawId = item?.id;
       const hasId = rawId !== undefined && rawId !== null && rawId !== "";
@@ -234,12 +253,14 @@ milestoneRouter.patch(
           title: item.title,
           context: item.context,
           milestone_time: item.milestone_time ?? null,
+          sort_order: sortOrder,
         });
       } else {
         insertItems.push({
           title: item.title,
           context: item.context,
           milestone_time: item.milestone_time ?? null,
+          sort_order: sortOrder,
         });
       }
     }
@@ -283,29 +304,40 @@ milestoneRouter.patch(
       await pool.query(
         `
           UPDATE milestones
-          SET title = $1, context = $2, milestone_time = $3
-          WHERE id = $4 AND tournament_id = $5
+          SET title = $1,
+              context = $2,
+              milestone_time = $3,
+              sort_order = $4
+          WHERE id = $5 AND tournament_id = $6
           `,
-        [item.title, item.context, item.milestone_time, item.id, tournamentId],
+        [
+          item.title,
+          item.context,
+          item.milestone_time,
+          item.sort_order,
+          item.id,
+          tournamentId,
+        ],
       );
     }
 
     if (insertItems.length > 0) {
       const insertValues = [];
       const insertPlaceholders = insertItems.map((item, index) => {
-        const base = index * 4;
+        const base = index * 5;
         insertValues.push(
           item.title,
           item.context,
           tournamentId,
           item.milestone_time,
+          item.sort_order,
         );
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
       });
 
       await pool.query(
         `
-          INSERT INTO milestones (title, context, tournament_id, milestone_time)
+          INSERT INTO milestones (title, context, tournament_id, milestone_time, sort_order)
           VALUES ${insertPlaceholders.join(", ")}
           `,
         insertValues,
@@ -317,7 +349,7 @@ milestoneRouter.patch(
         SELECT *
         FROM milestones
         WHERE tournament_id = $1
-        ORDER BY id
+        ORDER BY sort_order ASC, id ASC
         `,
       [tournamentId],
     );
@@ -332,82 +364,6 @@ milestoneRouter.patch(
     tags: [TAG],
     summary: "Sync milestones",
     security: [{ bearerAuth: [] }],
-    detail: {
-      parameters: [
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "integer", example: 1 },
-          description: "ID giải đấu",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              oneOf: [
-                {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    required: ["title", "context"],
-                    properties: {
-                      id: { type: "integer" },
-                      title: { type: "string" },
-                      context: { type: "string" },
-                      milestone_time: { type: "string", format: "date-time" },
-                    },
-                  },
-                },
-                {
-                  type: "object",
-                  properties: {
-                    milestones: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        required: ["title", "context"],
-                        properties: {
-                          id: { type: "integer" },
-                          title: { type: "string" },
-                          context: { type: "string" },
-                          milestone_time: {
-                            type: "string",
-                            format: "date-time",
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-            examples: {
-              syncMixed: {
-                value: [
-                  {
-                    id: 10,
-                    title: "Vòng bảng - cập nhật",
-                    context: "Thi đấu BO1, cập nhật lịch mới.",
-                    milestone_time: "2026-03-01T10:00:00.000Z",
-                  },
-                  {
-                    title: "Chung kết",
-                    context: "Trận BO5 tìm nhà vô địch.",
-                    milestone_time: "2026-03-06T13:00:00.000Z",
-                  },
-                ],
-              },
-              clearAll: {
-                value: [],
-              },
-            },
-          },
-        },
-      },
-    },
   },
 );
 
