@@ -316,7 +316,15 @@ const hydrateMatches = (matches: Match[]): EditableMatch[] =>
         ? "auto"
         : String(match.winner_team_id),
     draftDateScheduled: toDatetimeLocalInput(match.date_scheduled),
-    draftStatus: String(match.status ?? "scheduled").trim() || "scheduled",
+    // Score Control is for recording results — default to completed so BXH
+    // wins/losses update unless the operator explicitly picks ongoing.
+    draftStatus: (() => {
+      const raw = String(match.status ?? "").trim().toLowerCase();
+      if (!raw || raw === "scheduled" || raw === "upcoming" || raw === "pending") {
+        return "completed";
+      }
+      return String(match.status).trim() || "completed";
+    })(),
     draftRoomId: String(match.room_id ?? "").trim(),
     saving: false,
     scheduleSaving: false,
@@ -1047,6 +1055,22 @@ const ScoreControlPage = () => {
 
     const winnerSelection = String(match.draftWinnerTeamId || "auto");
 
+    let nextStatus = String(match.draftStatus || "completed").trim() || "completed";
+    const bestOf = Math.max(1, toNumber((match as any).best_of) ?? 1);
+    const winsNeeded = Math.ceil(bestOf / 2);
+    const seriesDecided = scoreA !== scoreB && Math.max(scoreA, scoreB) >= winsNeeded;
+    const statusNormalized = nextStatus.toLowerCase();
+    const isNotStarted = [
+      "scheduled",
+      "upcoming",
+      "pending",
+      "not_started",
+      "not-started",
+    ].includes(statusNormalized);
+    if (seriesDecided || (isNotStarted && scoreA !== scoreB)) {
+      nextStatus = "completed";
+    }
+
     const payload: {
       score_a: number;
       score_b: number;
@@ -1057,7 +1081,7 @@ const ScoreControlPage = () => {
     } = {
       score_a: scoreA,
       score_b: scoreB,
-      status: String(match.draftStatus || "completed").trim() || "completed",
+      status: nextStatus,
       propagate_winner: true,
       propagate_loser: true,
     };
@@ -1075,8 +1099,9 @@ const ScoreControlPage = () => {
 
     try {
       const response = await updateMatchScore(match.id, payload);
-      const rankingScheduled = Boolean(
-        response?.data?.data?.ranking_sync?.scheduled,
+      const rankingSynced = Boolean(
+        response?.data?.data?.ranking_sync?.synced ||
+          response?.data?.data?.ranking_sync?.scheduled,
       );
       const saved = response?.data?.data?.match;
       const savedA = toNumber(saved?.score_a);
@@ -1087,10 +1112,10 @@ const ScoreControlPage = () => {
         description:
           savedA !== null && savedB !== null
             ? `Match #${match.id}: ${savedA}-${savedB}${
-                rankingScheduled ? " · BXH đang cập nhật." : ""
+                rankingSynced ? " · BXH đã cập nhật thắng/thua." : ""
               }`
-            : rankingScheduled
-              ? `Match #${match.id} đã lưu. BXH đang được cập nhật tự động.`
+            : rankingSynced
+              ? `Match #${match.id} đã lưu. BXH đã cập nhật.`
               : `Match #${match.id} đã được cập nhật.`,
       });
 
@@ -1098,6 +1123,12 @@ const ScoreControlPage = () => {
       if (tournamentId) {
         await queryClient.invalidateQueries({
           queryKey: ["tournament-match-list-all-brackets", tournamentId],
+        });
+        await queryClient.invalidateQueries({
+          predicate: (query) =>
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === "tournament-leaderboard" &&
+            String(query.queryKey[1]) === String(tournamentId),
         });
       }
       await queryClient.invalidateQueries({
