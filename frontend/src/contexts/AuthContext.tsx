@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -143,7 +144,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void hydrateAuth();
   }, []);
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     if (!token) {
       setUser(null);
       return;
@@ -156,7 +157,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     setUser(freshUser);
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(freshUser));
-  };
+  }, [token]);
 
   const login = async (
     username: string,
