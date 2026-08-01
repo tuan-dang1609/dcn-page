@@ -36,6 +36,7 @@ import {
   uploadImageToSupabase,
 } from "@/lib/supabaseUpload";
 import { API_BASE } from "@/lib/apiBase";
+import { saveRiotOAuthReturn } from "@/lib/riotOAuthReturn";
 import {
   TOURNAMENT_INFO_LABEL_CLASS,
   TOURNAMENT_INFO_ROW_CLASS,
@@ -1093,6 +1094,7 @@ const TournamentRegistration = ({
     }
 
     setConnectingRiot(true);
+    saveRiotOAuthReturn(location.pathname, true);
 
     try {
       const response = await axios.get<{ url?: string; error?: string }>(
@@ -1105,6 +1107,7 @@ const TournamentRegistration = ({
             origin: window.location.origin,
           },
           headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
         },
       );
 

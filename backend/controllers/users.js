@@ -84,6 +84,42 @@ const buildFrontendRedirectUrl = (
   return url.toString();
 };
 
+const RIOT_RETURN_COOKIE = "dcn_riot_oauth_return";
+
+const readCookie = (request, name) => {
+  const raw = String(request?.headers?.get?.("cookie") ?? "");
+  const parts = raw.split(";").map((part) => part.trim());
+  for (const part of parts) {
+    if (!part.startsWith(`${name}=`)) continue;
+    return decodeURIComponent(part.slice(name.length + 1));
+  }
+  return null;
+};
+
+const parseRiotReturnCookie = (request) => {
+  try {
+    const raw = readCookie(request, RIOT_RETURN_COOKIE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      returnTo: sanitizeReturnTo(parsed?.returnTo),
+      origin: sanitizeOrigin(parsed?.origin),
+      openRegister: Boolean(parsed?.openRegister),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const buildRiotReturnCookie = (payload, { clear = false } = {}) => {
+  if (clear) {
+    return `${RIOT_RETURN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None`;
+  }
+
+  const value = encodeURIComponent(JSON.stringify(payload));
+  return `${RIOT_RETURN_COOKIE}=${value}; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=None`;
+};
+
 const friendlyRiotError = (error) => {
   const message = String(error?.message ?? error ?? "").toLowerCase();
   if (
@@ -94,6 +130,30 @@ const friendlyRiotError = (error) => {
     return "Riot ID này đã được liên kết với tài khoản khác";
   }
   return String(error?.message || "cannot complete riot sign on");
+};
+
+const redirectToFrontend = (
+  returnTo,
+  riot,
+  reason = "",
+  extras = {},
+  origin = config.FRONTEND_BASE_URL,
+) => {
+  const location = buildFrontendRedirectUrl(
+    returnTo,
+    riot,
+    reason,
+    extras,
+    origin,
+  );
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: location,
+      "Set-Cookie": buildRiotReturnCookie(null, { clear: true }),
+    },
+  });
 };
 
 const buildRiotAuthorizeUrl = (state = "") => {
@@ -364,8 +424,14 @@ usersRouter.get(
       return { error: "riot oauth is not configured" };
     }
 
-    const returnTo = sanitizeReturnTo(query?.return_to);
-    const openRegister = isTruthyFlag(query?.open_register);
+    const requestUrl = new URL(request.url);
+    const returnTo =
+      sanitizeReturnTo(requestUrl.searchParams.get("return_to")) ||
+      sanitizeReturnTo(query?.return_to) ||
+      "/profile";
+    const openRegister =
+      isTruthyFlag(requestUrl.searchParams.get("open_register")) ||
+      isTruthyFlag(query?.open_register);
 
     let refererOrigin = null;
     try {
@@ -376,6 +442,7 @@ usersRouter.get(
     }
 
     const requestOrigin =
+      sanitizeOrigin(requestUrl.searchParams.get("origin")) ||
       sanitizeOrigin(query?.origin) ||
       sanitizeOrigin(request?.headers?.get?.("origin")) ||
       sanitizeOrigin(refererOrigin) ||
@@ -393,6 +460,16 @@ usersRouter.get(
         expiresIn: "10m",
       },
     );
+
+    const cookie = buildRiotReturnCookie({
+      returnTo,
+      origin: requestOrigin,
+      openRegister,
+    });
+    set.headers = {
+      ...(set.headers ?? {}),
+      "set-cookie": cookie,
+    };
 
     set.status = 200;
     return {
@@ -424,14 +501,15 @@ usersRouter.get(
 
 usersRouter.get(
   "/riot/callback",
-  async ({ query }) => {
+  async ({ query, request }) => {
     const oauthError = String(query?.error ?? "").trim();
     const oauthErrorDescription = String(query?.error_description ?? "").trim();
     const state = String(query?.state ?? "").trim();
+    const cookieReturn = parseRiotReturnCookie(request);
 
-    let returnTo = "/profile";
-    let origin = config.FRONTEND_BASE_URL;
-    let openRegister = false;
+    let returnTo = cookieReturn?.returnTo || "/profile";
+    let origin = cookieReturn?.origin || config.FRONTEND_BASE_URL;
+    let openRegister = Boolean(cookieReturn?.openRegister);
 
     const redirectExtras = () =>
       openRegister ? { register: "1" } : {};
@@ -439,41 +517,42 @@ usersRouter.get(
     if (state) {
       try {
         const decodedState = jwt.verify(state, config.RIOT_STATE_SECRET);
-        returnTo = sanitizeReturnTo(decodedState?.returnTo) || "/profile";
-        origin = resolveFrontendOrigin(decodedState?.origin);
-        openRegister = Boolean(decodedState?.openRegister);
+        returnTo =
+          sanitizeReturnTo(decodedState?.returnTo) ||
+          cookieReturn?.returnTo ||
+          "/profile";
+        origin = resolveFrontendOrigin(
+          decodedState?.origin || cookieReturn?.origin,
+        );
+        openRegister = Boolean(
+          decodedState?.openRegister ?? cookieReturn?.openRegister,
+        );
       } catch (stateError) {
         console.error("[riot/callback] invalid oauth state", stateError?.message);
-        // Keep defaults when state is invalid; connection itself may still fail below.
+        // Keep cookie fallback when state is invalid.
       }
     }
 
     if (oauthError) {
       const reason = oauthErrorDescription || oauthError;
-      return Response.redirect(
-        buildFrontendRedirectUrl(
-          returnTo,
-          "failed",
-          reason,
-          redirectExtras(),
-          origin,
-        ),
-        302,
+      return redirectToFrontend(
+        returnTo,
+        "failed",
+        reason,
+        redirectExtras(),
+        origin,
       );
     }
 
     const accessCode = String(query?.code ?? "").trim();
 
     if (!accessCode) {
-      return Response.redirect(
-        buildFrontendRedirectUrl(
-          returnTo,
-          "failed",
-          "missing code",
-          redirectExtras(),
-          origin,
-        ),
-        302,
+      return redirectToFrontend(
+        returnTo,
+        "failed",
+        "missing code",
+        redirectExtras(),
+        origin,
       );
     }
 
@@ -482,28 +561,31 @@ usersRouter.get(
       const riot = await fetchRiotAccountByToken(accessToken);
 
       if (!state) {
-        // Backward-compatible callback mode for older Riot Portal setups.
-        return Response.redirect(
-          buildFrontendRedirectUrl(
-            returnTo,
-            "connected",
-            "",
-            {
-              ...redirectExtras(),
-              gameName: riot.gameName,
-              tagName: riot.tagLine,
-            },
-            origin,
-          ),
-          302,
+        return redirectToFrontend(
+          returnTo,
+          "connected",
+          "",
+          {
+            ...redirectExtras(),
+            gameName: riot.gameName,
+            tagName: riot.tagLine,
+          },
+          origin,
         );
       }
 
       const decodedState = jwt.verify(state, config.RIOT_STATE_SECRET);
       const userId = Number(decodedState?.uid);
-      returnTo = sanitizeReturnTo(decodedState?.returnTo) || returnTo;
-      origin = resolveFrontendOrigin(decodedState?.origin || origin);
-      openRegister = Boolean(decodedState?.openRegister);
+      returnTo =
+        sanitizeReturnTo(decodedState?.returnTo) ||
+        cookieReturn?.returnTo ||
+        returnTo;
+      origin = resolveFrontendOrigin(
+        decodedState?.origin || cookieReturn?.origin || origin,
+      );
+      openRegister = Boolean(
+        decodedState?.openRegister ?? cookieReturn?.openRegister,
+      );
 
       if (!Number.isFinite(userId)) {
         throw new Error("invalid state");
@@ -521,15 +603,12 @@ usersRouter.get(
       );
 
       if (existingOwners.length > 0) {
-        return Response.redirect(
-          buildFrontendRedirectUrl(
-            returnTo,
-            "failed",
-            "Riot ID này đã được liên kết với tài khoản khác",
-            redirectExtras(),
-            origin,
-          ),
-          302,
+        return redirectToFrontend(
+          returnTo,
+          "failed",
+          "Riot ID này đã được liên kết với tài khoản khác",
+          redirectExtras(),
+          origin,
         );
       }
 
@@ -538,30 +617,24 @@ usersRouter.get(
         userId,
       ]);
 
-      return Response.redirect(
-        buildFrontendRedirectUrl(
-          returnTo,
-          "connected",
-          "",
-          {
-            ...redirectExtras(),
-            gameName: riot.gameName,
-            tagName: riot.tagLine,
-          },
-          origin,
-        ),
-        302,
+      return redirectToFrontend(
+        returnTo,
+        "connected",
+        "",
+        {
+          ...redirectExtras(),
+          gameName: riot.gameName,
+          tagName: riot.tagLine,
+        },
+        origin,
       );
     } catch (error) {
-      return Response.redirect(
-        buildFrontendRedirectUrl(
-          returnTo,
-          "failed",
-          friendlyRiotError(error),
-          redirectExtras(),
-          origin,
-        ),
-        302,
+      return redirectToFrontend(
+        returnTo,
+        "failed",
+        friendlyRiotError(error),
+        redirectExtras(),
+        origin,
       );
     }
   },

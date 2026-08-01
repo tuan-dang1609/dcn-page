@@ -10,6 +10,11 @@ import axios from "axios";
 import { ArrowLeft, Link2, Loader2, Save, Upload } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import PageLoader from "@/components/PageLoader";
+import {
+  clearRiotOAuthReturn,
+  buildRiotOAuthResumeUrl,
+  saveRiotOAuthReturn,
+} from "@/lib/riotOAuthReturn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -88,6 +93,15 @@ const ProfilePage = () => {
     const reason = searchParams.get("reason");
 
     if (!riotStatus) return;
+
+    const resumeUrl = buildRiotOAuthResumeUrl(searchParams.toString());
+    clearRiotOAuthReturn();
+
+    // Backend prod may always return to /profile — bounce back to tournament if saved.
+    if (resumeUrl) {
+      navigate(resumeUrl, { replace: true });
+      return;
+    }
 
     if (riotStatus === "connected") {
       toast({
@@ -238,6 +252,7 @@ const ProfilePage = () => {
 
   const handleConnectRiot = async () => {
     setConnectingRiot(true);
+    saveRiotOAuthReturn("/profile", false);
 
     try {
       const response = await axios.get<{ url?: string; error?: string }>(
