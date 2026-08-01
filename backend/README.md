@@ -31,6 +31,16 @@ RIOT_STATE_SECRET="replace-me"
 ```
 
 > Important: set `FRONTEND_BASE_URL` to the **live** frontend host (not a deleted Vercel deployment). Riot callback also stores the browser `origin` from `/riot/connect` so redirects return to the page the user started from (e.g. tournament register modal).
+>
+> Local dev checklist (avoid redirecting to `/profile` on Vercel/Render):
+> 1. Frontend `VITE_API_BASE_URL=http://localhost:3000`
+> 2. Backend `APP_BASE_URL=http://localhost:3000`
+> 3. Backend `RIOT_REDIRECT_URI=http://localhost:3000/oauth2-callback`
+> 4. Backend `FRONTEND_BASE_URL=http://localhost:8080`
+> 5. Add the same `RIOT_REDIRECT_URI` in Riot Developer Portal → Redirect URLs
+> 6. Restart backend after changing `.env`
+>
+> If `connect` runs on localhost but `RIOT_REDIRECT_URI` points to Render, Render will handle the callback (often old code) and always send users to `/profile`.
 
 Legacy aliases also supported (for older env files):
 

@@ -442,7 +442,8 @@ usersRouter.get(
         returnTo = sanitizeReturnTo(decodedState?.returnTo) || "/profile";
         origin = resolveFrontendOrigin(decodedState?.origin);
         openRegister = Boolean(decodedState?.openRegister);
-      } catch {
+      } catch (stateError) {
+        console.error("[riot/callback] invalid oauth state", stateError?.message);
         // Keep defaults when state is invalid; connection itself may still fail below.
       }
     }
