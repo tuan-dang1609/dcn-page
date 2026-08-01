@@ -65,9 +65,9 @@ milestoneRouter.post(
     }
 
     for (const item of payload) {
-      if (!item?.title || !item?.context) {
+      if (!item?.title) {
         set.status = 400;
-        return { error: "Mỗi milestone phải có title và context" };
+        return { error: "Mỗi milestone phải có title" };
       }
     }
 
@@ -86,7 +86,7 @@ milestoneRouter.post(
       const base = index * 5;
       values.push(
         item.title,
-        item.context,
+        item.context ?? null,
         tournamentId,
         item.milestone_time ?? null,
         Number.isFinite(Number(item.sort_order))
@@ -131,7 +131,7 @@ milestoneRouter.post(
               oneOf: [
                 {
                   type: "object",
-                  required: ["title", "context"],
+                  required: ["title"],
                   properties: {
                     title: { type: "string" },
                     context: { type: "string" },
@@ -143,7 +143,7 @@ milestoneRouter.post(
                   type: "array",
                   items: {
                     type: "object",
-                    required: ["title", "context"],
+                    required: ["title"],
                     properties: {
                       title: { type: "string" },
                       context: { type: "string" },
@@ -181,11 +181,8 @@ milestoneRouter.patch(
       return { error: "ID giải đấu không hợp lệ" };
     }
 
-    const payload = Array.isArray(body)
-      ? body
-      : Array.isArray(body?.milestones)
-        ? body.milestones
-        : null;
+    // Accept array | { milestones } | single object (same as POST).
+    const payload = normalizeMilestonePayload(body);
 
     if (!Array.isArray(payload)) {
       set.status = 400;
@@ -224,50 +221,11 @@ milestoneRouter.patch(
       };
     }
 
-    const updateItems = [];
-    const insertItems = [];
-    const incomingIds = [];
-
-    for (const [index, item] of payload.entries()) {
-      if (!item?.title || !item?.context) {
+    for (const item of payload) {
+      if (!item?.title) {
         set.status = 400;
-        return { error: "Mỗi milestone phải có title và context" };
+        return { error: "Mỗi milestone phải có title" };
       }
-
-      const sortOrder = Number.isFinite(Number(item.sort_order))
-        ? Number(item.sort_order)
-        : index;
-
-      const rawId = item?.id;
-      const hasId = rawId !== undefined && rawId !== null && rawId !== "";
-
-      if (hasId) {
-        const milestoneId = Number(rawId);
-        if (!Number.isFinite(milestoneId)) {
-          set.status = 400;
-          return { error: "id milestone không hợp lệ" };
-        }
-        incomingIds.push(milestoneId);
-        updateItems.push({
-          id: milestoneId,
-          title: item.title,
-          context: item.context,
-          milestone_time: item.milestone_time ?? null,
-          sort_order: sortOrder,
-        });
-      } else {
-        insertItems.push({
-          title: item.title,
-          context: item.context,
-          milestone_time: item.milestone_time ?? null,
-          sort_order: sortOrder,
-        });
-      }
-    }
-
-    if (new Set(incomingIds).size !== incomingIds.length) {
-      set.status = 400;
-      return { error: "Danh sách milestone bị trùng id" };
     }
 
     const { rows: existingMilestones } = await pool.query(
@@ -278,31 +236,67 @@ milestoneRouter.patch(
     const existingIds = existingMilestones.map((row) => Number(row.id));
     const existingIdSet = new Set(existingIds);
 
-    for (const id of incomingIds) {
-      if (!existingIdSet.has(id)) {
-        set.status = 404;
-        return {
-          error: "Một hoặc nhiều milestone không tồn tại trong giải đấu này",
-        };
+    const updateItems = [];
+    const insertItems = [];
+    const keepIds = [];
+
+    for (const [index, item] of payload.entries()) {
+      const sortOrder = Number.isFinite(Number(item.sort_order))
+        ? Number(item.sort_order)
+        : index;
+
+      const rawId = item?.id;
+      const hasId = rawId !== undefined && rawId !== null && rawId !== "";
+      const milestoneId = hasId ? Number(rawId) : NaN;
+      const existsInTournament =
+        Number.isFinite(milestoneId) && existingIdSet.has(milestoneId);
+
+      if (existsInTournament) {
+        keepIds.push(milestoneId);
+        updateItems.push({
+          id: milestoneId,
+          title: item.title,
+          context: item.context ?? null,
+          milestone_time: item.milestone_time ?? null,
+          sort_order: sortOrder,
+        });
+      } else {
+        // No id, invalid id, or id not in this tournament → INSERT (append).
+        insertItems.push({
+          title: item.title,
+          context: item.context ?? null,
+          milestone_time: item.milestone_time ?? null,
+          sort_order: sortOrder,
+        });
       }
     }
 
-    const keepIdSet = new Set(incomingIds);
-    const deleteIds = existingIds.filter((id) => !keepIdSet.has(id));
-
-    if (deleteIds.length > 0) {
-      const deleteIdPlaceholders = deleteIds
-        .map((_, index) => `$${index + 2}`)
-        .join(", ");
-      await pool.query(
-        `DELETE FROM milestones WHERE tournament_id = $1 AND id IN (${deleteIdPlaceholders})`,
-        [tournamentId, ...deleteIds],
-      );
+    if (new Set(keepIds).size !== keepIds.length) {
+      set.status = 400;
+      return { error: "Danh sách milestone bị trùng id" };
     }
 
-    for (const item of updateItems) {
-      await pool.query(
-        `
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      const keepIdSet = new Set(keepIds);
+      const deleteIds = existingIds.filter((id) => !keepIdSet.has(id));
+
+      if (deleteIds.length > 0) {
+        const deleteIdPlaceholders = deleteIds
+          .map((_, index) => `$${index + 2}`)
+          .join(", ");
+        await client.query(
+          `DELETE FROM milestones WHERE tournament_id = $1 AND id IN (${deleteIdPlaceholders})`,
+          [tournamentId, ...deleteIds],
+        );
+      }
+
+      for (const item of updateItems) {
+        await client.query(
+          `
           UPDATE milestones
           SET title = $1,
               context = $2,
@@ -310,55 +304,68 @@ milestoneRouter.patch(
               sort_order = $4
           WHERE id = $5 AND tournament_id = $6
           `,
-        [
-          item.title,
-          item.context,
-          item.milestone_time,
-          item.sort_order,
-          item.id,
-          tournamentId,
-        ],
-      );
-    }
-
-    if (insertItems.length > 0) {
-      const insertValues = [];
-      const insertPlaceholders = insertItems.map((item, index) => {
-        const base = index * 5;
-        insertValues.push(
-          item.title,
-          item.context,
-          tournamentId,
-          item.milestone_time,
-          item.sort_order,
+          [
+            item.title,
+            item.context,
+            item.milestone_time,
+            item.sort_order,
+            item.id,
+            tournamentId,
+          ],
         );
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
-      });
+      }
 
-      await pool.query(
-        `
+      if (insertItems.length > 0) {
+        const insertValues = [];
+        const insertPlaceholders = insertItems.map((item, index) => {
+          const base = index * 5;
+          insertValues.push(
+            item.title,
+            item.context,
+            tournamentId,
+            item.milestone_time,
+            item.sort_order,
+          );
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+        });
+
+        await client.query(
+          `
           INSERT INTO milestones (title, context, tournament_id, milestone_time, sort_order)
           VALUES ${insertPlaceholders.join(", ")}
           `,
-        insertValues,
-      );
-    }
+          insertValues,
+        );
+      }
 
-    const { rows: syncedMilestones } = await pool.query(
-      `
+      const { rows: syncedMilestones } = await client.query(
+        `
         SELECT *
         FROM milestones
         WHERE tournament_id = $1
         ORDER BY sort_order ASC, id ASC
         `,
-      [tournamentId],
-    );
+        [tournamentId],
+      );
 
-    set.status = 200;
-    return {
-      message: "Sync milestones thành công",
-      data: syncedMilestones,
-    };
+      await client.query("COMMIT");
+
+      set.status = 200;
+      return {
+        message: "Sync milestones thành công",
+        data: syncedMilestones,
+        meta: {
+          updated: updateItems.length,
+          inserted: insertItems.length,
+          deleted: deleteIds.length,
+        },
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
   {
     tags: [TAG],
