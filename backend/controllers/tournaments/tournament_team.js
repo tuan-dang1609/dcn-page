@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import { pool } from "../../utils/db.js";
 import middleware from "../../utils/middleware.js";
 import { recalculateTournamentResults } from "../../utils/tournamentRanking.js";
+import { syncSoloRegistrationForTournament } from "../../utils/soloRiotSync.js";
 
 const teamTourRoute = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Tournament Teams";
@@ -551,6 +552,108 @@ teamTourRoute.post(
   {
     tags: [TAG],
     summary: "Register individual (solo) player to tournament",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+teamTourRoute.post(
+  "/:tournament_id/sync-solo-riot",
+  async ({ params, set, user }) => {
+    const tournamentId = Number(params.tournament_id);
+    const userId = Number(user?.id);
+
+    if (!userId) {
+      set.status = 403;
+      return { message: "Bạn cần đăng nhập" };
+    }
+
+    if (!Number.isFinite(tournamentId)) {
+      set.status = 400;
+      return { message: "ID giải đấu không hợp lệ" };
+    }
+
+    const { rows: tournamentRows } = await pool.query(
+      `
+      SELECT
+        id,
+        COALESCE(NULLIF(TRIM(to_jsonb(t)->>'registration_mode'), ''), 'org') AS registration_mode
+      FROM tournaments t
+      WHERE id = $1
+      `,
+      [tournamentId],
+    );
+
+    if (tournamentRows.length === 0) {
+      set.status = 404;
+      return { message: "Không tìm thấy giải đấu" };
+    }
+
+    if (String(tournamentRows[0].registration_mode) !== "individual") {
+      set.status = 400;
+      return {
+        message: "Chỉ áp dụng cho giải đăng ký cá nhân (TFT solo).",
+      };
+    }
+
+    const { rows: userRows } = await pool.query(
+      `SELECT id, riot_account FROM users WHERE id = $1`,
+      [userId],
+    );
+
+    if (userRows.length === 0) {
+      set.status = 404;
+      return { message: "Không tìm thấy người dùng" };
+    }
+
+    const riotAccount = String(userRows[0].riot_account ?? "").trim();
+    if (!riotAccount) {
+      set.status = 400;
+      return {
+        message: "Tài khoản chưa liên kết Riot ID. Hãy đổi/liên kết Riot trước.",
+      };
+    }
+
+    const { rows: registrationRows } = await pool.query(
+      `
+      SELECT tt.id, tt.team_id
+      FROM tournament_teams tt
+      JOIN tournament_team_players ttp ON ttp.tournament_team_id = tt.id
+      WHERE tt.tournament_id = $1
+        AND ttp.user_id = $2
+      LIMIT 1
+      `,
+      [tournamentId, userId],
+    );
+
+    if (registrationRows.length === 0) {
+      set.status = 400;
+      return {
+        message:
+          "Bạn chưa đăng ký giải này. Riot ID trên tài khoản đã được lưu; đăng ký khi sẵn sàng.",
+      };
+    }
+
+    const synced = await syncSoloRegistrationForTournament(
+      tournamentId,
+      userId,
+      riotAccount,
+    );
+
+    set.status = 200;
+    return {
+      message: "Đã cập nhật Riot ID cho đăng ký giải",
+      data: {
+        riot_account: riotAccount,
+        display_name: synced?.display_name ?? riotAccount.split("#")[0],
+        tournament_team_id:
+          synced?.tournament_team_id ?? Number(registrationRows[0].id),
+        team_id: synced?.team_id ?? Number(registrationRows[0].team_id),
+      },
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Sync solo registration display after Riot ID change",
     security: [{ bearerAuth: [] }],
   },
 );

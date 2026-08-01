@@ -97,6 +97,14 @@ export const unregisterSoloFromTournament = (tournamentId: number | string) =>
     getAuthConfig(),
   );
 
+/** After Riot OAuth relink: refresh solo/TFT registration display without unregistering. */
+export const syncSoloRiotOnTournament = (tournamentId: number | string) =>
+  axios.post(
+    `${tournamentsBaseUrl}/teams/${tournamentId}/sync-solo-riot`,
+    {},
+    getAuthConfig(),
+  );
+
 export const getMatchesByTournamentId = async (
   tournamentId: number | string,
 ) => {

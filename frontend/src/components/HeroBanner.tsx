@@ -30,10 +30,11 @@ import {
   getMyTeamInvites,
   type TeamInviteRecord,
 } from "@/api/teamInvites";
-import { unregisterSoloFromTournament } from "@/api/tournaments";
+import { unregisterSoloFromTournament, syncSoloRiotOnTournament } from "@/api/tournaments";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
 import TeamRosterDialog from "@/components/TeamRosterDialog";
 import { isRiotGameSlug } from "@/components/tournamentTheme";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface HeroBannerProps {
   tournament?: {
@@ -84,7 +85,8 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const { game } = useParams();
+  const { game, slug } = useParams();
+  const queryClient = useQueryClient();
   const showRiotId = isRiotGameSlug(game ?? tournament?.short_name);
   const isIndividualMode =
     String(tournament?.registration_mode ?? "org").toLowerCase() ===
@@ -144,13 +146,40 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
 
     const finish = async () => {
       if (riotStatus === "connected") {
-        toast.success("Đã liên kết Riot", {
-          description: "Riot ID đã được cập nhật. Bạn có thể đăng ký ngay.",
-        });
         try {
           await refreshUser();
         } catch {
           // ignore refresh errors; modal still opens
+        }
+
+        // If already registered for this TFT solo tournament, keep roster
+        // display name in sync with the new Riot ID (no cancel needed).
+        if (isIndividualMode && tournament?.id && token) {
+          try {
+            const syncResponse = await syncSoloRiotOnTournament(tournament.id);
+            const nextRiot =
+              syncResponse.data?.data?.riot_account ||
+              [params.get("gameName"), params.get("tagName")]
+                .filter(Boolean)
+                .join("#");
+            toast.success("Đã đổi Riot ID", {
+              description: nextRiot
+                ? `Đăng ký giải đã cập nhật thành ${nextRiot}.`
+                : "Riot ID và đăng ký giải đã được cập nhật.",
+            });
+            await queryClient.invalidateQueries({
+              queryKey: ["tournament", game, slug],
+            });
+          } catch {
+            toast.success("Đã liên kết Riot", {
+              description:
+                "Riot ID trên tài khoản đã cập nhật. Bạn có thể đăng ký ngay.",
+            });
+          }
+        } else {
+          toast.success("Đã liên kết Riot", {
+            description: "Riot ID đã được cập nhật. Bạn có thể đăng ký ngay.",
+          });
         }
       } else if (riotStatus === "failed") {
         toast.error("Liên kết Riot thất bại", {
@@ -187,11 +216,17 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
       cancelled = true;
     };
   }, [
+    game,
     isAuthLoading,
+    isIndividualMode,
     location.pathname,
     location.search,
     navigate,
+    queryClient,
     refreshUser,
+    slug,
+    token,
+    tournament?.id,
     user,
   ]);
 
@@ -536,16 +571,12 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                   isRegistrationOpen || isRegistered ? (
                     <Button
                       size="sm"
-                      onClick={
-                        showUpdateRegistration
-                          ? handleSoloUnregisterClick
-                          : handleOpenRegistration
-                      }
+                      onClick={handleOpenRegistration}
                       className="h-11 px-4 sm:px-5 gap-2 text-sm sm:text-base font-semibold"
-                      variant={showUpdateRegistration ? "destructive" : "default"}
+                      variant={showUpdateRegistration ? "outline" : "default"}
                     >
                       {showUpdateRegistration ? (
-                        <span>Hủy đăng ký</span>
+                        <span>Quản lý đăng ký</span>
                       ) : (
                         <>
                           <Trophy className="w-4 h-4" />

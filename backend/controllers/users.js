@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { pool } from "../utils/db.js";
 import middleware from "../utils/middleware.js";
 import config from "../utils/config.js";
+import { syncSoloRegistrationsForUser } from "../utils/soloRiotSync.js";
 
 const usersRouter = new Elysia({ name: "Users" }).derive(
   middleware.deriveAuthContext,
@@ -616,6 +617,17 @@ usersRouter.get(
         riot.riotAccount,
         userId,
       ]);
+
+      // Keep TFT/solo tournament display names in sync with the new Riot ID
+      // so players don't need to cancel and re-register.
+      try {
+        await syncSoloRegistrationsForUser(userId, riot.riotAccount);
+      } catch (syncError) {
+        console.error(
+          "[riot/callback] solo registration sync failed:",
+          syncError?.message || syncError,
+        );
+      }
 
       return redirectToFrontend(
         returnTo,

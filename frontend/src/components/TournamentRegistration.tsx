@@ -27,6 +27,7 @@ import {
   Trash2,
   Link2 as LinkIcon,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
@@ -1094,6 +1095,7 @@ const TournamentRegistration = ({
     }
 
     setConnectingRiot(true);
+    // Always reopen this modal after OAuth (link or change Riot ID).
     saveRiotOAuthReturn(location.pathname, true);
 
     try {
@@ -1132,6 +1134,12 @@ const TournamentRegistration = ({
     }
   };
 
+  const handleChangeRiotId = async () => {
+    // Same OAuth flow; after callback the account Riot ID updates and
+    // solo registration display is synced (no need to hủy đăng ký).
+    await handleConnectRiot();
+  };
+
   // Keep hook order stable: guard only after all hooks are declared.
   if (!user) return null;
 
@@ -1148,7 +1156,7 @@ const TournamentRegistration = ({
             </DialogTitle>
             <DialogDescription className="text-sm text-neutral-400">
               {soloAlreadyRegistered
-                ? "Bạn đã đăng ký giải TFT solo. Có thể hủy trong thời gian đăng ký."
+                ? "Bạn đã đăng ký giải TFT solo. Có thể đổi Riot ID (không cần hủy đăng ký) hoặc hủy trong thời gian đăng ký."
                 : "Giải TFT solo. Không cần chọn đội. Chỉ cần tài khoản đã liên kết Riot ID."}
             </DialogDescription>
           </DialogHeader>
@@ -1181,10 +1189,15 @@ const TournamentRegistration = ({
                 Bạn chưa liên kết Riot. Nhấn &quot;Liên kết Riot&quot; để kết
                 nối Riot Sign On, sau đó quay lại đây để đăng ký.
               </div>
+            ) : soloAlreadyRegistered ? (
+              <div className="border border-neutral-600 bg-neutral-900/60 px-4 py-3 text-sm text-neutral-300">
+                Liên kết sai Riot ID? Dùng &quot;Đổi Riot ID&quot; để cập nhật
+                trên tài khoản và danh sách giải — không cần hủy đăng ký.
+              </div>
             ) : null}
           </div>
 
-          <div className="flex flex-col-reverse gap-2 border-t border-neutral-700 px-4 py-4 sm:flex-row sm:justify-end sm:px-5">
+          <div className="flex flex-col-reverse gap-2 border-t border-neutral-700 px-4 py-4 sm:flex-row sm:flex-wrap sm:justify-end sm:px-5">
             <Button
               variant="outline"
               onClick={() => resetAndClose(false)}
@@ -1211,14 +1224,33 @@ const TournamentRegistration = ({
                 )}
               </Button>
             ) : soloAlreadyRegistered ? (
-              <Button
-                variant="destructive"
-                onClick={() => void handleSoloUnregister()}
-                disabled={soloSubmitting || !tournamentId}
-                className="gap-2 rounded-sm"
-              >
-                {soloSubmitting ? "Đang hủy..." : "Hủy đăng ký"}
-              </Button>
+              <>
+                <Button
+                  onClick={() => void handleChangeRiotId()}
+                  disabled={connectingRiot || soloSubmitting}
+                  className="gap-2 rounded-sm bg-[#2d2d2d] text-white hover:bg-neutral-700"
+                >
+                  {connectingRiot ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Đang chuyển sang Riot...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4" />
+                      Đổi Riot ID
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => void handleSoloUnregister()}
+                  disabled={soloSubmitting || connectingRiot || !tournamentId}
+                  className="gap-2 rounded-sm"
+                >
+                  {soloSubmitting ? "Đang hủy..." : "Hủy đăng ký"}
+                </Button>
+              </>
             ) : (
               <Button
                 onClick={() => void handleSoloRegister()}
