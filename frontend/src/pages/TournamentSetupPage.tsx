@@ -76,11 +76,27 @@ const stepLabels = [
 type StepIndex = 1 | 2 | 3 | 4 | 5;
 
 interface MilestoneDraft {
+  clientKey: string;
   id?: string;
   title: string;
   context: string;
   milestone_time: string;
 }
+
+const createEmptyMilestone = (): MilestoneDraft => ({
+  clientKey: `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  title: "",
+  context: "",
+  milestone_time: "",
+});
+
+const mapApiMilestoneToDraft = (item: TournamentMilestoneApi): MilestoneDraft => ({
+  clientKey: `m-${item?.id ?? Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  id: item?.id !== undefined && item?.id !== null ? String(item.id) : "",
+  title: String(item?.title ?? ""),
+  context: String(item?.context ?? ""),
+  milestone_time: toGmt7InputDateTime(item?.milestone_time),
+});
 
 interface RuleDraft {
   id?: string;
@@ -263,7 +279,7 @@ const TournamentSetupPage = () => {
 
   const [milestoneMode, setMilestoneMode] = useState<"post" | "patch">("patch");
   const [milestones, setMilestones] = useState<MilestoneDraft[]>([
-    { title: "", context: "", milestone_time: "" },
+    createEmptyMilestone(),
   ]);
 
   const [ruleMode, setRuleMode] = useState<"post" | "patch">("patch");
@@ -474,12 +490,7 @@ const TournamentSetupPage = () => {
     >,
   ) => {
     const nextMilestones = Array.isArray(details.milestones)
-      ? (details.milestones as TournamentMilestoneApi[]).map((item) => ({
-          id: item?.id !== undefined && item?.id !== null ? String(item.id) : "",
-          title: String(item?.title ?? ""),
-          context: String(item?.context ?? ""),
-          milestone_time: toGmt7InputDateTime(item?.milestone_time),
-        }))
+      ? (details.milestones as TournamentMilestoneApi[]).map(mapApiMilestoneToDraft)
       : [];
     const nextRules = Array.isArray(details.rule)
       ? (details.rule as TournamentRuleApi[]).map((item) => ({
@@ -499,9 +510,7 @@ const TournamentSetupPage = () => {
       : [];
 
     setMilestones(
-      nextMilestones.length
-        ? nextMilestones
-        : [{ title: "", context: "", milestone_time: "" }],
+      nextMilestones.length ? nextMilestones : [createEmptyMilestone()],
     );
     setRules(
       nextRules.length ? nextRules : [{ title: "", content: "" }],
@@ -568,7 +577,7 @@ const TournamentSetupPage = () => {
     setTournamentIdInput(nextId);
 
     if (!nextId) {
-      setMilestones([{ title: "", context: "", milestone_time: "" }]);
+      setMilestones([createEmptyMilestone()]);
       setRules([{ title: "", content: "" }]);
       setPrizes(defaultPrizeDrafts());
       applyRequirementFromApi(null);
@@ -772,10 +781,11 @@ const TournamentSetupPage = () => {
 
     const payload: MilestonePayload[] = milestones
       .filter((item) => item.title.trim() && item.context.trim())
-      .map((item) => ({
+      .map((item, index) => ({
         ...(toNumber(item.id) ? { id: Number(item.id) } : {}),
         title: item.title.trim(),
         context: item.context.trim(),
+        sort_order: index,
         ...(toGmt7OffsetDateTime(item.milestone_time)
           ? { milestone_time: toGmt7OffsetDateTime(item.milestone_time) }
           : {}),
@@ -784,7 +794,7 @@ const TournamentSetupPage = () => {
     if (!payload.length) {
       toast({
         title: "Milestones rỗng",
-        description: "Hãy nhập ít nhất 1 milestone hợp lệ.",
+        description: "Hãy nhập ít nhất 1 milestone hợp lệ (title + context).",
         variant: "destructive",
       });
       return;
@@ -793,10 +803,37 @@ const TournamentSetupPage = () => {
     setSubmitting(true);
 
     try {
-      if (milestoneMode === "post") {
-        await createMilestones(tournamentId, payload);
+      // Always sync (patch) so order/inserts/deletes stay consistent.
+      const response =
+        milestoneMode === "post"
+          ? await createMilestones(tournamentId, payload)
+          : await syncMilestones(tournamentId, payload);
+
+      const savedRows = Array.isArray(response.data?.data)
+        ? response.data.data
+        : [];
+
+      if (savedRows.length) {
+        setMilestones(
+          savedRows.map((item: TournamentMilestoneApi) =>
+            mapApiMilestoneToDraft(item),
+          ),
+        );
+        setMilestoneMode("patch");
       } else {
-        await syncMilestones(tournamentId, payload);
+        const details = await getTournamentInfoById(tournamentId);
+        const info = details.data?.info;
+        if (info) {
+          const nextMilestones = Array.isArray(info.milestones)
+            ? (info.milestones as TournamentMilestoneApi[]).map(
+                mapApiMilestoneToDraft,
+              )
+            : [];
+          setMilestones(
+            nextMilestones.length ? nextMilestones : [createEmptyMilestone()],
+          );
+          setMilestoneMode("patch");
+        }
       }
 
       markStepCompleted(2);
@@ -1462,17 +1499,56 @@ const TournamentSetupPage = () => {
             <div className="space-y-3">
               {milestones.map((item, index) => (
                 <div
-                  key={index}
+                  key={item.clientKey}
                   className="rounded-md border border-border p-3 space-y-2"
                 >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Milestone {index + 1}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() =>
+                          setMilestones((prev) => {
+                            const next = [...prev];
+                            next.splice(index, 0, createEmptyMilestone());
+                            return next;
+                          })
+                        }
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Thêm trước
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() =>
+                          setMilestones((prev) => {
+                            const next = [...prev];
+                            next.splice(index + 1, 0, createEmptyMilestone());
+                            return next;
+                          })
+                        }
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Thêm sau
+                      </Button>
+                    </div>
+                  </div>
                   <div className="grid gap-2 md:grid-cols-3">
                     <Input
                       value={item.id ?? ""}
                       title="ID milestone để update (nếu có)"
                       onChange={(event) =>
                         setMilestones((prev) =>
-                          prev.map((row, rowIndex) =>
-                            rowIndex === index
+                          prev.map((row) =>
+                            row.clientKey === item.clientKey
                               ? { ...row, id: event.target.value }
                               : row,
                           ),
@@ -1486,8 +1562,8 @@ const TournamentSetupPage = () => {
                       title="Tiêu đề milestone"
                       onChange={(event) =>
                         setMilestones((prev) =>
-                          prev.map((row, rowIndex) =>
-                            rowIndex === index
+                          prev.map((row) =>
+                            row.clientKey === item.clientKey
                               ? { ...row, title: event.target.value }
                               : row,
                           ),
@@ -1504,8 +1580,8 @@ const TournamentSetupPage = () => {
                       onClick={openDateTimePicker}
                       onChange={(event) =>
                         setMilestones((prev) =>
-                          prev.map((row, rowIndex) =>
-                            rowIndex === index
+                          prev.map((row) =>
+                            row.clientKey === item.clientKey
                               ? { ...row, milestone_time: event.target.value }
                               : row,
                           ),
@@ -1518,8 +1594,8 @@ const TournamentSetupPage = () => {
                     value={item.context}
                     onChange={(event) =>
                       setMilestones((prev) =>
-                        prev.map((row, rowIndex) =>
-                          rowIndex === index
+                        prev.map((row) =>
+                          row.clientKey === item.clientKey
                             ? { ...row, context: event.target.value }
                             : row,
                         ),
@@ -1532,9 +1608,12 @@ const TournamentSetupPage = () => {
                     variant="outline"
                     className="gap-2"
                     onClick={() =>
-                      setMilestones((prev) =>
-                        prev.filter((_, rowIndex) => rowIndex !== index),
-                      )
+                      setMilestones((prev) => {
+                        const next = prev.filter(
+                          (row) => row.clientKey !== item.clientKey,
+                        );
+                        return next.length ? next : [createEmptyMilestone()];
+                      })
                     }
                     disabled={milestones.length <= 1}
                   >
@@ -1550,15 +1629,12 @@ const TournamentSetupPage = () => {
                 type="button"
                 variant="outline"
                 onClick={() =>
-                  setMilestones((prev) => [
-                    ...prev,
-                    { title: "", context: "", milestone_time: "" },
-                  ])
+                  setMilestones((prev) => [...prev, createEmptyMilestone()])
                 }
                 className="gap-2"
               >
                 <Plus className="h-4 w-4" />
-                Thêm milestone
+                Thêm cuối danh sách
               </Button>
 
               <Button

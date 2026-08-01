@@ -170,6 +170,7 @@ export interface MilestonePayload {
   title: string;
   context: string;
   milestone_time?: string | null;
+  sort_order?: number;
 }
 
 export const createMilestones = (
