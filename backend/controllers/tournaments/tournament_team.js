@@ -446,55 +446,55 @@ teamTourRoute.post(
 
     if (existingSoloTeams.length > 0) {
       soloTeamId = Number(existingSoloTeams[0].id);
+      // Solo/TFT: only refresh display name. Do not copy profile_picture into
+      // teams.logo_url — that column is UNIQUE and shared default avatars collide.
       await pool.query(
         `
         UPDATE teams
-        SET name = $1,
-            logo_url = COALESCE($2, logo_url)
-        WHERE id = $3
+        SET name = $1
+        WHERE id = $2
         `,
-        [soloTeamName, profile.profile_picture ?? null, soloTeamId],
+        [soloTeamName, soloTeamId],
       );
     } else {
-      // Solo/TFT: no team color. Shared default hex violates
-      // teams_team_color_hex_unique — prefer NULL; fallback to per-user hex.
+      // Solo/TFT slots don't need team logo/color. Shared profile avatars and
+      // default hex violate teams_logo_url_unique / teams_team_color_hex_unique.
       const soloColorFallback = `#${((userId * 2654435761) >>> 0)
         .toString(16)
         .padStart(8, "0")
         .slice(0, 6)
         .toUpperCase()}`;
 
-      try {
-        const { rows: createdTeams } = await pool.query(
+      const insertSoloTeam = async (logoUrl, colorHex) => {
+        const { rows } = await pool.query(
           `
           INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
-          VALUES ($1, $2, $3, NULL, $4)
+          VALUES ($1, $2, $3, $4, $5)
           RETURNING id
           `,
-          [soloTeamName, shortName, profile.profile_picture ?? null, userId],
+          [soloTeamName, shortName, logoUrl, colorHex, userId],
         );
-        soloTeamId = Number(createdTeams[0]?.id);
+        return Number(rows[0]?.id);
+      };
+
+      try {
+        soloTeamId = await insertSoloTeam(null, null);
       } catch (error) {
         // 23502 = not_null_violation, 23505 = unique_violation
         if (error?.code !== "23502" && error?.code !== "23505") {
           throw error;
         }
 
-        const { rows: createdTeams } = await pool.query(
-          `
-          INSERT INTO teams (name, short_name, logo_url, team_color_hex, created_by)
-          VALUES ($1, $2, $3, $4, $5)
-          RETURNING id
-          `,
-          [
-            soloTeamName,
-            shortName,
-            profile.profile_picture ?? null,
-            soloColorFallback,
-            userId,
-          ],
-        );
-        soloTeamId = Number(createdTeams[0]?.id);
+        try {
+          soloTeamId = await insertSoloTeam(null, soloColorFallback);
+        } catch (retryError) {
+          if (retryError?.code !== "23505") {
+            throw retryError;
+          }
+          // Last resort: unique logo placeholder + unique color for this user.
+          const uniqueLogo = `solo://${userId}`;
+          soloTeamId = await insertSoloTeam(uniqueLogo, soloColorFallback);
+        }
       }
     }
 

@@ -133,42 +133,89 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     setRegOpen(true);
   };
 
+  // Prevent OAuth return handler from re-firing (refreshUser / invalidateQueries
+  // change deps while ?riot= is still in the URL → infinite API loop).
+  const handledOauthSearchRef = useRef<string | null>(null);
+  const oauthSyncRef = useRef({
+    isIndividualMode,
+    tournamentId: tournament?.id,
+    token,
+    game,
+    slug,
+    refreshUser,
+    queryClient,
+  });
+  oauthSyncRef.current = {
+    isIndividualMode,
+    tournamentId: tournament?.id,
+    token,
+    game,
+    slug,
+    refreshUser,
+    queryClient,
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const shouldOpenRegister = params.get("register") === "1";
     const riotStatus = params.get("riot");
+    const reason = params.get("reason");
+    const gameName = params.get("gameName");
+    const tagName = params.get("tagName");
 
-    if (!shouldOpenRegister && !riotStatus) return;
+    if (!shouldOpenRegister && !riotStatus) {
+      handledOauthSearchRef.current = null;
+      return;
+    }
     if (isAuthLoading) return;
     if (shouldOpenRegister && !user) return;
 
-    let cancelled = false;
+    const searchKey = location.search;
+    if (handledOauthSearchRef.current === searchKey) return;
+    handledOauthSearchRef.current = searchKey;
 
-    const finish = async () => {
+    // Clear OAuth query params immediately so re-renders cannot re-trigger this.
+    params.delete("register");
+    params.delete("riot");
+    params.delete("reason");
+    params.delete("gameName");
+    params.delete("tagName");
+    const nextSearch = params.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : "",
+      },
+      { replace: true },
+    );
+
+    // Do not abort on effect cleanup — clearing the URL re-runs this effect and
+    // would otherwise cancel sync/toasts mid-flight.
+    void (async () => {
+      const ctx = oauthSyncRef.current;
+
       if (riotStatus === "connected") {
         try {
-          await refreshUser();
+          await ctx.refreshUser();
         } catch {
           // ignore refresh errors; modal still opens
         }
 
-        // If already registered for this TFT solo tournament, keep roster
-        // display name in sync with the new Riot ID (no cancel needed).
-        if (isIndividualMode && tournament?.id && token) {
+        if (ctx.isIndividualMode && ctx.tournamentId && ctx.token) {
           try {
-            const syncResponse = await syncSoloRiotOnTournament(tournament.id);
+            const syncResponse = await syncSoloRiotOnTournament(
+              ctx.tournamentId,
+            );
             const nextRiot =
               syncResponse.data?.data?.riot_account ||
-              [params.get("gameName"), params.get("tagName")]
-                .filter(Boolean)
-                .join("#");
+              [gameName, tagName].filter(Boolean).join("#");
             toast.success("Đã đổi Riot ID", {
               description: nextRiot
                 ? `Đăng ký giải đã cập nhật thành ${nextRiot}.`
                 : "Riot ID và đăng ký giải đã được cập nhật.",
             });
-            await queryClient.invalidateQueries({
-              queryKey: ["tournament", game, slug],
+            await ctx.queryClient.invalidateQueries({
+              queryKey: ["tournament", ctx.game, ctx.slug],
             });
           } catch {
             toast.success("Đã liên kết Riot", {
@@ -183,51 +230,21 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
         }
       } else if (riotStatus === "failed") {
         toast.error("Liên kết Riot thất bại", {
-          description:
-            params.get("reason") || "Không thể lấy Riot ID từ Riot Sign On.",
+          description: reason || "Không thể lấy Riot ID từ Riot Sign On.",
         });
       }
-
-      if (cancelled) return;
 
       if (shouldOpenRegister) {
         setDialogMode("manage");
         setRegOpen(true);
       }
-
-      params.delete("register");
-      params.delete("riot");
-      params.delete("reason");
-      params.delete("gameName");
-      params.delete("tagName");
-      const nextSearch = params.toString();
-      navigate(
-        {
-          pathname: location.pathname,
-          search: nextSearch ? `?${nextSearch}` : "",
-        },
-        { replace: true },
-      );
-    };
-
-    void finish();
-
-    return () => {
-      cancelled = true;
-    };
+    })();
   }, [
-    game,
     isAuthLoading,
-    isIndividualMode,
     location.pathname,
     location.search,
     navigate,
-    queryClient,
-    refreshUser,
-    slug,
-    token,
-    tournament?.id,
-    user,
+    user?.id,
   ]);
 
   const handleSoloUnregisterClick = () => {
