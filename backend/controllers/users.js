@@ -175,7 +175,9 @@ usersRouter.post(
 
       const saltRounds = 10;
       const passwordHash = await bcrypt.hash(password, saltRounds);
-      const avatarUrl = profile_picture ?? logo_url ?? null;
+      const DEFAULT_AVATAR =
+        "https://nybmykdjtkjaatepkfog.supabase.co/storage/v1/object/public/image/users/default-avatar-icon-of-social-media-user-vector.jpg";
+      const avatarUrl = profile_picture ?? logo_url ?? DEFAULT_AVATAR;
 
       const { rows } = await pool.query(
         "INSERT INTO users(nickname,username,password_hash,profile_picture) VALUES ($1,$2,$3,$4) RETURNING id, nickname, username, profile_picture",

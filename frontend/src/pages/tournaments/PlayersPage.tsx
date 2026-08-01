@@ -14,6 +14,8 @@ import {
   TOURNAMENT_PAGE_BG_CLASS,
   TOURNAMENT_PAGE_TITLE_CLASS,
   TOURNAMENT_PANEL_CLASS,
+  TOURNAMENT_SECTION_META_CLASS,
+  TOURNAMENT_TABLE_CELL_CLASS,
   TOURNAMENT_TABLE_HEADER_CLASS,
   TOURNAMENT_TABLE_HEADER_ROW_CLASS,
   TOURNAMENT_TABLE_MIN_CLASS,
@@ -98,7 +100,7 @@ const PlayersPage = () => {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className={TOURNAMENT_PAGE_TITLE_CLASS}>Danh sách</h2>
-          <p className="mt-1 text-xs font-bold uppercase tracking-wider text-neutral-500">
+          <p className={TOURNAMENT_SECTION_META_CLASS}>
             {registeredCount}
             {maxParticipate ? ` / ${maxParticipate}` : ""} đội đăng ký
             {apiPlayersRaw.length > 0
@@ -126,22 +128,22 @@ const PlayersPage = () => {
             <TableHeader>
               <TableRow className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
                 <TableHead
-                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-16 text-center whitespace-nowrap`}
+                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-10 text-center whitespace-nowrap sm:w-12`}
                 >
                   #
                 </TableHead>
                 <TableHead
-                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} min-w-[260px] whitespace-nowrap`}
+                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} min-w-0 whitespace-nowrap`}
                 >
                   Đội
                 </TableHead>
                 <TableHead
-                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-32 whitespace-nowrap`}
+                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} hidden w-20 whitespace-nowrap sm:table-cell`}
                 >
                   Tag
                 </TableHead>
                 <TableHead
-                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-36 text-center whitespace-nowrap`}
+                  className={`${TOURNAMENT_TABLE_HEADER_CLASS} w-24 text-center whitespace-nowrap sm:w-28`}
                 >
                   Check-in
                 </TableHead>
@@ -164,22 +166,33 @@ const PlayersPage = () => {
                     } ${isMine ? "border-l-[3px] border-l-neutral-400" : ""}`}
                     onClick={() => openTeamModal(tournamentTeamId)}
                   >
-                    <TableCell className="text-center text-sm font-bold text-neutral-400">
+                    <TableCell
+                      className={`${TOURNAMENT_TABLE_CELL_CLASS} text-center font-semibold text-neutral-400 tabular-nums`}
+                    >
                       {String(index + 1).padStart(2, "0")}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      <div className="flex items-center gap-2">
+                    <TableCell className={TOURNAMENT_TABLE_CELL_CLASS}>
+                      <div className="flex min-w-0 items-center gap-2">
                         <img
                           src={participant.logo_url || TOURNAMENT_LOGO}
                           alt={participant.name || "Team logo"}
-                          className="h-10 w-10 shrink-0 object-contain"
+                          className="h-7 w-7 shrink-0 object-contain sm:h-8 sm:w-8"
                         />
-                        <span className="font-bold text-white">
-                          {participant.name || "—"}
-                        </span>
+                        <div className="min-w-0 leading-snug">
+                          <span className="block truncate font-semibold text-white">
+                            {participant.name || "—"}
+                          </span>
+                          {participant.short_name ? (
+                            <span className="mt-0.5 block text-[10px] font-semibold uppercase text-neutral-500 sm:hidden">
+                              {participant.short_name}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell
+                      className={`${TOURNAMENT_TABLE_CELL_CLASS} hidden sm:table-cell`}
+                    >
                       {participant.short_name ? (
                         <span className={TOURNAMENT_TEAM_TAG_BADGE_CLASS}>
                           {participant.short_name}
@@ -188,15 +201,17 @@ const PlayersPage = () => {
                         <span className={TOURNAMENT_TABLE_TAG_CLASS}>—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-center">
+                    <TableCell
+                      className={`${TOURNAMENT_TABLE_CELL_CLASS} text-center`}
+                    >
                       <span
-                        className={`inline-block border px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wider whitespace-nowrap ${
+                        className={`inline-block border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide whitespace-nowrap sm:px-2.5 sm:text-[11px] ${
                           isCheckedIn
                             ? "border-emerald-500/70 bg-emerald-950/40 text-emerald-200"
                             : "border-rose-500/60 bg-rose-950/30 text-rose-200"
                         }`}
                       >
-                        {isCheckedIn ? "Đã check-in" : "Chưa check-in"}
+                        {isCheckedIn ? "Đã check-in" : "Chưa"}
                       </span>
                     </TableCell>
                   </TableRow>
