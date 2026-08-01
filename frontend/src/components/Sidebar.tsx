@@ -12,6 +12,7 @@ type SidebarProps = {
   tournament?: {
     registered_count?: number;
     max_participate?: number;
+    registration_mode?: "org" | "individual" | string;
     requirement?: {
       rank_min?: string;
       rank_max?: string;
@@ -33,6 +34,9 @@ type SidebarProps = {
 const Sidebar = ({ tournament, isLoading = false }: SidebarProps) => {
   const registeredCount = Number(tournament?.registered_count ?? 0);
   const maxParticipate = Number(tournament?.max_participate ?? 0);
+  const isIndividualMode =
+    String(tournament?.registration_mode ?? "org").toLowerCase() ===
+    "individual";
   const requirement = tournament?.requirement ?? {};
   const rankLabel = (() => {
     const min = String(requirement?.rank_min ?? "").trim();
@@ -86,7 +90,7 @@ const Sidebar = ({ tournament, isLoading = false }: SidebarProps) => {
                 </span>
               </p>
               <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-neutral-500">
-                Đội đã đăng ký
+                {isIndividualMode ? "Thành viên đã đăng ký" : "Đội đã đăng ký"}
               </p>
             </div>
             <span className="text-sm font-extrabold tabular-nums text-neutral-400">

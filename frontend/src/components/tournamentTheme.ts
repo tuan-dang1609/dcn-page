@@ -112,7 +112,7 @@ export const TOURNAMENT_MEMBER_ROW_CLASS =
   "flex items-center gap-3 border-0 border-b border-neutral-800 bg-[#141414] px-4 py-3 last:border-b-0";
 
 export const TOURNAMENT_MEMBER_AVATAR_CLASS =
-  "flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden border border-neutral-600 bg-[#2d2d2d] text-xs font-bold uppercase text-neutral-200";
+  "flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden border border-neutral-600 bg-[#2d2d2d] text-xs font-bold uppercase text-neutral-200 sm:h-12 sm:w-12";
 
 export const TOURNAMENT_SECTION_META_CLASS =
   "mt-1 text-xs font-bold uppercase tracking-wider text-neutral-500";

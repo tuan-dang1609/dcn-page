@@ -517,6 +517,9 @@ export interface TournamentTeamResult {
   short_name?: string;
   logo_url?: string;
   team_color_hex?: string;
+  primary_riot_account?: string | null;
+  primary_profile_picture?: string | null;
+  primary_nickname?: string | null;
 }
 
 export interface TournamentTeamAchievement {

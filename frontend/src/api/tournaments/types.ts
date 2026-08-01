@@ -43,9 +43,12 @@ export interface TournamentBySlugResponse {
       short_name?: string;
       logo_url?: string;
       team_color_hex?: string;
+      nickname?: string | null;
+      profile_picture?: string | null;
       isCheckedIn?: boolean;
       player_ids?: Array<number | string>;
       primary_riot_account?: string | null;
+      primary_profile_picture?: string | null;
     }>;
     registered_count?: number;
     registration_mode?: "org" | "individual" | string;

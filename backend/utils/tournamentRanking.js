@@ -1312,7 +1312,37 @@ const TOURNAMENT_RESULTS_SELECT = `
     t.name,
     t.short_name,
     t.logo_url,
-    t.team_color_hex
+    t.team_color_hex,
+    (
+      SELECT u2.riot_account
+      FROM tournament_teams tt2
+      JOIN tournament_team_players ttp2 ON ttp2.tournament_team_id = tt2.id
+      JOIN users u2 ON u2.id = ttp2.user_id
+      WHERE tt2.tournament_id = r.tournament_id
+        AND tt2.team_id = r.team_id
+      ORDER BY ttp2.user_id
+      LIMIT 1
+    ) AS primary_riot_account,
+    (
+      SELECT u2.profile_picture
+      FROM tournament_teams tt2
+      JOIN tournament_team_players ttp2 ON ttp2.tournament_team_id = tt2.id
+      JOIN users u2 ON u2.id = ttp2.user_id
+      WHERE tt2.tournament_id = r.tournament_id
+        AND tt2.team_id = r.team_id
+      ORDER BY ttp2.user_id
+      LIMIT 1
+    ) AS primary_profile_picture,
+    (
+      SELECT u2.nickname
+      FROM tournament_teams tt2
+      JOIN tournament_team_players ttp2 ON ttp2.tournament_team_id = tt2.id
+      JOIN users u2 ON u2.id = ttp2.user_id
+      WHERE tt2.tournament_id = r.tournament_id
+        AND tt2.team_id = r.team_id
+      ORDER BY ttp2.user_id
+      LIMIT 1
+    ) AS primary_nickname
   FROM tournament_team_results r
   JOIN teams t ON t.id = r.team_id
   WHERE r.tournament_id = $1
