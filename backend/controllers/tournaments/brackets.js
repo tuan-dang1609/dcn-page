@@ -6,6 +6,7 @@ import {
   setTournamentRankingBracketId,
   scheduleTournamentResultsRecalculate,
 } from "../../utils/tournamentRanking.js";
+import { repropagateDoubleElimLosers } from "../../utils/bracketProgression.js";
 
 const bracketRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Brackets";
@@ -2816,6 +2817,61 @@ bracketRouter.patch(
   {
     tags: [TAG],
     summary: "Link match to next slot (same bracket)",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+bracketRouter.post(
+  "/:tournament_id/brackets/:bracket_id/repropagate",
+  async ({ params, set, user }) => {
+    const tournamentId = toNumber(params.tournament_id);
+    const bracketId = toNumber(params.bracket_id);
+
+    if (!tournamentId || !bracketId) {
+      set.status = 400;
+      return { error: "tournament_id / bracket_id không hợp lệ" };
+    }
+
+    const permission = await ensureTournamentManagePermission(
+      user,
+      tournamentId,
+      set,
+    );
+    if (!permission.ok) return permission.error;
+
+    const { rows: bracketRows } = await pool.query(
+      `
+      SELECT id, tournament_id
+      FROM brackets
+      WHERE id = $1 AND tournament_id = $2
+      LIMIT 1
+      `,
+      [bracketId, tournamentId],
+    );
+
+    if (!bracketRows.length) {
+      set.status = 404;
+      return { error: "Bracket not found" };
+    }
+
+    const result = await repropagateDoubleElimLosers(bracketId);
+
+    try {
+      await scheduleTournamentResultsRecalculate(tournamentId);
+    } catch {
+      // ranking sync optional
+    }
+
+    set.status = 200;
+    return {
+      message:
+        "Đã đẩy lại đội thắng/thua trong bracket (gồm winner nhánh dưới đi tiếp)",
+      data: result,
+    };
+  },
+  {
+    tags: [TAG],
+    summary: "Re-propagate DE winners/losers for a bracket",
     security: [{ bearerAuth: [] }],
   },
 );

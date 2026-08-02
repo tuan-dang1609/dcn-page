@@ -313,10 +313,20 @@ const hydrateMatches = (matches: Match[]): EditableMatch[] =>
         : String(match.score_b),
     draftWinnerTeamId:
       match.winner_team_id === null || match.winner_team_id === undefined
-        ? "none"
+        ? (() => {
+            const status = String(match.status ?? "")
+              .trim()
+              .toLowerCase();
+            if (
+              ["completed", "complete", "done", "finished"].includes(status)
+            ) {
+              return "auto";
+            }
+            return "none";
+          })()
         : String(match.winner_team_id),
     draftDateScheduled: toDatetimeLocalInput(match.date_scheduled),
-    // Giữ status hiện tại — chỉ đổi completed/winner khi operator chọn tay.
+    // Giữ status hiện tại — chỉ đổi completed khi operator chọn tay.
     draftStatus: String(match.status ?? "").trim() || "scheduled",
     draftRoomId: String(match.room_id ?? "").trim(),
     saving: false,
@@ -1050,6 +1060,12 @@ const ScoreControlPage = () => {
     const nextStatus =
       String(match.draftStatus || match.status || "scheduled").trim() ||
       "scheduled";
+    const isCompleted = [
+      "completed",
+      "complete",
+      "done",
+      "finished",
+    ].includes(nextStatus.toLowerCase());
 
     const payload: {
       score_a: number;
@@ -1067,9 +1083,12 @@ const ScoreControlPage = () => {
     };
 
     if (winnerSelection === "none") {
-      payload.winner_team_id = null;
+      // Completed + điểm phân thắng bại → để backend tự suy winner (đi tiếp).
+      if (!(isCompleted && scoreA !== scoreB)) {
+        payload.winner_team_id = null;
+      }
     } else if (winnerSelection === "auto") {
-      // Backend tự suy winner chỉ khi status = completed.
+      // Backend tự suy winner khi status = completed.
     } else {
       const winnerTeamId = toNumber(winnerSelection);
       if (winnerTeamId !== null) {

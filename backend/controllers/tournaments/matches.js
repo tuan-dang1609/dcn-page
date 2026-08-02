@@ -6,6 +6,7 @@ import { deleteBanPickSession } from "../../utils/banPick.js";
 import { scheduleTournamentResultsRecalculate } from "../../utils/tournamentRanking.js";
 import {
   applyMatchProgression,
+  ensureDoubleElimLoserNextLinks,
 } from "../../utils/bracketProgression.js";
 import { tryApplyStagedAovStats, ensureMatchAovStatsFromStaging } from "../../utils/aovStagingDb.js";
 import {
@@ -1383,7 +1384,9 @@ matchRouter.patch(
 
     if (!permission.ok) return permission.error;
 
-    // Không tự promote completed/winner — chỉ theo body (Score Control chọn tay).
+    // Không tự promote completed — status chỉ theo body.
+    // Khi đã completed: luôn suy winner từ tỉ số nếu chưa chỉ định đội thắng cụ thể
+    // (kể cả body gửi winner_team_id: null) để đội đi tiếp / BXH hoạt động.
     const statusRaw = Object.prototype.hasOwnProperty.call(body ?? {}, "status")
       ? String(body?.status ?? "").trim()
       : String(match.status ?? "").trim();
@@ -1403,19 +1406,28 @@ matchRouter.patch(
       body ?? {},
       "winner_team_id",
     );
-    let winnerTeamId = winnerExplicitlyProvided
+    const explicitWinnerTeamId = winnerExplicitlyProvided
       ? toNumber(body.winner_team_id)
       : null;
 
+    let winnerTeamId = null;
+
     if (!isCompletedStatus) {
-      // Đang diễn ra / chưa kết thúc: lưu điểm, không ghi winner cho BXH.
+      // Đang diễn ra / chưa kết thúc: lưu điểm, không ghi winner.
       winnerTeamId = null;
-    } else if (!winnerExplicitlyProvided) {
-      if (scoreA > scoreB) winnerTeamId = teamAId;
-      else if (scoreB > scoreA) winnerTeamId = teamBId;
-      else winnerTeamId = null;
+    } else if (
+      winnerExplicitlyProvided &&
+      explicitWinnerTeamId !== null &&
+      (explicitWinnerTeamId === teamAId || explicitWinnerTeamId === teamBId)
+    ) {
+      winnerTeamId = explicitWinnerTeamId;
+    } else if (scoreA > scoreB) {
+      winnerTeamId = teamAId;
+    } else if (scoreB > scoreA) {
+      winnerTeamId = teamBId;
+    } else {
+      winnerTeamId = null;
     }
-    // else: keep explicit winner_team_id from body (including null = no winner)
 
     const hasRoomIdValue =
       body?.room_id !== undefined ||
@@ -1443,6 +1455,27 @@ matchRouter.patch(
     );
 
     const updatedMatch = updatedRows[0] ?? null;
+
+    // Sửa link next_match thiếu ở nhánh thua (DE 8 đội) trước khi đẩy đội đi tiếp.
+    if (isCompletedStatus && updatedMatch?.bracket_id) {
+      try {
+        await ensureDoubleElimLoserNextLinks(Number(updatedMatch.bracket_id));
+        const refreshed = await getMatchById(matchId);
+        if (refreshed) {
+          Object.assign(updatedMatch, refreshed);
+          updatedMatch.winner_team_id = winnerTeamId;
+          updatedMatch.status = status;
+          updatedMatch.score_a = scoreA;
+          updatedMatch.score_b = scoreB;
+        }
+      } catch (error) {
+        logger.error("[bracket-link] Failed to ensure loser next links", {
+          bracket_id: Number(updatedMatch.bracket_id),
+          match_id: matchId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     const shouldPropagateWinner =
       isCompletedStatus && body?.propagate_winner !== false;
@@ -1672,6 +1705,24 @@ matchRouter.post(
     let loserNextMatch = null;
 
     if (updatedMatch && winnerTeamId) {
+      try {
+        await ensureDoubleElimLoserNextLinks(Number(updatedMatch.bracket_id));
+        const refreshed = await getMatchById(matchId);
+        if (refreshed) Object.assign(updatedMatch, refreshed, {
+          winner_team_id: winnerTeamId,
+          status: "completed",
+          score_a: totalA,
+          score_b: totalB,
+        });
+      } catch (error) {
+        logger.error("[bracket-link] Failed to ensure loser next links", {
+          bracket_id: Number(updatedMatch.bracket_id),
+          match_id: matchId,
+          source: "post_match_games",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
       const progression = await applyMatchProgression({
         updatedMatch,
         winnerTeamId,

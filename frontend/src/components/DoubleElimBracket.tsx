@@ -296,10 +296,8 @@ const projectDoubleElimMatches = ({
   matches: DisplayMatch[];
   selectedTeamByMatchId?: Record<number, number>;
 }) => {
-  if (!selectedTeamByMatchId || !Object.keys(selectedTeamByMatchId).length) {
-    return matches;
-  }
-
+  // Luôn project đội thắng đã completed vào slot tiếp theo (kể cả khi DB chưa kịp
+  // ghi team_a/b), và thêm projection pickem nếu có selectedTeamByMatchId.
   const projectedById = new Map<number, DisplayMatch>();
   const teamInfoById = new Map<
     number,
@@ -427,7 +425,6 @@ const projectDoubleElimMatches = ({
     const targetMatch = byRoundMatchNo.get(
       `${loserTarget.round}-${loserTarget.matchNo}`,
     );
-
     if (!targetMatch) return;
 
     applyTeamToSlot(targetMatch, loserTarget.slot, loserTeamId, {
@@ -435,26 +432,18 @@ const projectDoubleElimMatches = ({
     });
   });
 
-  projectedById.forEach((match) => {
+  return projectedMatches.map((match) => {
     const winnerTeamId = getResolvedWinnerTeamId(match, selectedTeamByMatchId);
 
     if (winnerTeamId !== null && winnerTeamId === match.teamAId) {
-      match.winner = match.p1;
-      return;
+      return { ...match, winner: match.p1 };
     }
 
     if (winnerTeamId !== null && winnerTeamId === match.teamBId) {
-      match.winner = match.p2;
-      return;
+      return { ...match, winner: match.p2 };
     }
 
-    match.winner = null;
-  });
-
-  return [...projectedById.values()].sort((a, b) => {
-    if (a.round !== b.round) return a.round - b.round;
-    if (a.matchNo !== b.matchNo) return a.matchNo - b.matchNo;
-    return a.id - b.id;
+    return match;
   });
 };
 
