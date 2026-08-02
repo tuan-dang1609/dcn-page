@@ -1154,50 +1154,6 @@ export const recalculateTournamentResults = async (tournamentId) => {
     matchesQuery.params,
   );
 
-  // Heal stale rows: có điểm đủ bo nhưng thiếu winner → BXH không cộng thắng/thua.
-  for (const match of allMatchRows) {
-    const teamAId = toNumber(match.team_a_id);
-    const teamBId = toNumber(match.team_b_id);
-    const scoreA = toNumber(match.score_a);
-    const scoreB = toNumber(match.score_b);
-    const existingWinner = toNumber(match.winner_team_id);
-    if (!teamAId || !teamBId || scoreA === null || scoreB === null) continue;
-    if (scoreA === scoreB) continue;
-
-    const bestOf = Math.max(1, toNumber(match.best_of) ?? 1);
-    const winsNeeded = Math.ceil(bestOf / 2);
-    if (Math.max(scoreA, scoreB) < winsNeeded) continue;
-
-    const inferredWinner = scoreA > scoreB ? teamAId : teamBId;
-    if (existingWinner === inferredWinner) {
-      const statusNorm = String(match.status ?? "").trim().toLowerCase();
-      if (
-        !["completed", "complete", "done", "finished"].includes(statusNorm)
-      ) {
-        match.status = "completed";
-        await pool.query(
-          `UPDATE matches SET status = 'completed' WHERE id = $1`,
-          [match.id],
-        );
-      }
-      continue;
-    }
-
-    if (existingWinner) continue;
-
-    match.winner_team_id = inferredWinner;
-    match.status = "completed";
-    await pool.query(
-      `
-      UPDATE matches
-      SET winner_team_id = $1,
-          status = 'completed'
-      WHERE id = $2
-      `,
-      [inferredWinner, match.id],
-    );
-  }
-
   let matchRows = allMatchRows;
 
   // Bracket được chọn để tính hạng/placement (có thể hẹp hơn toàn giải).

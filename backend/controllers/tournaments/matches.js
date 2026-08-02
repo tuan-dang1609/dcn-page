@@ -1383,10 +1383,13 @@ matchRouter.patch(
 
     if (!permission.ok) return permission.error;
 
-    const statusRaw = String(body?.status ?? "completed").trim() || "completed";
-    let status = statusRaw;
-    let statusNormalized = status.toLowerCase();
-    let isCompletedStatus = [
+    // Không tự promote completed/winner — chỉ theo body (Score Control chọn tay).
+    const statusRaw = Object.prototype.hasOwnProperty.call(body ?? {}, "status")
+      ? String(body?.status ?? "").trim()
+      : String(match.status ?? "").trim();
+    const status = statusRaw || String(match.status ?? "scheduled").trim() || "scheduled";
+    const statusNormalized = status.toLowerCase();
+    const isCompletedStatus = [
       "completed",
       "complete",
       "done",
@@ -1395,45 +1398,17 @@ matchRouter.patch(
 
     const teamAId = toNumber(match.team_a_id);
     const teamBId = toNumber(match.team_b_id);
-    const bestOf = Math.max(1, toNumber(match.best_of) ?? 1);
-    const winsNeeded = Math.ceil(bestOf / 2);
-    const hasDecisiveScore =
-      scoreA !== scoreB && teamAId !== null && teamBId !== null;
-    const seriesDecided =
-      hasDecisiveScore && Math.max(scoreA, scoreB) >= winsNeeded;
 
-    // Series đã đủ bo (vd BO3 tới 2) → luôn completed để BXH có thắng/thua.
-    // Trận chưa start mà đã nhập điểm phân thắng bại cũng promote.
-    const isNotStartedStatus = [
-      "scheduled",
-      "upcoming",
-      "pending",
-      "not_started",
-      "not-started",
-    ].includes(statusNormalized);
-
-    if (
-      !isCompletedStatus &&
-      (seriesDecided || (isNotStartedStatus && hasDecisiveScore))
-    ) {
-      status = "completed";
-      statusNormalized = "completed";
-      isCompletedStatus = true;
-    }
-
-    let winnerTeamId = Object.prototype.hasOwnProperty.call(
-      body ?? {},
-      "winner_team_id",
-    )
-      ? toNumber(body.winner_team_id)
-      : null;
     const winnerExplicitlyProvided = Object.prototype.hasOwnProperty.call(
       body ?? {},
       "winner_team_id",
     );
+    let winnerTeamId = winnerExplicitlyProvided
+      ? toNumber(body.winner_team_id)
+      : null;
 
     if (!isCompletedStatus) {
-      // Mid-series (vd 1-0 BO3): lưu điểm, chưa ghi winner cho BXH.
+      // Đang diễn ra / chưa kết thúc: lưu điểm, không ghi winner cho BXH.
       winnerTeamId = null;
     } else if (!winnerExplicitlyProvided) {
       if (scoreA > scoreB) winnerTeamId = teamAId;
