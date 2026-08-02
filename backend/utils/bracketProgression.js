@@ -360,11 +360,194 @@ export const applyMatchProgression = async ({
   return { nextMatch, loserNextMatch };
 };
 
+const inferWinnerTeamIdFromScores = (match) => {
+  const teamAId = toNumber(match.team_a_id);
+  const teamBId = toNumber(match.team_b_id);
+  const scoreA = toNumber(match.score_a);
+  const scoreB = toNumber(match.score_b);
+  if (!teamAId || !teamBId || scoreA === null || scoreB === null) return null;
+  if (scoreA > scoreB) return teamAId;
+  if (scoreB > scoreA) return teamBId;
+  return null;
+};
+
+const healCompletedMatchWinner = async (match) => {
+  const status = String(match?.status ?? "")
+    .trim()
+    .toLowerCase();
+  const isCompleted = ["completed", "complete", "done", "finished"].includes(
+    status,
+  );
+  if (!isCompleted) return match;
+
+  let winnerTeamId = toNumber(match.winner_team_id);
+  if (winnerTeamId) return match;
+
+  winnerTeamId = inferWinnerTeamIdFromScores(match);
+  if (!winnerTeamId) return match;
+
+  const { rows } = await pool.query(
+    `
+    UPDATE matches
+    SET winner_team_id = $1
+    WHERE id = $2
+    RETURNING *
+    `,
+    [winnerTeamId, match.id],
+  );
+
+  return rows[0] ?? { ...match, winner_team_id: winnerTeamId };
+};
+
+/**
+ * Đảm bảo next_match_id trong nhánh thua (single-bracket DE) đúng cấu trúc chuẩn.
+ * Sửa bracket cũ thiếu link → winner nhánh dưới không đi tiếp.
+ */
+export const ensureDoubleElimLoserNextLinks = async (bracketId) => {
+  const normalizedBracketId = toNumber(bracketId);
+  if (!normalizedBracketId) {
+    throw new Error("bracket_id không hợp lệ");
+  }
+
+  const { rows: roundShapeRows } = await pool.query(
+    `
+    SELECT round_number, COUNT(*)::int AS total
+    FROM matches
+    WHERE bracket_id = $1
+    GROUP BY round_number
+    ORDER BY round_number ASC
+    `,
+    [normalizedBracketId],
+  );
+
+  const roundShape = roundShapeRows
+    .map((row) => `${Number(row.round_number)}:${Number(row.total)}`)
+    .join(",");
+
+  if (
+    roundShape === COMPACT_SIX_ROUND_SHAPE ||
+    roundShape === FOUR_TEAM_ADVANCE_ROUND_SHAPE
+  ) {
+    return { bracket_id: normalizedBracketId, updated: 0, skipped: true };
+  }
+
+  const winnerRounds = await getWinnerRoundsForBracket(
+    normalizedBracketId,
+    roundShape,
+  );
+  const loserMainRounds = Math.max(1, 2 * (winnerRounds - 1));
+
+  const { rows: matchRows } = await pool.query(
+    `
+    SELECT id, round_number, match_no, next_match_id, next_slot
+    FROM matches
+    WHERE bracket_id = $1
+    ORDER BY round_number ASC, match_no ASC, id ASC
+    `,
+    [normalizedBracketId],
+  );
+
+  const byRound = new Map();
+  for (const match of matchRows) {
+    const round = Number(match.round_number);
+    if (!byRound.has(round)) byRound.set(round, []);
+    byRound.get(round).push(match);
+  }
+
+  let updated = 0;
+  const updates = [];
+
+  for (let loserIndex = 1; loserIndex <= loserMainRounds - 1; loserIndex += 1) {
+    const currentRoundNumber = winnerRounds + loserIndex;
+    const nextRoundNumber = winnerRounds + loserIndex + 1;
+    const currentRound = byRound.get(currentRoundNumber) ?? [];
+    const nextRound = byRound.get(nextRoundNumber) ?? [];
+
+    for (let index = 0; index < currentRound.length; index += 1) {
+      let targetMatchId = null;
+      let nextSlot = "A";
+
+      if (loserIndex % 2 === 1) {
+        targetMatchId = nextRound[index]?.id ?? null;
+        nextSlot = "A";
+      } else {
+        targetMatchId = nextRound[Math.floor(index / 2)]?.id ?? null;
+        nextSlot = index % 2 === 0 ? "A" : "B";
+      }
+
+      if (!targetMatchId) continue;
+
+      const current = currentRound[index];
+      const existingNext = toNumber(current.next_match_id);
+      const existingSlot = String(current.next_slot || "")
+        .trim()
+        .toUpperCase();
+
+      if (existingNext === toNumber(targetMatchId) && existingSlot === nextSlot) {
+        continue;
+      }
+
+      await pool.query(
+        `
+        UPDATE matches
+        SET next_match_id = $1, next_slot = $2
+        WHERE id = $3
+        `,
+        [targetMatchId, nextSlot, current.id],
+      );
+      updated += 1;
+      updates.push({
+        match_id: current.id,
+        next_match_id: targetMatchId,
+        next_slot: nextSlot,
+      });
+    }
+  }
+
+  const lastLoserRound = byRound.get(winnerRounds + loserMainRounds) ?? [];
+  const grandFinalRound = byRound.get(winnerRounds + loserMainRounds + 1) ?? [];
+  const lastLoser = lastLoserRound[0];
+  const grandFinal = grandFinalRound[0];
+
+  if (lastLoser && grandFinal) {
+    const existingNext = toNumber(lastLoser.next_match_id);
+    const existingSlot = String(lastLoser.next_slot || "")
+      .trim()
+      .toUpperCase();
+    if (existingNext !== toNumber(grandFinal.id) || existingSlot !== "B") {
+      await pool.query(
+        `
+        UPDATE matches
+        SET next_match_id = $1, next_slot = 'B'
+        WHERE id = $2
+        `,
+        [grandFinal.id, lastLoser.id],
+      );
+      updated += 1;
+      updates.push({
+        match_id: lastLoser.id,
+        next_match_id: grandFinal.id,
+        next_slot: "B",
+      });
+    }
+  }
+
+  return {
+    bracket_id: normalizedBracketId,
+    winner_rounds: winnerRounds,
+    loser_main_rounds: loserMainRounds,
+    updated,
+    updates,
+  };
+};
+
 export const repropagateDoubleElimLosers = async (bracketId) => {
   const normalizedBracketId = toNumber(bracketId);
   if (!normalizedBracketId) {
     throw new Error("bracket_id không hợp lệ");
   }
+
+  const linkRepair = await ensureDoubleElimLoserNextLinks(normalizedBracketId);
 
   const { rows: roundShapeRows } = await pool.query(
     `
@@ -386,45 +569,67 @@ export const repropagateDoubleElimLosers = async (bracketId) => {
     roundShape,
   );
 
-  const { rows: completedUpperMatches } = await pool.query(
+  const { rows: completedMatches } = await pool.query(
     `
     SELECT *
     FROM matches
     WHERE bracket_id = $1
-      AND round_number <= $2
-      AND winner_team_id IS NOT NULL
       AND team_a_id IS NOT NULL
       AND team_b_id IS NOT NULL
-      AND LOWER(COALESCE(status, '')) IN ('completed', 'complete')
+      AND LOWER(COALESCE(status, '')) IN (
+        'completed', 'complete', 'done', 'finished'
+      )
     ORDER BY round_number ASC, match_no ASC, id ASC
     `,
-    [normalizedBracketId, winnerRounds],
+    [normalizedBracketId],
   );
 
-  const results = [];
+  const winnerResults = [];
+  const loserResults = [];
 
-  for (const match of completedUpperMatches) {
-    const loserNextMatch = await propagateLoserToLoserBracket({
-      updatedMatch: match,
-      winnerTeamId: match.winner_team_id,
-    });
+  for (const rawMatch of completedMatches) {
+    const match = await healCompletedMatchWinner(rawMatch);
+    const winnerTeamId = toNumber(match.winner_team_id);
+    if (!winnerTeamId) continue;
 
-    results.push({
+    // Winner đi tiếp qua next_match_id (gồm cả nhánh dưới: VL1 → VL2 …)
+    const nextMatch = await propagateWinnerToNextMatch(match, winnerTeamId);
+    winnerResults.push({
       source_match_id: match.id,
       round_number: match.round_number,
       match_no: match.match_no,
-      winner_team_id: match.winner_team_id,
-      propagated: Boolean(loserNextMatch),
-      target_match_id: loserNextMatch?.id ?? null,
+      winner_team_id: winnerTeamId,
+      propagated: Boolean(nextMatch),
+      target_match_id: nextMatch?.id ?? null,
     });
+
+    // Chỉ trận nhánh trên mới drop loser xuống nhánh thua
+    if (Number(match.round_number) <= winnerRounds) {
+      const loserNextMatch = await propagateLoserToLoserBracket({
+        updatedMatch: match,
+        winnerTeamId,
+      });
+
+      loserResults.push({
+        source_match_id: match.id,
+        round_number: match.round_number,
+        match_no: match.match_no,
+        winner_team_id: winnerTeamId,
+        propagated: Boolean(loserNextMatch),
+        target_match_id: loserNextMatch?.id ?? null,
+      });
+    }
   }
 
   return {
     bracket_id: normalizedBracketId,
     winner_rounds: winnerRounds,
-    processed: results.length,
-    propagated: results.filter((item) => item.propagated).length,
-    results,
+    link_repair: linkRepair,
+    processed: completedMatches.length,
+    winners_propagated: winnerResults.filter((item) => item.propagated).length,
+    losers_propagated: loserResults.filter((item) => item.propagated).length,
+    winner_results: winnerResults,
+    results: loserResults,
   };
 };
 
