@@ -134,7 +134,8 @@ const LeaderboardPage = () => {
     queryKey: tournamentLeaderboardQueryKey(tournamentId),
     enabled: Boolean(tournamentId),
     queryFn: async () => fetchTournamentLeaderboardEnvelope(tournamentId!),
-    staleTime: 60000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const {

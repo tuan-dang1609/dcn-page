@@ -218,6 +218,32 @@ const toPlacementLabel = (start, end) => {
   return `${start}-${end}`;
 };
 
+const isCompletedMatchStatus = (status) => {
+  const normalized = String(status ?? "")
+    .trim()
+    .toLowerCase();
+  return ["completed", "complete", "done", "finished"].includes(normalized);
+};
+
+/** Winner chỉ hợp lệ khi trận completed; thiếu winner_team_id thì suy từ tỉ số. */
+const resolveMatchWinnerTeamId = (match) => {
+  if (!isCompletedMatchStatus(match?.status)) return null;
+
+  const teamA = toNumber(match.team_a_id);
+  const teamB = toNumber(match.team_b_id);
+  if (!teamA || !teamB) return null;
+
+  const explicit = toNumber(match.winner_team_id);
+  if (explicit === teamA || explicit === teamB) return explicit;
+
+  const scoreA = toNumber(match.score_a);
+  const scoreB = toNumber(match.score_b);
+  if (scoreA === null || scoreB === null) return null;
+  if (scoreA > scoreB) return teamA;
+  if (scoreB > scoreA) return teamB;
+  return null;
+};
+
 const buildTeamStats = ({ teamIds, matches }) => {
   const stats = new Map(
     teamIds.map((teamId) => [
@@ -235,9 +261,11 @@ const buildTeamStats = ({ teamIds, matches }) => {
   );
 
   for (const match of matches) {
+    if (!isCompletedMatchStatus(match.status)) continue;
+
     const teamA = toNumber(match.team_a_id);
     const teamB = toNumber(match.team_b_id);
-    const winner = toNumber(match.winner_team_id);
+    const winner = resolveMatchWinnerTeamId(match);
     const roundNumber = toNumber(match.round_number) ?? 0;
 
     if (!teamA || !teamB || !winner) continue;
@@ -277,9 +305,18 @@ const sortCompletedMatches = (matches) =>
     .filter((match) => {
       const teamA = toNumber(match.team_a_id);
       const teamB = toNumber(match.team_b_id);
-      const winner = toNumber(match.winner_team_id);
-      // Winner đã ghi = trận đã có kết quả cho BXH (kể cả status còn ongoing do sót).
-      return Boolean(teamA && teamB && winner);
+      // Chỉ tính trận status = completed và có đội thắng (ghi sẵn hoặc suy từ tỉ số).
+      return Boolean(teamA && teamB && resolveMatchWinnerTeamId(match));
+    })
+    .map((match) => {
+      const resolvedWinner = resolveMatchWinnerTeamId(match);
+      if (
+        resolvedWinner &&
+        toNumber(match.winner_team_id) !== resolvedWinner
+      ) {
+        return { ...match, winner_team_id: resolvedWinner };
+      }
+      return match;
     })
     .slice()
     .sort((a, b) => {
@@ -400,6 +437,22 @@ const getEliminationBranchLabel = (roundNumber, roundShape, matches = null) => {
     };
     return labels[roundNumber] ?? `Vòng ${roundNumber}`;
   }
+
+  // Double-elim 8 đội (shape 1:4,2:2,3:1,4:2,5:2,6:1,7:1,8:1)
+  if (String(roundShape).startsWith("1:4,2:2,3:1")) {
+    const labels = {
+      1: "Tứ kết nhánh trên",
+      2: "Bán kết nhánh trên",
+      3: "Chung kết nhánh trên",
+      4: "Vòng loại 1",
+      5: "Vòng loại 2",
+      6: "Trận loại 3",
+      7: "Chung kết nhánh thua",
+      8: "Chung kết tổng",
+    };
+    return labels[roundNumber] ?? (roundNumber ? `Vòng ${roundNumber}` : null);
+  }
+
   return roundNumber ? `Vòng ${roundNumber}` : null;
 };
 
@@ -419,14 +472,171 @@ const formatElimLabel = (bracketLabel, roundNumber, roundShape, matches = null) 
   return stage || branch || null;
 };
 
+const COMPACT_SIX_ROUND_SHAPE = "1:2,2:2,3:1,4:2,5:1,6:1,7:1";
+
+const isEliminationFormatType = (type) => {
+  const normalized = String(type ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  return (
+    normalized === "elimination" ||
+    normalized === "doubleelimination" ||
+    normalized === "singleelimination" ||
+    normalized.includes("elim")
+  );
+};
+
+/** Nhận diện DE theo shape trận (không phụ thuộc flag has_losers_bracket). */
+const isDoubleElimMatchSet = (matches) => {
+  if (!matches?.length) return false;
+  if (isFourTeamAdvanceMatchSet(matches)) return true;
+
+  const shape = getMatchRoundShape(matches);
+  if (!shape) return false;
+  if (shape === COMPACT_SIX_ROUND_SHAPE) return true;
+  // 8 đội DE (đủ hoặc đang dựng nhánh thua)
+  if (/^1:4,2:2,3:1/.test(shape)) return true;
+  // 4 đội DE đủ nhánh: thường nhiều hơn 4 trận / có nhánh thua
+  if (shape.startsWith("1:2,2:1,3:1,4:1,5:1")) return true;
+  return false;
+};
+
+const bracketLooksElimination = (bracket, matches) => {
+  if (Boolean(bracket?.has_losers_bracket)) return true;
+  if (isEliminationFormatType(bracket?.format_type)) return true;
+  if (isDoubleElimMatchSet(matches)) return true;
+  if (isFourTeamAdvanceMatchSet(matches)) return true;
+
+  const shape = getMatchRoundShape(matches);
+  // Single-elim dạng 1:N,2:N/2,… (ít nhất 2 vòng, số trận giảm dần)
+  if (!shape) return false;
+  const parts = shape.split(",").map((part) => {
+    const [round, count] = part.split(":").map(Number);
+    return { round, count };
+  });
+  if (parts.length < 2) return false;
+  let decreasing = true;
+  for (let i = 1; i < parts.length; i += 1) {
+    if (!(parts[i].count < parts[i - 1].count)) {
+      decreasing = false;
+      break;
+    }
+  }
+  return decreasing && parts[0].count >= 1;
+};
+
 const resolveEliminationLossThreshold = ({
   hasLosersBracket,
   matches,
 }) => {
   // DE advance / double-elim: thua 1 trận chưa bị loại (còn nhánh thua / quyết định)
+  if (isDoubleElimMatchSet(matches)) return 2;
   if (isFourTeamAdvanceMatchSet(matches)) return 2;
   if (hasLosersBracket) return 2;
   return 1;
+};
+
+const bracketStageSortKey = (stage, name) => {
+  const stageNorm = normalizeBracketStageLabel(stage);
+  const nameNorm = normalizeBracketStageLabel(name);
+  const key = stageNorm || nameNorm || "";
+  if (key === "Play-in") return 0;
+  if (key === "Play-off") return 1;
+  if (key === "Group") return 2;
+  if (key === "Swiss") return 3;
+  if (key === "Main") return 10;
+  return 20;
+};
+
+const resolveBracketDisplayLabel = (bracket) => {
+  const stage = String(bracket?.stage ?? "").trim();
+  const name = String(bracket?.name ?? "").trim();
+  const stageNorm = normalizeBracketStageLabel(stage);
+  const nameNorm = normalizeBracketStageLabel(name);
+  if (stageNorm === "Play-in" || stageNorm === "Play-off") return stageNorm;
+  return nameNorm || stageNorm || name || stage || null;
+};
+
+/**
+ * Thu thập nhóm đội bị loại theo vòng (chưa gán hạng toàn giải).
+ * Loss đếm riêng trong tập matches truyền vào (từng bracket).
+ */
+const collectEliminationGroups = ({
+  teamIds,
+  matches,
+  eliminationLossThreshold,
+  bracketLabel = null,
+}) => {
+  const completedMatches = sortCompletedMatches(matches);
+  const roundShape = getMatchRoundShape(matches);
+  const lossThreshold = Math.max(
+    1,
+    Number(eliminationLossThreshold) ||
+      resolveEliminationLossThreshold({
+        hasLosersBracket: false,
+        matches,
+      }),
+  );
+
+  const teamIdSet = new Set(
+    teamIds.map((id) => toNumber(id)).filter(Number.isFinite),
+  );
+  const teamLosses = new Map([...teamIdSet].map((teamId) => [teamId, 0]));
+  const eliminatedTeams = new Set();
+  const eliminatedByRound = new Map();
+  const elimRoundByTeam = new Map();
+
+  for (const match of completedMatches) {
+    const roundNumber = toNumber(match.round_number) ?? 0;
+    const teamA = toNumber(match.team_a_id);
+    const teamB = toNumber(match.team_b_id);
+    const winner = resolveMatchWinnerTeamId(match);
+
+    if (!teamA || !teamB || !winner) continue;
+    if (!teamIdSet.has(teamA) && !teamIdSet.has(teamB)) continue;
+
+    const loser = winner === teamA ? teamB : winner === teamB ? teamA : null;
+    if (!loser || !teamIdSet.has(loser)) continue;
+
+    const nextLossCount = Number(teamLosses.get(loser) ?? 0) + 1;
+    teamLosses.set(loser, nextLossCount);
+
+    if (nextLossCount >= lossThreshold && !eliminatedTeams.has(loser)) {
+      eliminatedTeams.add(loser);
+      elimRoundByTeam.set(loser, roundNumber);
+
+      if (!eliminatedByRound.has(roundNumber)) {
+        eliminatedByRound.set(roundNumber, []);
+      }
+      eliminatedByRound.get(roundNumber).push(loser);
+    }
+  }
+
+  const groups = [];
+  const rounds = [...eliminatedByRound.keys()].sort((a, b) => a - b);
+  for (const roundNumber of rounds) {
+    const teamIdsInRound = [
+      ...new Set(eliminatedByRound.get(roundNumber) ?? []),
+    ];
+    if (!teamIdsInRound.length) continue;
+    groups.push({
+      teamIds: teamIdsInRound,
+      elim_round: roundNumber,
+      elim_label: formatElimLabel(
+        bracketLabel,
+        roundNumber,
+        roundShape,
+        matches,
+      ),
+    });
+  }
+
+  const remainingTeamIds = [...teamIdSet].filter(
+    (teamId) => !eliminatedTeams.has(teamId),
+  );
+
+  return { groups, remainingTeamIds, eliminatedTeams };
 };
 
 const buildEliminationRanking = ({
@@ -445,83 +655,35 @@ const buildEliminationRanking = ({
       : matches;
   const completedMatches = sortCompletedMatches(rankingMatches);
   const stats = buildTeamStats({ teamIds, matches: completedMatches });
-  const roundShape = getMatchRoundShape(rankingMatches);
-  const lossThreshold = Math.max(
-    1,
-    Number(eliminationLossThreshold) ||
-      resolveEliminationLossThreshold({
-        hasLosersBracket: false,
-        matches: rankingMatches,
-      }),
-  );
 
-  const teamLosses = new Map(teamIds.map((teamId) => [teamId, 0]));
-  const eliminatedTeams = new Set();
-  const eliminatedByRound = new Map();
-  const elimRoundByTeam = new Map();
+  const { groups, remainingTeamIds } = collectEliminationGroups({
+    teamIds,
+    matches: rankingMatches,
+    eliminationLossThreshold,
+    bracketLabel,
+  });
 
-  for (const match of completedMatches) {
-    const roundNumber = toNumber(match.round_number) ?? 0;
-    const teamA = toNumber(match.team_a_id);
-    const teamB = toNumber(match.team_b_id);
-    const winner = toNumber(match.winner_team_id);
-
-    if (!teamA || !teamB || !winner) continue;
-
-    const loser = winner === teamA ? teamB : winner === teamB ? teamA : null;
-    if (!loser) continue;
-
-    const nextLossCount = Number(teamLosses.get(loser) ?? 0) + 1;
-    teamLosses.set(loser, nextLossCount);
-
-    if (nextLossCount >= lossThreshold && !eliminatedTeams.has(loser)) {
-      eliminatedTeams.add(loser);
-      elimRoundByTeam.set(loser, roundNumber);
-
-      if (!eliminatedByRound.has(roundNumber)) {
-        eliminatedByRound.set(roundNumber, []);
-      }
-
-      eliminatedByRound.get(roundNumber).push(loser);
-    }
-  }
-
-  const remainingTeamIds = teamIds.filter(
-    (teamId) => !eliminatedTeams.has(teamId),
-  );
   const isFinal =
     remainingTeamIds.length === 1 &&
-    eliminatedTeams.size === teamIds.length - 1;
+    groups.reduce((sum, g) => sum + g.teamIds.length, 0) ===
+      teamIds.length - 1;
 
-  // Gán hạng ngay khi bị loại (theo vòng), đội còn lại để null → UI hiện "-"
   const placementByTeam = new Map();
-  const rounds = [...eliminatedByRound.keys()].sort((a, b) => a - b);
   let remaining = teamIds.length;
 
-  for (const roundNumber of rounds) {
-    const eliminatedInRound = [
-      ...new Set(eliminatedByRound.get(roundNumber) ?? []),
-    ];
-    if (!eliminatedInRound.length) continue;
-
-    const groupSize = eliminatedInRound.length;
+  for (const group of groups) {
+    const groupSize = group.teamIds.length;
     const placementStart = remaining - groupSize + 1;
     const placementEnd = remaining;
     const placementLabel = toPlacementLabel(placementStart, placementEnd);
 
-    for (const teamId of eliminatedInRound) {
-      const elimRound = elimRoundByTeam.get(teamId) ?? roundNumber;
+    for (const teamId of group.teamIds) {
       placementByTeam.set(teamId, {
         placement: placementStart,
         placement_end: placementEnd,
         placement_label: placementLabel,
-        elim_round: elimRound,
-        elim_label: formatElimLabel(
-          bracketLabel,
-          elimRound,
-          roundShape,
-          rankingMatches,
-        ),
+        elim_round: group.elim_round,
+        elim_label: group.elim_label,
       });
     }
 
@@ -557,7 +719,6 @@ const buildEliminationRanking = ({
     .sort((a, b) => {
       const aPlacement = toNumber(a.placement);
       const bPlacement = toNumber(b.placement);
-      // Đội còn thi đấu (chưa có hạng) lên trước
       if (aPlacement === null && bPlacement !== null) return -1;
       if (aPlacement !== null && bPlacement === null) return 1;
       if (aPlacement !== null && bPlacement !== null && aPlacement !== bPlacement) {
@@ -573,6 +734,158 @@ const buildEliminationRanking = ({
     isFinal,
     rankings,
   };
+};
+
+/**
+ * Xếp hạng elimination khi giải có nhiều bracket (Play-in → Main DE …).
+ * Mỗi bracket đếm thua riêng; đội loại ở bracket sớm nhận hạng thấp hơn.
+ */
+const buildMultiBracketEliminationRanking = ({
+  teamIds,
+  allMatches,
+  brackets,
+  tournamentHasLosersBracket = false,
+}) => {
+  const completedAll = sortCompletedMatches(allMatches);
+  const stats = buildTeamStats({ teamIds, matches: completedAll });
+
+  const bracketsSorted = [...brackets].sort((a, b) => {
+    const orderDiff =
+      bracketStageSortKey(a.stage, a.name) -
+      bracketStageSortKey(b.stage, b.name);
+    if (orderDiff !== 0) return orderDiff;
+    return Number(a.id) - Number(b.id);
+  });
+
+  const alreadyEliminated = new Set();
+  const mergedGroups = [];
+
+  for (const bracket of bracketsSorted) {
+    const bracketId = toNumber(bracket.id);
+    if (!bracketId) continue;
+
+    const bracketMatches = allMatches.filter(
+      (match) => toNumber(match.bracket_id) === bracketId,
+    );
+    if (!bracketMatches.length) continue;
+
+    const teamsInBracket = new Set();
+    for (const match of bracketMatches) {
+      const teamA = toNumber(match.team_a_id);
+      const teamB = toNumber(match.team_b_id);
+      if (teamA) teamsInBracket.add(teamA);
+      if (teamB) teamsInBracket.add(teamB);
+    }
+
+    const activeTeamIds = [...teamsInBracket].filter((teamId) => {
+      const id = toNumber(teamId);
+      return (
+        id !== null &&
+        teamIds.some((participantId) => toNumber(participantId) === id) &&
+        !alreadyEliminated.has(id)
+      );
+    });
+    if (!activeTeamIds.length) continue;
+
+    const bracketLabel = resolveBracketDisplayLabel(bracket);
+    const threshold = resolveEliminationLossThreshold({
+      hasLosersBracket:
+        Boolean(bracket.has_losers_bracket) ||
+        tournamentHasLosersBracket ||
+        isDoubleElimMatchSet(bracketMatches),
+      matches: bracketMatches,
+    });
+
+    const { groups } = collectEliminationGroups({
+      teamIds: activeTeamIds,
+      matches: bracketMatches,
+      eliminationLossThreshold: threshold,
+      bracketLabel,
+    });
+
+    for (const group of groups) {
+      const fresh = group.teamIds.filter(
+        (teamId) => !alreadyEliminated.has(teamId),
+      );
+      if (!fresh.length) continue;
+      for (const teamId of fresh) alreadyEliminated.add(teamId);
+      mergedGroups.push({
+        ...group,
+        teamIds: fresh,
+      });
+    }
+  }
+
+  const remainingTeamIds = teamIds.filter(
+    (teamId) => !alreadyEliminated.has(teamId),
+  );
+  const isFinal =
+    remainingTeamIds.length === 1 &&
+    alreadyEliminated.size === teamIds.length - 1;
+
+  const placementByTeam = new Map();
+  let remaining = teamIds.length;
+
+  for (const group of mergedGroups) {
+    const groupSize = group.teamIds.length;
+    const placementStart = remaining - groupSize + 1;
+    const placementEnd = remaining;
+    const placementLabel = toPlacementLabel(placementStart, placementEnd);
+
+    for (const teamId of group.teamIds) {
+      placementByTeam.set(teamId, {
+        placement: placementStart,
+        placement_end: placementEnd,
+        placement_label: placementLabel,
+        elim_round: group.elim_round,
+        elim_label: group.elim_label,
+      });
+    }
+
+    remaining -= groupSize;
+  }
+
+  if (isFinal && remainingTeamIds[0]) {
+    placementByTeam.set(remainingTeamIds[0], {
+      placement: 1,
+      placement_end: 1,
+      placement_label: "1",
+      elim_round: null,
+      elim_label: null,
+    });
+  }
+
+  const rankings = teamIds
+    .map((teamId) => {
+      const stat = stats.get(teamId);
+      const placement = placementByTeam.get(teamId) ?? {
+        placement: null,
+        placement_end: null,
+        placement_label: null,
+        elim_round: null,
+        elim_label: null,
+      };
+
+      return {
+        ...stat,
+        ...placement,
+      };
+    })
+    .sort((a, b) => {
+      const aPlacement = toNumber(a.placement);
+      const bPlacement = toNumber(b.placement);
+      if (aPlacement === null && bPlacement !== null) return -1;
+      if (aPlacement !== null && bPlacement === null) return 1;
+      if (aPlacement !== null && bPlacement !== null && aPlacement !== bPlacement) {
+        return aPlacement - bPlacement;
+      }
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (a.losses !== b.losses) return a.losses - b.losses;
+      if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+      return a.team_id - b.team_id;
+    });
+
+  return { isFinal, rankings };
 };
 
 const getSwissQualificationRules = (teamCount) => {
@@ -603,7 +916,7 @@ const buildSwissRanking = ({ teamIds, matches }) => {
     const roundNumber = toNumber(match.round_number) ?? 0;
     const teamA = toNumber(match.team_a_id);
     const teamB = toNumber(match.team_b_id);
-    const winner = toNumber(match.winner_team_id);
+    const winner = resolveMatchWinnerTeamId(match);
     if (!teamA || !teamB || !winner) continue;
 
     const loser = winner === teamA ? teamB : winner === teamB ? teamA : null;
@@ -632,7 +945,7 @@ const buildSwissRanking = ({ teamIds, matches }) => {
   const pendingOrAdvanced = teamIds.filter((id) => !eliminatedTeams.has(id));
   const allMatchesDone =
     matchesWithTwoTeams.length > 0 &&
-    matchesWithTwoTeams.every((match) => toNumber(match.winner_team_id));
+    matchesWithTwoTeams.every((match) => resolveMatchWinnerTeamId(match));
   const noPendingLeft = pendingOrAdvanced.every((teamId) => {
     const wins = Number(stats.get(teamId)?.wins ?? 0);
     return wins >= advanceWins;
@@ -730,7 +1043,7 @@ const buildStandingsRanking = ({ teamIds, matches }) => {
 
   const isFinal =
     matchesWithTwoTeams.length > 0 &&
-    matchesWithTwoTeams.every((match) => toNumber(match.winner_team_id));
+    matchesWithTwoTeams.every((match) => resolveMatchWinnerTeamId(match));
 
   const sorted = [...stats.values()].sort((a, b) => {
     if (b.wins !== a.wins) return b.wins - a.wins;
@@ -1149,24 +1462,94 @@ export const recalculateTournamentResults = async (tournamentId) => {
     params: [normalizedTournamentId],
   };
 
-  const { rows: allMatchRows } = await pool.query(
+  const { rows: allMatchRowsRaw } = await pool.query(
     matchesQuery.text,
     matchesQuery.params,
   );
 
+  // Heal: trận completed có tỉ số phân thắng bại nhưng thiếu winner_team_id
+  // → ghi winner để BXH / đi tiếp / loại đồng bộ (nhánh dưới hay bị sót).
+  const allMatchRows = [];
+  for (const match of allMatchRowsRaw) {
+    const resolvedWinner = resolveMatchWinnerTeamId(match);
+    const existingWinner = toNumber(match.winner_team_id);
+    if (resolvedWinner && existingWinner !== resolvedWinner) {
+      await pool.query(
+        `
+        UPDATE matches
+        SET winner_team_id = $1
+        WHERE id = $2
+          AND (winner_team_id IS NULL OR winner_team_id IS DISTINCT FROM $1)
+        `,
+        [resolvedWinner, match.id],
+      );
+      allMatchRows.push({ ...match, winner_team_id: resolvedWinner });
+    } else {
+      allMatchRows.push(match);
+    }
+  }
+
   let matchRows = allMatchRows;
 
-  // Bracket được chọn để tính hạng/placement (có thể hẹp hơn toàn giải).
-  if (rankingBracketId) {
+  const { rows: tournamentBracketRows } = await pool.query(
+    `
+    SELECT
+      b.id,
+      b.name,
+      b.stage,
+      f.type AS format_type,
+      COALESCE(f.has_losers_bracket, false) AS has_losers_bracket
+    FROM brackets b
+    LEFT JOIN formats f ON f.id = b.format_id
+    WHERE b.tournament_id = $1
+    ORDER BY b.id ASC
+    `,
+    [normalizedTournamentId],
+  );
+
+  const bracketsWithMatches = tournamentBracketRows.filter((bracket) =>
+    allMatchRows.some(
+      (match) => toNumber(match.bracket_id) === toNumber(bracket.id),
+    ),
+  );
+
+  const eliminationBrackets = bracketsWithMatches.filter((bracket) => {
+    const bracketMatches = allMatchRows.filter(
+      (match) => toNumber(match.bracket_id) === toNumber(bracket.id),
+    );
+    return bracketLooksElimination(bracket, bracketMatches);
+  });
+
+  const effectiveFormatType = isEliminationFormatType(formatType)
+    ? "elimination"
+    : isEliminationFormatType(
+          bracketsWithMatches.find((b) => b.format_type)?.format_type,
+        )
+      ? "elimination"
+      : formatType === "swiss" ||
+          String(formatType).trim().toLowerCase() === "swiss"
+        ? "swiss"
+        : eliminationBrackets.length > 0
+          ? "elimination"
+          : formatType;
+
+  // Nhiều bracket loại (Play-in + Main DE…): luôn gộp — không phụ thuộc
+  // tournament.format_type hay ranking_bracket_id (tránh chỉ tính Play-in).
+  const useMultiBracketElimination =
+    effectiveFormatType === "elimination" && eliminationBrackets.length > 1;
+
+  // Bracket được chọn để tính hạng/placement (single-bracket mode).
+  if (!useMultiBracketElimination && rankingBracketId) {
     matchRows = allMatchRows.filter(
       (match) => toNumber(match.bracket_id) === rankingBracketId,
     );
   }
 
-  // Chưa chọn ranking bracket: ưu tiên bracket DE 4 đội / 2 đội đi tiếp
-  if (!rankingBracketId) {
+  // Single-bracket: nếu ranking_bracket trỏ Play-in nhưng còn bracket DE khác
+  // thì vẫn ưu tiên multi (đã cover ở trên). Fallback four-team chỉ khi 1 bracket.
+  if (!useMultiBracketElimination && !rankingBracketId) {
     const fourTeamBracketId = findFourTeamAdvanceBracketId(matchRows);
-    if (fourTeamBracketId) {
+    if (fourTeamBracketId && eliminationBrackets.length <= 1) {
       rankingBracketId = fourTeamBracketId;
       matchRows = matchRows.filter(
         (match) => toNumber(match.bracket_id) === fourTeamBracketId,
@@ -1178,6 +1561,7 @@ export const recalculateTournamentResults = async (tournamentId) => {
           b.id,
           b.name,
           b.stage,
+          f.type AS format_type,
           COALESCE(f.has_losers_bracket, false) AS has_losers_bracket
         FROM brackets b
         LEFT JOIN formats f ON f.id = b.format_id
@@ -1188,14 +1572,7 @@ export const recalculateTournamentResults = async (tournamentId) => {
       );
 
       if (bracketRows.length) {
-        const stage = String(bracketRows[0].stage ?? "").trim();
-        const name = String(bracketRows[0].name ?? "").trim();
-        const stageNorm = normalizeBracketStageLabel(stage);
-        const nameNorm = normalizeBracketStageLabel(name);
-        bracketLabel =
-          stageNorm === "Play-in" || stageNorm === "Play-off"
-            ? stageNorm
-            : nameNorm || stageNorm || name || stage || null;
+        bracketLabel = resolveBracketDisplayLabel(bracketRows[0]);
         bracketHasLosers = true;
       } else {
         bracketHasLosers = true;
@@ -1203,7 +1580,7 @@ export const recalculateTournamentResults = async (tournamentId) => {
     }
   }
 
-  if (!bracketLabel) {
+  if (!bracketLabel && !useMultiBracketElimination) {
     const bracketIdFromMatches = toNumber(matchRows[0]?.bracket_id);
     if (bracketIdFromMatches) {
       const { rows: labelRows } = await pool.query(
@@ -1216,33 +1593,48 @@ export const recalculateTournamentResults = async (tournamentId) => {
         [bracketIdFromMatches],
       );
       if (labelRows.length) {
-        const stage = String(labelRows[0].stage ?? "").trim();
-        const name = String(labelRows[0].name ?? "").trim();
-        const stageNorm = normalizeBracketStageLabel(stage);
-        const nameNorm = normalizeBracketStageLabel(name);
-        bracketLabel =
-          stageNorm === "Play-in" || stageNorm === "Play-off"
-            ? stageNorm
-            : nameNorm || stageNorm || name || stage || null;
+        bracketLabel = resolveBracketDisplayLabel(labelRows[0]);
       }
     }
   }
 
   const rankingResult =
-    formatType === "elimination"
-      ? buildEliminationRanking({
-          teamIds,
-          matches: matchRows,
-          eliminationLossThreshold: resolveEliminationLossThreshold({
-            hasLosersBracket:
-              bracketHasLosers ||
-              hasLosersBracket ||
-              isFourTeamAdvanceMatchSet(matchRows),
-            matches: matchRows,
-          }),
-          bracketLabel,
-        })
-      : formatType === "swiss"
+    effectiveFormatType === "elimination"
+      ? useMultiBracketElimination
+        ? buildMultiBracketEliminationRanking({
+            teamIds,
+            allMatches: allMatchRows,
+            brackets: eliminationBrackets,
+            tournamentHasLosersBracket: hasLosersBracket,
+          })
+        : buildEliminationRanking({
+            teamIds,
+            matches:
+              eliminationBrackets.length === 1
+                ? allMatchRows.filter(
+                    (match) =>
+                      toNumber(match.bracket_id) ===
+                      toNumber(eliminationBrackets[0].id),
+                  )
+                : matchRows,
+            eliminationLossThreshold: resolveEliminationLossThreshold({
+              hasLosersBracket:
+                bracketHasLosers ||
+                hasLosersBracket ||
+                isDoubleElimMatchSet(matchRows) ||
+                isFourTeamAdvanceMatchSet(matchRows),
+              matches:
+                eliminationBrackets.length === 1
+                  ? allMatchRows.filter(
+                      (match) =>
+                        toNumber(match.bracket_id) ===
+                        toNumber(eliminationBrackets[0].id),
+                    )
+                  : matchRows,
+            }),
+            bracketLabel,
+          })
+      : effectiveFormatType === "swiss"
         ? buildSwissRanking({
             teamIds,
             matches: matchRows,
@@ -1292,9 +1684,10 @@ export const recalculateTournamentResults = async (tournamentId) => {
   return {
     tournament_id: normalizedTournamentId,
     series_id: seriesId,
-    format_type: formatType,
+    format_type: effectiveFormatType || formatType,
     has_losers_bracket: hasLosersBracket,
-    ranking_bracket_id: rankingBracketId,
+    ranking_bracket_id: useMultiBracketElimination ? null : rankingBracketId,
+    multi_bracket: useMultiBracketElimination,
     teams: rankingsWithOverallRecord.length,
     rankings: rankingsWithOverallRecord,
     is_final: isFinal,
