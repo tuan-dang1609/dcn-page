@@ -4,33 +4,16 @@ const VALID_FORMATS = new Set(["BO1", "BO3", "BO5"]);
 const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
 const MIN_TURN_TIME_LIMIT_SECONDS = 5;
 const MAX_TURN_TIME_LIMIT_SECONDS = 3600;
+const STAFF_ROLE_IDS = new Set([1, 2, 3]);
 
-const ACTION_SEQUENCES = {
-  BO1: [
-    { type: "ban", team: "team1" },
-    { type: "ban", team: "team2" },
-    { type: "ban", team: "team1" },
-    { type: "ban", team: "team2" },
-    { type: "ban", team: "team1" },
-    { type: "ban", team: "team2" },
-  ],
-  BO3: [
-    { type: "ban", team: "team1" },
-    { type: "ban", team: "team2" },
-    { type: "pick", team: "team1" },
-    { type: "pick", team: "team2" },
-    { type: "ban", team: "team1" },
-    { type: "ban", team: "team2" },
-  ],
-  BO5: [
-    { type: "ban", team: "team1" },
-    { type: "ban", team: "team2" },
-    { type: "pick", team: "team1" },
-    { type: "pick", team: "team2" },
-    { type: "pick", team: "team1" },
-    { type: "pick", team: "team2" },
-  ],
-};
+/**
+ * Luồng ban/pick (state.version = 2):
+ *   waiting  — BTC đã tạo phòng, chưa chạy giờ. Bắt đầu khi 2 chủ đội bấm Sẵn sàng hoặc BTC bấm Bắt đầu.
+ *   running  — lần lượt từng bước trong state.steps (cấm / chọn map / chọn bên).
+ *              Hết giờ → server tự chọn ngẫu nhiên (xử lý khi có người tải trạng thái).
+ *   done     — xong; map còn lại là map quyết định.
+ * Chỉ chủ đội (teams.created_by) thao tác lượt; BTC chỉ bắt đầu / bỏ qua lượt (ngẫu nhiên) / làm lại.
+ */
 
 const DEFAULT_VALORANT_MAP_POOL = [
   {
@@ -121,7 +104,11 @@ const normalizeFormat = (value, fallback = "BO3") => {
   return VALID_FORMATS.has(fallback) ? fallback : "BO3";
 };
 
-const getSequence = (format) => ACTION_SEQUENCES[normalizeFormat(format)] ?? [];
+const normalizeTeamSlot = (value, fallback = "team1") =>
+  value === "team1" || value === "team2" ? value : fallback;
+
+const normalizeDeciderRule = (value, fallback = "lastActor") =>
+  value === "lastActor" || value === "other" ? value : fallback;
 
 const getOpponent = (team) => (team === "team1" ? "team2" : "team1");
 
@@ -150,7 +137,7 @@ export const buildRoundSlug = ({
 }) => {
   const base = String(tournamentSlug ?? "tournament")
     .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
@@ -169,219 +156,278 @@ const toTeamNames = (sessionRow) => ({
   team2: String(sessionRow.team_b_name ?? "TEAM B"),
 });
 
-const createInitialState = ({ mapPool, format, teamNames }) => ({
-  maps: mapPool.map((map) => ({ mapId: map.map_code, status: "available" })),
-  currentStep: 0,
-  format,
-  teamNames,
-  phase: "ban_pick",
-  selectedMapId: null,
-  sideSelectMapId: null,
-  sideSelectTeam: null,
-  actionLog: [],
-});
+/* ───────────── Luật ───────────── */
 
-const findCurrentAction = (state) => {
-  const sequence = getSequence(state.format);
-  return state.currentStep < sequence.length
-    ? sequence[state.currentStep]
-    : null;
-};
-
-const handleSequenceComplete = ({ state, maps, step, log }) => {
-  const format = normalizeFormat(state.format, "BO3");
+/**
+ * Thứ tự lượt theo số map trong pool (N). Đội đi trước = firstTeam, sau đó luân phiên.
+ *   BO1: cấm N-1 map.
+ *   BO3: cấm, cấm, chọn, chọn, rồi cấm tới khi còn 1 map.
+ *   BO5: cấm tối đa 2, chọn 4, rồi cấm tới khi còn 1 map.
+ * Sau mỗi lần chọn map → đối thủ chọn bên. Map quyết định → bên theo deciderRule
+ * ("lastActor" = đội thao tác cuối, "other" = đội còn lại).
+ */
+export const buildSteps = ({ format, mapCount, firstTeam, deciderRule }) => {
+  const n = Math.max(0, mapCount);
+  const kinds = [];
 
   if (format === "BO1") {
-    const remaining = maps.find((item) => item.status === "available");
+    for (let i = 0; i < n - 1; i += 1) kinds.push("ban");
+  } else if (format === "BO3") {
+    kinds.push("ban", "ban", "pick", "pick");
+    for (let i = 0; i < n - 5; i += 1) kinds.push("ban");
+  } else {
+    const preBans = Math.min(2, Math.max(0, n - 5));
+    for (let i = 0; i < preBans; i += 1) kinds.push("ban");
+    kinds.push("pick", "pick", "pick", "pick");
+    for (let i = 0; i < n - 5 - preBans; i += 1) kinds.push("ban");
+  }
 
-    if (remaining) {
-      remaining.status = "picked";
-      remaining.actionType = "pick";
+  const steps = [];
+  let lastActor = firstTeam;
+  kinds.slice(0, Math.max(0, n - 1)).forEach((kind, index) => {
+    const team = index % 2 === 0 ? firstTeam : getOpponent(firstTeam);
+    lastActor = team;
+    steps.push({ kind, team });
+    if (kind === "pick") steps.push({ kind: "side", team: getOpponent(team) });
+  });
 
-      return {
-        ...state,
-        maps: [...maps],
-        currentStep: step,
-        phase: "side_select",
-        sideSelectMapId: remaining.mapId,
-        sideSelectTeam: "team2",
-        selectedMapId: null,
-        actionLog: log,
-      };
+  // Còn đúng 1 map sau các lượt cấm/chọn → map quyết định cần chọn bên
+  if (kinds.length === n - 1 && n > 0) {
+    steps.push({
+      kind: "side",
+      team: deciderRule === "other" ? getOpponent(lastActor) : lastActor,
+    });
+  }
+
+  return steps;
+};
+
+const derivePhase = (state) => {
+  if (state.status === "waiting") return "waiting";
+  if (state.status === "done") return "complete";
+  return state.steps[state.stepIndex]?.kind === "side" ? "side_select" : "ban_pick";
+};
+
+const withPhase = (state) => ({ ...state, phase: derivePhase(state) });
+
+const createInitialState = ({
+  mapPool,
+  format,
+  teamNames,
+  firstTeam = "team1",
+  deciderRule = "lastActor",
+}) =>
+  withPhase({
+    version: 2,
+    status: "waiting",
+    format,
+    firstTeam,
+    deciderRule,
+    teamNames,
+    steps: buildSteps({ format, mapCount: mapPool.length, firstTeam, deciderRule }),
+    stepIndex: 0,
+    currentStep: 0,
+    ready: { team1: false, team2: false },
+    maps: mapPool.map((map) => ({ mapId: map.map_code, status: "available" })),
+    actionLog: [],
+  });
+
+/** Map đang chờ chọn bên: map đã chọn / quyết định chưa có bên, theo thứ tự thi đấu. */
+export const getSideTargetMap = (state) =>
+  (state.maps ?? [])
+    .filter(
+      (map) => (map.status === "picked" || map.status === "decider") && !map.side,
+    )
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0] ?? null;
+
+export const getCurrentStep = (state) =>
+  state.status === "running" ? state.steps[state.stepIndex] ?? null : null;
+
+/**
+ * Áp 1 bước (cấm / chọn / chọn bên). Trả null nếu lựa chọn không hợp lệ.
+ * random = true khi server tự chọn (hết giờ hoặc BTC bỏ qua lượt).
+ */
+const applyStep = (state, { mapId, side }, random) => {
+  const step = getCurrentStep(state);
+  if (!step) return null;
+
+  let maps = state.maps;
+  let record;
+
+  if (step.kind === "side") {
+    const target = getSideTargetMap(state);
+    const normalizedSide = String(side ?? "").toUpperCase();
+    if (!target || (normalizedSide !== "ATK" && normalizedSide !== "DEF")) return null;
+    const otherSide = normalizedSide === "ATK" ? "DEF" : "ATK";
+    const sideMap =
+      step.team === "team1"
+        ? { team1: normalizedSide, team2: otherSide }
+        : { team1: otherSide, team2: normalizedSide };
+    maps = maps.map((map) =>
+      map.mapId === target.mapId
+        ? { ...map, side: sideMap, sideChosenBy: step.team, sideRandom: random }
+        : map,
+    );
+    record = {
+      step: state.stepIndex,
+      mapId: target.mapId,
+      action: "side_select",
+      team: step.team,
+      side: normalizedSide,
+      random,
+    };
+  } else {
+    const target = maps.find(
+      (map) => map.mapId === String(mapId ?? "") && map.status === "available",
+    );
+    if (!target) return null;
+    const pickedCount = maps.filter((map) => map.status === "picked").length;
+    maps = maps.map((map) =>
+      map.mapId === target.mapId
+        ? step.kind === "ban"
+          ? { ...map, status: "banned", actionBy: step.team, actionType: "ban", random }
+          : {
+              ...map,
+              status: "picked",
+              actionBy: step.team,
+              actionType: "pick",
+              order: pickedCount + 1,
+              random,
+            }
+        : map,
+    );
+
+    // Hết lượt cấm/chọn mà còn đúng 1 map → map quyết định
+    const banPickLeft = state.steps
+      .slice(state.stepIndex + 1)
+      .some((next) => next.kind !== "side");
+    const available = maps.filter((map) => map.status === "available");
+    if (!banPickLeft && available.length === 1) {
+      const order = maps.filter((map) => map.status === "picked").length + 1;
+      maps = maps.map((map) =>
+        map.mapId === available[0].mapId
+          ? { ...map, status: "decider", actionType: "pick", order }
+          : map,
+      );
     }
-  }
 
-  const remaining = maps.find((item) => item.status === "available");
-  if (remaining) {
-    remaining.status = "decider";
-    remaining.actionType = "pick";
-  }
-
-  return {
-    ...state,
-    maps: [...maps],
-    currentStep: step,
-    phase: "complete",
-    selectedMapId: null,
-    sideSelectMapId: null,
-    sideSelectTeam: null,
-    actionLog: log,
-  };
-};
-
-export const applySelectMap = (state, mapId) => {
-  const map = state.maps.find((item) => item.mapId === mapId);
-
-  if (!map || map.status !== "available" || state.phase !== "ban_pick") {
-    return state;
-  }
-
-  return {
-    ...state,
-    selectedMapId: mapId,
-  };
-};
-
-export const applyConfirmAction = (state) => {
-  const currentAction = findCurrentAction(state);
-
-  if (!state.selectedMapId || !currentAction || state.phase !== "ban_pick") {
-    return state;
-  }
-
-  const actionType = currentAction.type;
-  const maps = state.maps.map((item) =>
-    item.mapId === state.selectedMapId
-      ? {
-          ...item,
-          status: actionType === "ban" ? "banned" : "picked",
-          actionBy: currentAction.team,
-          actionType,
-        }
-      : item,
-  );
-
-  const actionLog = [
-    ...state.actionLog,
-    {
-      step: state.currentStep,
-      mapId: state.selectedMapId,
-      action: actionType,
-      team: currentAction.team,
-    },
-  ];
-
-  const nextStep = state.currentStep + 1;
-  const sequence = getSequence(state.format);
-  const isSequenceComplete = nextStep >= sequence.length;
-
-  if (actionType === "pick") {
-    return {
-      ...state,
-      maps,
-      selectedMapId: null,
-      phase: "side_select",
-      sideSelectMapId: state.selectedMapId,
-      sideSelectTeam: getOpponent(currentAction.team),
-      currentStep: nextStep,
-      actionLog,
+    record = {
+      step: state.stepIndex,
+      mapId: target.mapId,
+      action: step.kind,
+      team: step.team,
+      random,
     };
   }
 
-  if (isSequenceComplete) {
-    return handleSequenceComplete({
-      state,
-      maps,
-      step: nextStep,
-      log: actionLog,
-    });
-  }
-
+  const stepIndex = state.stepIndex + 1;
+  const done = stepIndex >= state.steps.length;
   return {
-    ...state,
-    maps,
-    currentStep: nextStep,
-    selectedMapId: null,
-    actionLog,
+    state: withPhase({
+      ...state,
+      maps,
+      stepIndex,
+      currentStep: stepIndex,
+      status: done ? "done" : "running",
+      actionLog: [...(state.actionLog ?? []), record],
+    }),
+    record,
   };
 };
 
-export const applySelectSide = (state, side) => {
-  if (
-    state.phase !== "side_select" ||
-    !state.sideSelectMapId ||
-    !state.sideSelectTeam
+const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
+
+const applyRandomStep = (state) => {
+  const step = getCurrentStep(state);
+  if (!step) return null;
+  if (step.kind === "side") {
+    return applyStep(state, { side: pickRandom(["ATK", "DEF"]) }, true);
+  }
+  const available = state.maps.filter((map) => map.status === "available");
+  return available.length
+    ? applyStep(state, { mapId: pickRandom(available).mapId }, true)
+    : null;
+};
+
+/**
+ * Hết giờ lượt → chọn ngẫu nhiên. Lượt kế bắt đầu đúng lúc lượt trước hết hạn,
+ * nên nếu không ai mở trang trong lúc đó vẫn bắt kịp đúng số lượt đã trôi qua.
+ */
+const settleTimeouts = ({ state, turnStartedAt, turnLimitSeconds, now = Date.now() }) => {
+  let current = state;
+  let startedAt = turnStartedAt ? new Date(turnStartedAt).getTime() : null;
+  const records = [];
+  const limitMs = turnLimitSeconds * 1000;
+
+  while (
+    current.status === "running" &&
+    startedAt !== null &&
+    now >= startedAt + limitMs &&
+    records.length < 64
   ) {
-    return state;
-  }
-
-  const chooser = state.sideSelectTeam;
-  const other = getOpponent(chooser);
-  const chooserSide = side;
-  const otherSide = side === "ATK" ? "DEF" : "ATK";
-
-  const sideMap =
-    chooser === "team1"
-      ? { team1: chooserSide, team2: otherSide }
-      : { team1: otherSide, team2: chooserSide };
-
-  const maps = state.maps.map((item) =>
-    item.mapId === state.sideSelectMapId
-      ? { ...item, side: sideMap, sideChosenBy: chooser }
-      : item,
-  );
-
-  const sequence = getSequence(state.format);
-  const isSequenceComplete = state.currentStep >= sequence.length;
-
-  if (isSequenceComplete) {
-    return handleSequenceComplete({
-      state,
-      maps,
-      step: state.currentStep,
-      log: state.actionLog,
-    });
+    const result = applyRandomStep(current);
+    if (!result) break;
+    current = result.state;
+    records.push(result.record);
+    startedAt += limitMs;
   }
 
   return {
-    ...state,
-    maps,
-    phase: "ban_pick",
-    sideSelectMapId: null,
-    sideSelectTeam: null,
+    state: current,
+    records,
+    turnStartedAt:
+      current.status === "running" && startedAt !== null
+        ? new Date(startedAt).toISOString()
+        : null,
   };
 };
 
+/**
+ * Phiên cũ (luồng trước, không có version 2): đã xong thì giữ kết quả để hiển thị,
+ * chưa xong thì tạo lại từ đầu ở trạng thái chờ.
+ */
 const normalizeStoredState = ({ sessionRow, mapPool }) => {
   const format = normalizeFormat(sessionRow.format, "BO3");
   const teamNames = toTeamNames(sessionRow);
   const parsed = parseState(sessionRow.state);
 
-  if (!parsed || !Array.isArray(parsed.maps)) {
-    return createInitialState({ mapPool, format, teamNames });
+  if (parsed?.version === 2 && Array.isArray(parsed.steps)) {
+    return withPhase({
+      ...parsed,
+      format,
+      teamNames,
+      firstTeam: normalizeTeamSlot(parsed.firstTeam),
+      deciderRule: normalizeDeciderRule(parsed.deciderRule),
+      ready: {
+        team1: Boolean(parsed.ready?.team1),
+        team2: Boolean(parsed.ready?.team2),
+      },
+      stepIndex: toNumber(parsed.stepIndex) ?? 0,
+      actionLog: Array.isArray(parsed.actionLog) ? parsed.actionLog : [],
+    });
   }
 
-  return {
-    ...parsed,
-    format,
-    teamNames,
-    maps: parsed.maps.map((item) => ({
-      ...item,
-      mapId: String(item.mapId ?? item.map_code ?? ""),
-    })),
-    currentStep: toNumber(parsed.currentStep) ?? 0,
-    selectedMapId: parsed.selectedMapId ?? null,
-    sideSelectMapId: parsed.sideSelectMapId ?? null,
-    sideSelectTeam:
-      parsed.sideSelectTeam === "team1" || parsed.sideSelectTeam === "team2"
-        ? parsed.sideSelectTeam
-        : null,
-    actionLog: Array.isArray(parsed.actionLog) ? parsed.actionLog : [],
-    phase:
-      parsed.phase === "side_select" || parsed.phase === "complete"
-        ? parsed.phase
-        : "ban_pick",
-  };
+  if (parsed?.phase === "complete" && Array.isArray(parsed.maps)) {
+    return withPhase({
+      version: 2,
+      status: "done",
+      format,
+      firstTeam: "team1",
+      deciderRule: "lastActor",
+      teamNames,
+      steps: [],
+      stepIndex: 0,
+      currentStep: 0,
+      ready: { team1: true, team2: true },
+      maps: parsed.maps.map((map) => ({
+        ...map,
+        mapId: String(map.mapId ?? map.map_code ?? ""),
+      })),
+      actionLog: Array.isArray(parsed.actionLog) ? parsed.actionLog : [],
+    });
+  }
+
+  return createInitialState({ mapPool, format, teamNames });
 };
 
 export const ensureBanPickTables = async () => {
@@ -599,11 +645,13 @@ const getBanPickRowBySlug = async (roundSlug) => {
            ta.name AS team_a_name,
            tb.name AS team_b_name,
            ta.created_by AS team_a_owner_id,
-           tb.created_by AS team_b_owner_id
+           tb.created_by AS team_b_owner_id,
+           tr.created_by AS tournament_owner_id
     FROM ban_picks bp
     LEFT JOIN matches m ON m.id = bp.match_id
     LEFT JOIN teams ta ON ta.id = COALESCE(m.team_a_id, bp.team_a_id)
     LEFT JOIN teams tb ON tb.id = COALESCE(m.team_b_id, bp.team_b_id)
+    LEFT JOIN tournaments tr ON tr.id = COALESCE(m.tournament_id, bp.tournament_id)
     WHERE bp.round_slug = $1
     LIMIT 1
     `,
@@ -627,11 +675,13 @@ const getBanPickRowByMatchId = async (matchId) => {
            ta.name AS team_a_name,
            tb.name AS team_b_name,
            ta.created_by AS team_a_owner_id,
-           tb.created_by AS team_b_owner_id
+           tb.created_by AS team_b_owner_id,
+           tr.created_by AS tournament_owner_id
     FROM ban_picks bp
     LEFT JOIN matches m ON m.id = bp.match_id
     LEFT JOIN teams ta ON ta.id = COALESCE(m.team_a_id, bp.team_a_id)
     LEFT JOIN teams tb ON tb.id = COALESCE(m.team_b_id, bp.team_b_id)
+    LEFT JOIN tournaments tr ON tr.id = COALESCE(m.tournament_id, bp.tournament_id)
     WHERE bp.match_id = $1
     LIMIT 1
     `,
@@ -691,104 +741,6 @@ export const getBanPickSessionByRoundSlug = async (roundSlug) => {
   return hydrateSessionFromRow(row);
 };
 
-const reinitializeSessionWithConfigIfNeeded = async ({
-  session,
-  format,
-  countdownSeconds,
-}) => {
-  if (!session) {
-    return session;
-  }
-
-  const hasRequestedFormat =
-    format !== null && format !== undefined && String(format).trim() !== "";
-  const hasRequestedCountdown =
-    countdownSeconds !== null &&
-    countdownSeconds !== undefined &&
-    String(countdownSeconds).trim() !== "";
-
-  const currentFormat = normalizeFormat(
-    session.state?.format ?? session.format,
-    "BO3",
-  );
-  const currentTurnTime = normalizeTurnTimeLimitSeconds(
-    session.turn_time_limit_seconds,
-    DEFAULT_TURN_TIME_LIMIT_SECONDS,
-  );
-
-  const nextFormat = hasRequestedFormat
-    ? normalizeFormat(format, currentFormat)
-    : currentFormat;
-  const nextTurnTime = hasRequestedCountdown
-    ? normalizeTurnTimeLimitSeconds(countdownSeconds, currentTurnTime)
-    : currentTurnTime;
-
-  if (nextFormat === currentFormat && nextTurnTime === currentTurnTime) {
-    return session;
-  }
-
-  if (nextFormat !== currentFormat) {
-    const mapPool =
-      Array.isArray(session.map_pool) && session.map_pool.length > 0
-        ? session.map_pool
-        : await getMapPool("valorant");
-
-    const resetState = createInitialState({
-      mapPool,
-      format: nextFormat,
-      teamNames: toTeamNames(session),
-    });
-
-    await pool.query(
-      `
-      UPDATE ban_picks
-      SET format = $1,
-          turn_time_limit_seconds = $2,
-          turn_started_at = NOW(),
-          phase = $3,
-          current_step = $4,
-          selected_map_code = NULL,
-          side_select_map_code = NULL,
-          side_select_team = NULL,
-          status = 'active',
-          state = $5::jsonb,
-          updated_at = NOW()
-      WHERE id = $6
-      `,
-      [
-        nextFormat,
-        nextTurnTime,
-        resetState.phase,
-        toNumber(resetState.currentStep) ?? 0,
-        JSON.stringify(resetState),
-        session.id,
-      ],
-    );
-
-    await pool.query(
-      `
-      DELETE FROM ban_pick_actions
-      WHERE ban_pick_id = $1
-      `,
-      [session.id],
-    );
-
-    return getBanPickSessionByRoundSlug(session.round_slug);
-  }
-
-  await pool.query(
-    `
-    UPDATE ban_picks
-    SET turn_time_limit_seconds = $1,
-        updated_at = NOW()
-    WHERE id = $2
-    `,
-    [nextTurnTime, session.id],
-  );
-
-  return getBanPickSessionByRoundSlug(session.round_slug);
-};
-
 export const createBanPickSession = async ({
   matchId,
   roundSlug,
@@ -800,12 +752,8 @@ export const createBanPickSession = async ({
 
   const existingByMatch = await getBanPickRowByMatchId(matchId);
   if (existingByMatch) {
-    const existingSession = await getBanPickSessionByRoundSlug(
-      existingByMatch.round_slug,
-    );
-
-    return reinitializeSessionWithConfigIfNeeded({
-      session: existingSession,
+    return configureExistingSession({
+      session: await hydrateSessionFromRow(existingByMatch),
       format,
       countdownSeconds,
     });
@@ -837,6 +785,7 @@ export const createBanPickSession = async ({
       matchId: match.id,
     });
 
+  // Tạo phòng ≠ bắt đầu: turn_started_at để trống tới khi bắt đầu
   const { rows } = await pool.query(
     `
     INSERT INTO ban_picks (
@@ -856,7 +805,7 @@ export const createBanPickSession = async ({
       status,
       state
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, NULL, NULL, NULL, 'active', $10::jsonb)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, 0, NULL, NULL, NULL, 'waiting', $9::jsonb)
     RETURNING id, round_slug
     `,
     [
@@ -868,7 +817,6 @@ export const createBanPickSession = async ({
       normalizedFormat,
       normalizedTurnTime,
       sessionState.phase,
-      sessionState.currentStep,
       JSON.stringify(sessionState),
     ],
   );
@@ -888,6 +836,34 @@ export const createBanPickSession = async ({
   return getBanPickSessionByRoundSlug(rows[0].round_slug);
 };
 
+/**
+ * Setup lại từ trang BTC: chỉ đổi thể thức / thời gian khi phòng còn ở trạng thái chờ.
+ * Đã bắt đầu thì giữ nguyên (muốn đổi phải bấm "Làm lại" trên trang ban/pick).
+ */
+const configureExistingSession = async ({ session, format, countdownSeconds }) => {
+  if (!session) return session;
+  const hasFormat = format !== null && format !== undefined && String(format).trim() !== "";
+  const hasCountdown =
+    countdownSeconds !== null &&
+    countdownSeconds !== undefined &&
+    String(countdownSeconds).trim() !== "";
+  if (!hasFormat && !hasCountdown) return session;
+  if (session.state.status !== "waiting") return session;
+
+  await withLockedBanPick(session, ({ state, turnLimitSeconds }) => ({
+    ok: true,
+    ...reconfigure({
+      session,
+      state,
+      turnLimitSeconds,
+      format: hasFormat ? format : undefined,
+      countdownSeconds: hasCountdown ? countdownSeconds : undefined,
+    }),
+  }));
+
+  return getBanPickSessionByRoundSlug(session.round_slug);
+};
+
 export const ensureSessionByRoundSlug = async ({
   roundSlug,
   matchId,
@@ -896,11 +872,7 @@ export const ensureSessionByRoundSlug = async ({
 }) => {
   const existing = await getBanPickSessionByRoundSlug(roundSlug);
   if (existing) {
-    return reinitializeSessionWithConfigIfNeeded({
-      session: existing,
-      format,
-      countdownSeconds,
-    });
+    return configureExistingSession({ session: existing, format, countdownSeconds });
   }
 
   const matchIdAsNumber = toNumber(matchId);
@@ -912,6 +884,21 @@ export const ensureSessionByRoundSlug = async ({
     format,
     countdownSeconds,
   });
+};
+
+/** Tìm phiên theo slug, nếu không có thì theo match_id (slug cũ/mới khác nhau vẫn ra đúng phiên). */
+export const findBanPickSession = async ({ roundSlug, matchId }) => {
+  const normalizedRoundSlug = String(roundSlug ?? "")
+    .trim()
+    .toLowerCase();
+  let session = normalizedRoundSlug
+    ? await getBanPickSessionByRoundSlug(normalizedRoundSlug)
+    : null;
+  const matchIdAsNumber = toNumber(matchId);
+  if (!session && matchIdAsNumber) {
+    session = await getBanPickSessionByMatchId(matchIdAsNumber);
+  }
+  return session;
 };
 
 export const deleteBanPickSession = async ({ roundSlug, matchId }) => {
@@ -998,69 +985,56 @@ export const deleteBanPickSession = async ({ roundSlug, matchId }) => {
   };
 };
 
+/* ───────────── Quyền ───────────── */
+
+/** Chỉ chủ đội (teams.created_by của đội trong trận) được thao tác lượt. */
 export const resolveUserTeamSlot = (user, session) => {
   const userId = toNumber(user?.id);
-  const userTeamId = toNumber(user?.team_id);
-  if (!userId && !userTeamId) return null;
+  if (!userId || !session) return null;
 
-  const teamAId = toNumber(session.team_a_id);
-  const teamBId = toNumber(session.team_b_id);
-  const teamAOwnerId = toNumber(session.team_a_owner_id);
-  const teamBOwnerId = toNumber(session.team_b_owner_id);
-
-  const canActAsTeam1 =
-    (teamAId && userTeamId === teamAId) ||
-    (teamAOwnerId && userId === teamAOwnerId);
-
-  const canActAsTeam2 =
-    (teamBId && userTeamId === teamBId) ||
-    (teamBOwnerId && userId === teamBOwnerId);
-
-  if (canActAsTeam1) return "team1";
-  if (canActAsTeam2) return "team2";
+  if (toNumber(session.team_a_owner_id) === userId) return "team1";
+  if (toNumber(session.team_b_owner_id) === userId) return "team2";
   return null;
 };
 
-export const getCurrentAction = (state) => {
-  const sequence = getSequence(state.format);
-  return state.currentStep < sequence.length
-    ? sequence[state.currentStep]
-    : null;
+/** BTC: role 1–3 hoặc người tạo giải. */
+export const isBanPickAdmin = (user, session) => {
+  if (!user) return false;
+  if (STAFF_ROLE_IDS.has(toNumber(user.role_id))) return true;
+  const ownerId = toNumber(session?.tournament_owner_id);
+  return Boolean(ownerId) && ownerId === toNumber(user.id);
 };
 
-export const toBanPickPayload = (session, userTeamSlot = null) => {
+/* ───────────── Trả về client ───────────── */
+
+export const getCurrentAction = (state) => {
+  const step = getCurrentStep(state);
+  return step ? { type: step.kind, team: step.team } : null;
+};
+
+export const toBanPickPayload = (session, userTeamSlot = null, viewerIsAdmin = false) => {
   const state = session.state;
   const currentAction = getCurrentAction(state);
+  const sideTarget = currentAction?.type === "side" ? getSideTargetMap(state) : null;
   const turnTimeLimitSeconds = normalizeTurnTimeLimitSeconds(
     session.turn_time_limit_seconds,
     DEFAULT_TURN_TIME_LIMIT_SECONDS,
   );
 
-  const turnStartedAt = session.turn_started_at
-    ? new Date(session.turn_started_at)
-    : null;
+  const turnStartedAt =
+    state.status === "running" && session.turn_started_at
+      ? new Date(session.turn_started_at)
+      : null;
   const turnStartedAtIso =
     turnStartedAt && !Number.isNaN(turnStartedAt.getTime())
       ? turnStartedAt.toISOString()
       : null;
-
-  const turnDeadlineAt = turnStartedAtIso
-    ? new Date(
-        new Date(turnStartedAtIso).getTime() + turnTimeLimitSeconds * 1000,
-      )
+  const turnDeadlineAtIso = turnStartedAtIso
+    ? new Date(new Date(turnStartedAtIso).getTime() + turnTimeLimitSeconds * 1000).toISOString()
     : null;
-  const turnDeadlineAtIso =
-    turnDeadlineAt && !Number.isNaN(turnDeadlineAt.getTime())
-      ? turnDeadlineAt.toISOString()
-      : null;
-
-  const turnRemainingSeconds =
-    turnDeadlineAtIso && state.phase !== "complete"
-      ? Math.max(
-          0,
-          Math.ceil((new Date(turnDeadlineAtIso).getTime() - Date.now()) / 1000),
-        )
-      : null;
+  const turnRemainingSeconds = turnDeadlineAtIso
+    ? Math.max(0, Math.ceil((new Date(turnDeadlineAtIso).getTime() - Date.now()) / 1000))
+    : null;
 
   return {
     id: toNumber(session.id),
@@ -1071,17 +1045,22 @@ export const toBanPickPayload = (session, userTeamSlot = null) => {
     match_status: String(session.match_status ?? "").trim() || null,
     round_number: toNumber(session.round_number),
     match_no: toNumber(session.match_no),
-    status: String(session.status ?? "active"),
+    status: state.status,
     phase: state.phase,
     format: state.format,
+    first_team: state.firstTeam,
+    decider_rule: state.deciderRule,
+    ready: state.ready,
+    steps: state.steps,
+    step_index: state.stepIndex,
     turn_time_limit_seconds: turnTimeLimitSeconds,
     turn_started_at: turnStartedAtIso,
     turn_deadline_at: turnDeadlineAtIso,
     turn_remaining_seconds: turnRemainingSeconds,
-    current_step: state.currentStep,
-    selected_map_id: state.selectedMapId,
-    side_select_map_id: state.sideSelectMapId,
-    side_select_team: state.sideSelectTeam,
+    server_time: new Date().toISOString(),
+    current_step: state.stepIndex,
+    side_select_map_id: sideTarget?.mapId ?? null,
+    side_select_team: currentAction?.type === "side" ? currentAction.team : null,
     current_action: currentAction,
     team_a: {
       id: toNumber(session.team_a_id),
@@ -1094,69 +1073,184 @@ export const toBanPickPayload = (session, userTeamSlot = null) => {
     map_pool: session.map_pool,
     state,
     viewer_team_slot: userTeamSlot,
+    viewer_is_admin: viewerIsAdmin,
   };
 };
 
-const persistSessionState = async ({
-  session,
-  nextState,
-  actionRecord,
-  actedByUserId,
-  turnStartedAt,
-}) => {
-  await pool.query(
-    `
-    UPDATE ban_picks
-    SET format = $1,
-        phase = $2,
-        current_step = $3,
-        selected_map_code = $4,
-        side_select_map_code = $5,
-        side_select_team = $6,
-        state = $7::jsonb,
-        turn_started_at = $8,
-        updated_at = NOW()
-    WHERE id = $9
-    `,
-    [
-      normalizeFormat(nextState.format, "BO3"),
-      nextState.phase,
-      toNumber(nextState.currentStep) ?? 0,
-      nextState.selectedMapId ?? null,
-      nextState.sideSelectMapId ?? null,
-      nextState.sideSelectTeam ?? null,
-      JSON.stringify(nextState),
-      turnStartedAt ?? null,
-      session.id,
-    ],
-  );
+/* ───────────── Ghi có khoá (tránh 2 người bấm cùng lúc) ───────────── */
 
-  if (actionRecord) {
-    await pool.query(
+const sessionWithState = (session, row) =>
+  normalizeStoredState({
+    sessionRow: { ...session, state: row.state, format: row.format },
+    mapPool: session.map_pool,
+  });
+
+/**
+ * Khoá dòng ban_picks (SELECT … FOR UPDATE), xử lý lượt hết giờ trước, rồi gọi mutator.
+ * mutator trả { ok, status?, error?, state?, turnStartedAt?, turnLimitSeconds?, format?, records? };
+ * không có state → không ghi gì thêm.
+ */
+const withLockedBanPick = async (session, mutator) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
       `
-      INSERT INTO ban_pick_actions (
-        ban_pick_id,
-        step,
-        map_code,
-        action_type,
-        team_slot,
-        side,
-        acted_by_user_id
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      SELECT id, state, format, turn_time_limit_seconds, turn_started_at
+      FROM ban_picks
+      WHERE id = $1
+      FOR UPDATE
+      `,
+      [session.id],
+    );
+    const row = rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 404, error: "Không tìm thấy phiên ban/pick" };
+    }
+
+    const turnLimitSeconds = normalizeTurnTimeLimitSeconds(row.turn_time_limit_seconds);
+    const settled = settleTimeouts({
+      state: sessionWithState(session, row),
+      turnStartedAt: row.turn_started_at,
+      turnLimitSeconds,
+    });
+
+    const result =
+      (await mutator({
+        state: settled.state,
+        turnStartedAt: settled.turnStartedAt,
+        turnLimitSeconds,
+      })) ?? { ok: true };
+
+    const write = result.ok && result.state
+      ? result
+      : settled.records.length
+        ? { state: settled.state, turnStartedAt: settled.turnStartedAt, records: [] }
+        : null;
+
+    if (!write) {
+      await client.query("ROLLBACK");
+      return result;
+    }
+
+    const nextState = write.state;
+    const sideTarget = getCurrentStep(nextState)?.kind === "side" ? getSideTargetMap(nextState) : null;
+    await client.query(
+      `
+      UPDATE ban_picks
+      SET format = $1,
+          turn_time_limit_seconds = $2,
+          phase = $3,
+          current_step = $4,
+          selected_map_code = NULL,
+          side_select_map_code = $5,
+          side_select_team = $6,
+          status = $7,
+          state = $8::jsonb,
+          turn_started_at = $9,
+          updated_at = NOW()
+      WHERE id = $10
       `,
       [
+        normalizeFormat(write.format ?? nextState.format, "BO3"),
+        write.turnLimitSeconds ?? turnLimitSeconds,
+        nextState.phase,
+        toNumber(nextState.stepIndex) ?? 0,
+        sideTarget?.mapId ?? null,
+        sideTarget ? getCurrentStep(nextState).team : null,
+        nextState.status,
+        JSON.stringify(nextState),
+        write.turnStartedAt ?? null,
         session.id,
-        toNumber(actionRecord.step) ?? 0,
-        actionRecord.mapId ?? null,
-        actionRecord.action,
-        actionRecord.team ?? null,
-        actionRecord.side ?? null,
-        actedByUserId ?? null,
       ],
     );
+
+    const records = [
+      ...settled.records.map((record) => ({ ...record, userId: null })),
+      ...(write === result ? result.records ?? [] : []),
+    ];
+    for (const record of records) {
+      await client.query(
+        `
+        INSERT INTO ban_pick_actions (
+          ban_pick_id, step, map_code, action_type, team_slot, side, acted_by_user_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `,
+        [
+          session.id,
+          toNumber(record.step) ?? 0,
+          record.mapId ?? null,
+          record.random ? `${record.action}_random` : record.action,
+          record.team ?? null,
+          record.side ?? null,
+          record.userId ?? null,
+        ],
+      );
+    }
+
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
   }
 };
+
+const reconfigure = ({
+  session,
+  state,
+  turnLimitSeconds,
+  format,
+  countdownSeconds,
+  firstTeam,
+  deciderRule,
+}) => {
+  const nextFormat = format !== undefined ? normalizeFormat(format, state.format) : state.format;
+  return {
+    format: nextFormat,
+    turnLimitSeconds:
+      countdownSeconds !== undefined
+        ? normalizeTurnTimeLimitSeconds(countdownSeconds, turnLimitSeconds)
+        : turnLimitSeconds,
+    turnStartedAt: null,
+    state: createInitialState({
+      mapPool: session.map_pool,
+      format: nextFormat,
+      teamNames: toTeamNames(session),
+      firstTeam: normalizeTeamSlot(firstTeam, state.firstTeam),
+      deciderRule: normalizeDeciderRule(deciderRule, state.deciderRule),
+    }),
+    records: [],
+  };
+};
+
+const startState = (state) =>
+  withPhase({ ...state, status: "running", stepIndex: 0, currentStep: 0 });
+
+/**
+ * Áp lượt hết giờ còn tồn đọng khi có người tải trạng thái (không cần job nền).
+ * Kiểm tra nhanh không khoá trước; chỉ khoá khi thực sự đã quá hạn.
+ */
+export const settleBanPickSession = async (session) => {
+  if (!session || session.state.status !== "running" || !session.turn_started_at) {
+    return session;
+  }
+  const limit = normalizeTurnTimeLimitSeconds(session.turn_time_limit_seconds);
+  const deadline = new Date(session.turn_started_at).getTime() + limit * 1000;
+  if (Date.now() < deadline) return session;
+
+  await withLockedBanPick(session, () => ({ ok: true }));
+  return getBanPickSessionByRoundSlug(session.round_slug);
+};
+
+/* ───────────── Lệnh ───────────── */
+
+const TEAM_COMMANDS = new Set(["act", "ready"]);
+const ADMIN_COMMANDS = new Set(["start", "skip", "reset", "configure"]);
 
 export const mutateBanPickSession = async ({
   roundSlug,
@@ -1165,185 +1259,193 @@ export const mutateBanPickSession = async ({
   command,
   mapId,
   side,
+  ready,
+  config,
 }) => {
-  const normalizedRoundSlug = String(roundSlug ?? "")
-    .trim()
-    .toLowerCase();
-
-  let session = normalizedRoundSlug
-    ? await getBanPickSessionByRoundSlug(normalizedRoundSlug)
-    : null;
-
-  const matchIdAsNumber = toNumber(matchId);
-  if (!session && matchIdAsNumber) {
-    session = await getBanPickSessionByMatchId(matchIdAsNumber);
-  }
-
+  const session = await findBanPickSession({ roundSlug, matchId });
   if (!session) {
     return { ok: false, status: 404, error: "Không tìm thấy phiên ban/pick" };
   }
 
-  const actorTeamSlot = resolveUserTeamSlot(user, session);
-  if (!actorTeamSlot) {
+  const normalizedCommand = String(command ?? "").trim();
+  const actorSlot = resolveUserTeamSlot(user, session);
+  const isAdmin = isBanPickAdmin(user, session);
+  const userId = toNumber(user?.id);
+
+  if (TEAM_COMMANDS.has(normalizedCommand) && !actorSlot) {
     return {
       ok: false,
       status: 403,
-      error: "Chỉ thành viên của 2 team trong trận mới được thao tác ban/pick",
+      error: "Chỉ chủ đội của 2 đội trong trận mới được thao tác ban/pick",
     };
   }
-
-  const normalizedCommand = String(command ?? "").trim();
-  if (
-    normalizedCommand !== "select_map" &&
-    normalizedCommand !== "confirm_action" &&
-    normalizedCommand !== "select_side" &&
-    normalizedCommand !== "reset"
-  ) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Command không hợp lệ",
-    };
+  if (ADMIN_COMMANDS.has(normalizedCommand) && !isAdmin) {
+    return { ok: false, status: 403, error: "Chỉ BTC mới được thao tác này" };
+  }
+  if (!TEAM_COMMANDS.has(normalizedCommand) && !ADMIN_COMMANDS.has(normalizedCommand)) {
+    return { ok: false, status: 400, error: "Command không hợp lệ" };
   }
 
-  let nextState = session.state;
+  const result = await withLockedBanPick(session, ({ state, turnStartedAt, turnLimitSeconds }) => {
+    const nowIso = new Date().toISOString();
 
-  if (normalizedCommand === "select_map") {
-    const currentAction = getCurrentAction(nextState);
-    if (nextState.phase !== "ban_pick" || !currentAction) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Không thể chọn map ở phase hiện tại",
-      };
+    switch (normalizedCommand) {
+      case "act": {
+        const step = getCurrentStep(state);
+        if (!step) {
+          return { ok: false, status: 400, error: "Ban/pick chưa bắt đầu hoặc đã kết thúc" };
+        }
+        if (step.team !== actorSlot) {
+          return { ok: false, status: 403, error: "Chưa tới lượt đội của bạn" };
+        }
+        const applied = applyStep(state, { mapId, side }, false);
+        if (!applied) {
+          return { ok: false, status: 400, error: "Lựa chọn không hợp lệ" };
+        }
+        return {
+          ok: true,
+          state: applied.state,
+          turnStartedAt: applied.state.status === "running" ? nowIso : null,
+          records: [{ ...applied.record, userId }],
+        };
+      }
+      case "ready": {
+        if (state.status !== "waiting") {
+          return { ok: false, status: 400, error: "Ban/pick đã bắt đầu" };
+        }
+        const nextReady = { ...state.ready, [actorSlot]: ready !== false };
+        const next = withPhase({ ...state, ready: nextReady });
+        const bothReady = nextReady.team1 && nextReady.team2;
+        return {
+          ok: true,
+          state: bothReady ? startState(next) : next,
+          turnStartedAt: bothReady ? nowIso : null,
+          records: [
+            { step: 0, action: bothReady ? "start" : ready === false ? "unready" : "ready", team: actorSlot, userId },
+          ],
+        };
+      }
+      case "start": {
+        if (state.status !== "waiting") {
+          return { ok: false, status: 400, error: "Ban/pick đã bắt đầu" };
+        }
+        return {
+          ok: true,
+          state: startState(state),
+          turnStartedAt: nowIso,
+          records: [{ step: 0, action: "start", userId }],
+        };
+      }
+      case "skip": {
+        const applied = applyRandomStep(state);
+        if (!applied) {
+          return { ok: false, status: 400, error: "Không có lượt nào để bỏ qua" };
+        }
+        return {
+          ok: true,
+          state: applied.state,
+          turnStartedAt: applied.state.status === "running" ? nowIso : null,
+          records: [{ ...applied.record, userId }],
+        };
+      }
+      case "reset": {
+        const next = reconfigure({ session, state, turnLimitSeconds });
+        return { ...next, ok: true, records: [{ step: 0, action: "reset", userId }] };
+      }
+      case "configure": {
+        if (state.status !== "waiting") {
+          return {
+            ok: false,
+            status: 400,
+            error: "Chỉ đổi thiết lập khi chưa bắt đầu (bấm Làm lại trước)",
+          };
+        }
+        const next = reconfigure({
+          session,
+          state,
+          turnLimitSeconds,
+          format: config?.format,
+          countdownSeconds: config?.countdown_seconds,
+          firstTeam: config?.first_team,
+          deciderRule: config?.decider_rule,
+        });
+        // Giữ trạng thái Sẵn sàng của 2 đội khi BTC chỉnh thiết lập
+        return { ...next, ok: true, state: withPhase({ ...next.state, ready: state.ready }) };
+      }
+      default:
+        return { ok: false, status: 400, error: "Command không hợp lệ" };
     }
+  });
 
-    if (currentAction.team !== actorTeamSlot) {
-      return { ok: false, status: 403, error: "Chưa tới lượt team của bạn" };
-    }
-
-    nextState = applySelectMap(nextState, String(mapId ?? ""));
-
-    if (nextState === session.state) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Map không hợp lệ hoặc đã được chọn",
-      };
-    }
-
-    await persistSessionState({
-      session,
-      nextState,
-      actionRecord: null,
-      actedByUserId: toNumber(user?.id),
-      turnStartedAt: session.turn_started_at ?? new Date().toISOString(),
-    });
-  }
-
-  if (normalizedCommand === "confirm_action") {
-    const currentAction = getCurrentAction(nextState);
-    if (nextState.phase !== "ban_pick" || !currentAction) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Không thể xác nhận ban/pick ở phase hiện tại",
-      };
-    }
-
-    if (currentAction.team !== actorTeamSlot) {
-      return { ok: false, status: 403, error: "Chưa tới lượt team của bạn" };
-    }
-
-    if (!nextState.selectedMapId) {
-      return { ok: false, status: 400, error: "Bạn chưa chọn map" };
-    }
-
-    const actionRecord = {
-      step: nextState.currentStep,
-      mapId: nextState.selectedMapId,
-      action: currentAction.type,
-      team: currentAction.team,
-    };
-
-    const updatedState = applyConfirmAction(nextState);
-    nextState = updatedState;
-
-    await persistSessionState({
-      session,
-      nextState,
-      actionRecord,
-      actedByUserId: toNumber(user?.id),
-      turnStartedAt:
-        nextState.phase === "complete" ? null : new Date().toISOString(),
-    });
-  }
-
-  if (normalizedCommand === "select_side") {
-    if (nextState.phase !== "side_select" || !nextState.sideSelectTeam) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Không thể chọn side ở phase hiện tại",
-      };
-    }
-
-    if (nextState.sideSelectTeam !== actorTeamSlot) {
-      return { ok: false, status: 403, error: "Chưa tới lượt team của bạn" };
-    }
-
-    const normalizedSide = String(side ?? "").toUpperCase();
-    if (normalizedSide !== "ATK" && normalizedSide !== "DEF") {
-      return { ok: false, status: 400, error: "Side không hợp lệ" };
-    }
-
-    const actionRecord = {
-      step: nextState.currentStep,
-      mapId: nextState.sideSelectMapId,
-      action: "side_select",
-      team: nextState.sideSelectTeam,
-      side: normalizedSide,
-    };
-
-    nextState = applySelectSide(nextState, normalizedSide);
-
-    await persistSessionState({
-      session,
-      nextState,
-      actionRecord,
-      actedByUserId: toNumber(user?.id),
-      turnStartedAt:
-        nextState.phase === "complete" ? null : new Date().toISOString(),
-    });
-  }
-
-  if (normalizedCommand === "reset") {
-    const mapPool = session.map_pool;
-    const resetState = createInitialState({
-      mapPool,
-      format: normalizeFormat(session.format, "BO3"),
-      teamNames: toTeamNames(session),
-    });
-
-    await persistSessionState({
-      session,
-      nextState: resetState,
-      actionRecord: {
-        step: 0,
-        mapId: null,
-        action: "reset",
-        team: actorTeamSlot,
-      },
-      actedByUserId: toNumber(user?.id),
-      turnStartedAt: new Date().toISOString(),
-    });
-  }
-
-  const refreshed = await getBanPickSessionByRoundSlug(session.round_slug);
+  if (!result.ok) return result;
 
   return {
     ok: true,
     status: 200,
-    session: refreshed,
+    session: await getBanPickSessionByRoundSlug(session.round_slug),
   };
+};
+
+/**
+ * Phòng ban/pick chưa xong mà người dùng là chủ đội (teams.created_by) — cho dải báo toàn trang.
+ * Trả kèm link vào phòng: trang lobby của giải nếu biết game/slug, không thì /round/:slug.
+ */
+export const listOwnerBanPickSessions = async (user) => {
+  const userId = toNumber(user?.id);
+  if (!userId) return [];
+
+  const { rows } = await pool.query(
+    `
+    SELECT bp.match_id,
+           t.slug AS tournament_slug,
+           t.name AS tournament_name,
+           LOWER(g.short_name) AS game_short_name
+    FROM ban_picks bp
+    JOIN matches m ON m.id = bp.match_id
+    LEFT JOIN teams ta ON ta.id = m.team_a_id
+    LEFT JOIN teams tb ON tb.id = m.team_b_id
+    LEFT JOIN tournaments t ON t.id = m.tournament_id
+    LEFT JOIN games g ON g.id = t.game_id
+    WHERE (ta.created_by = $1 OR tb.created_by = $1)
+      AND bp.status <> 'done'
+      AND LOWER(COALESCE(m.status, '')) NOT IN ('completed', 'complete', 'finished')
+    ORDER BY bp.updated_at DESC
+    LIMIT 5
+    `,
+    [userId],
+  );
+
+  const items = [];
+  for (const row of rows) {
+    const session = await settleBanPickSession(
+      await getBanPickSessionByMatchId(toNumber(row.match_id)),
+    );
+    if (!session || session.state.status === "done") continue;
+
+    const slot = resolveUserTeamSlot(user, session);
+    const payload = toBanPickPayload(session, slot, false);
+    const lobbyPath =
+      row.game_short_name && row.tournament_slug
+        ? `/tournament/${row.game_short_name}/${row.tournament_slug}/lobby/${payload.match_id}`
+        : `/round/${payload.round_slug}?matchId=${payload.match_id}`;
+
+    items.push({
+      match_id: payload.match_id,
+      status: payload.status,
+      format: payload.format,
+      tournament_name: row.tournament_name ?? null,
+      team_a: payload.team_a,
+      team_b: payload.team_b,
+      viewer_team_slot: slot,
+      ready: payload.ready,
+      current_action: payload.current_action,
+      side_select_map_id: payload.side_select_map_id,
+      turn_deadline_at: payload.turn_deadline_at,
+      turn_time_limit_seconds: payload.turn_time_limit_seconds,
+      server_time: payload.server_time,
+      link: lobbyPath,
+    });
+  }
+
+  return items;
 };

@@ -3,16 +3,10 @@ import axios from "axios";
 import { API_BASE } from "@/lib/apiBase";
 import { Link, useNavigate, useLocation, useParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  ArrowLeft,
-  Bell,
-  Check,
-  LogIn,
-  LogOut,
-  Trophy,
-  RefreshCw,
-  X,
-} from "lucide-react";
+import { Bell, Check, X } from "lucide-react";
+import InfoGrid from "@/components/InfoGrid";
+import { PAGE_FRAME_CLASS } from "@/components/TournamentMasthead";
+import { formatShortDateTime } from "@/lib/tournamentFormat";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,6 +41,12 @@ interface HeroBannerProps {
     register_end?: string;
     name?: string;
     short_name?: string;
+    game_name?: string;
+    date_start?: string;
+    date_end?: string;
+    max_participate?: number;
+    registered_count?: number;
+    prizes?: Array<{ prize?: string }>;
     registration_mode?: "org" | "individual" | string;
     registered?: Array<{
       id?: number | string;
@@ -503,206 +503,210 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     navigate("/series/dcn_series");
   };
 
+  const registeredCount =
+    tournament?.registered_count ?? tournament?.registered?.length ?? null;
+  const registerStatus = (() => {
+    const countText =
+      registeredCount != null
+        ? `${registeredCount}${tournament?.max_participate ? ` / ${tournament.max_participate}` : ""} ${isIndividualMode ? "người" : "đội"} đã đăng ký`
+        : null;
+
+    if (isRegistrationOpen) {
+      return {
+        label: "ĐANG MỞ ĐĂNG KÝ",
+        tone: "text-[#FF4A3D]",
+        detail: [countText, `hạn chót ${formatShortDateTime(tournament?.register_end)}`]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }
+    if (Number.isFinite(registerStartMs) && now < registerStartMs) {
+      return {
+        label: "SẮP MỞ ĐĂNG KÝ",
+        tone: "text-[#F2F0EB]",
+        detail: `Mở lúc ${formatShortDateTime(tournament?.register_start)}`,
+      };
+    }
+    if (Number.isFinite(registerEndMs) && now > registerEndMs) {
+      return {
+        label: "ĐÃ ĐÓNG ĐĂNG KÝ",
+        tone: "text-[#9A9893]",
+        detail: countText ?? "",
+      };
+    }
+    return null;
+  })();
+
+  const actionBtn = "h-11 px-4 text-sm font-semibold";
+  const gameLabel = tournament?.game_name || tournament?.short_name;
+
   return (
     <>
-      <div className="relative w-full h-87.5 md:h-105 overflow-hidden bg-muted">
+      <section className={`${PAGE_FRAME_CLASS} pt-6 md:pt-8`}>
         {normalizedSeriesSlug ? (
-          <div className="absolute left-4 top-4 z-20">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={handleBackToSeries}
-              className="gap-1.5"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Về series
-            </Button>
-          </div>
+          <button
+            type="button"
+            onClick={handleBackToSeries}
+            className="mb-2 flex min-h-11 items-center text-sm font-semibold hover:underline hover:underline-offset-4"
+          >
+            ← Về series
+          </button>
         ) : null}
 
-        <div
-          className="absolute inset-0 bg-cover bg-center scale-105"
-          style={{ backgroundImage: `url(${tournament?.banner_url})` }}
-          aria-hidden="true"
-        />
-        <div className="absolute inset-0 bg-linear-to-t from-background via-background/60 to-transparent" />
+        {/* Ảnh giải: một dải ngang rộng hết khung, như ảnh bìa trang báo */}
+        {tournament?.banner_url ? (
+          <figure className="m-0">
+            <img
+              src={tournament.banner_url}
+              alt={`Ảnh giải ${tournament?.name ?? ""}`}
+              className="block aspect-[16/9] w-full object-cover md:aspect-[4/1]"
+            />
+          </figure>
+        ) : null}
 
-        {/* Bottom: tournament info left + auth area right (stacks on small screens) */}
-        <div className="absolute left-0 right-0 bottom-0 p-4 sm:p-6 md:p-10 flex flex-col md:flex-row items-center md:items-end justify-between gap-4">
-          {/* Left: tournament info (center on small, left on md+) */}
-          <div className="min-w-0 w-full md:w-auto text-center md:text-left">
-            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold leading-tight mb-2 max-w-180 mx-auto md:mx-0">
-              {tournament?.name || "Đang tải..."}
-            </h1>
-            <p className="text-sm sm:text-sm md:text-basetext-[#EEEEEE]">
-              Tổ chức bởi{" "}
-              <span className="font-semibold text-primary">
-                Dong Chuyen Nghiep
-              </span>
+        {/* Tên giải bên trái, thông tin chính bên phải — cùng bố cục trang con */}
+        <div className="mt-6 grid gap-6 md:mt-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,600px)] lg:items-end lg:gap-12">
+          <div className="min-w-0">
+            <p className="m-0 mb-1 text-[13px] font-semibold text-[#9A9893]">
+              {[gameLabel, "Tổ chức bởi Dong Chuyen Nghiep"]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
+            <h1 className="m-0 break-words text-[36px] font-extrabold leading-[1.08] tracking-[-0.03em] md:text-[52px]">
+              {tournament?.name || "Đang tải…"}
+            </h1>
           </div>
+          <InfoGrid tournament={tournament} />
+        </div>
 
-          {/* Right: auth area (move below on small screens) */}
-          <div className="flex items-center gap-3 shrink-0 mt-3 md:mt-0">
+        <div className="mt-6 flex flex-col gap-3 border-y border-b-[#2C2B29] border-t-[#F2F0EB] py-3 md:flex-row md:items-center md:gap-4">
+          {registerStatus ? (
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+              <span className={`font-bold tracking-[0.04em] ${registerStatus.tone}`}>
+                {registerStatus.label}
+              </span>
+              {registerStatus.detail ? (
+                <span className="text-[#9A9893]">{registerStatus.detail}</span>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-2 md:ml-auto">
             {user ? (
               <>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleOpenInviteModal}
-                  className="relative h-10 w-10 rounded-full border border-border bg-card/80 backdrop-blur-sm"
-                  aria-label="Thông báo lời mời"
-                >
-                  <Bell className="w-4 h-4" />
-                  {inviteCount > 0 && (
-                    <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-white">
-                      {inviteCount}
-                    </span>
-                  )}
-                </Button>
-
-                <Link
-                  to="/profile"
-                  title="Hồ sơ cá nhân"
-                  className="flex items-center gap-2 rounded-lg border border-border bg-card/80 px-3 py-2 backdrop-blur-sm transition-colors hover:border-neutral-500 hover:bg-card"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-primary/15">
-                    <Avatar className="h-9 w-9">
-                      <AvatarImage
-                        src={user.profile_picture ?? undefined}
-                        alt={user.nickname}
-                      />
-                      <AvatarFallback className="bg-primary text-[10px] font-bold text-primary-foreground">
-                        {(user.nickname || "U")[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                  </div>
-                  <span className="max-w-28 truncate text-sm font-semibold sm:max-w-40">
-                    {user.nickname}
-                  </span>
-                  
-                </Link>
                 {isIndividualMode ? (
                   isRegistrationOpen || isRegistered ? (
                     <Button
-                      size="sm"
                       onClick={handleOpenRegistration}
-                      className="h-11 px-4 sm:px-5 gap-2 text-sm sm:text-base font-semibold"
+                      className={actionBtn}
                       variant={showUpdateRegistration ? "outline" : "default"}
                     >
-                      {showUpdateRegistration ? (
-                        <span>Quản lý đăng ký</span>
-                      ) : (
-                        <>
-                          <Trophy className="w-4 h-4" />
-                          <span className="hidden sm:inline">Đăng ký cá nhân</span>
-                          <span className="sm:hidden">Đăng ký</span>
-                        </>
-                      )}
+                      {showUpdateRegistration ? "Quản lý đăng ký" : "Đăng ký cá nhân"}
                     </Button>
                   ) : null
                 ) : hasTeam && !isTeamCaptain ? (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     onClick={handleOpenRoster}
-                    className="h-10 rounded-full border border-border bg-card/80 backdrop-blur-sm px-3 py-2 flex items-center gap-2 max-w-55"
+                    className={`${actionBtn} max-w-60`}
                     aria-label="Xem đồng đội trong giải"
                   >
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage
-                        src={user?.team?.logo_url ?? undefined}
-                        alt={user?.team?.name ?? "Team"}
-                      />
-                      <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
-                        {(user?.team?.short_name || user?.team?.name || "T")[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="max-w-35 truncate text-sm font-semibold">
-                      {user?.team?.name}
-                    </span>
+                    <span className="truncate">{user?.team?.name}</span>
                   </Button>
                 ) : isRegistrationOpen || isRegistered ? (
                   <Button
-                    size="sm"
                     onClick={handleOpenRegistration}
-                    className="h-11 px-4 sm:px-5 gap-2 text-sm sm:text-base font-semibold"
+                    className={actionBtn}
                     variant={showUpdateRegistration ? "outline" : "default"}
                   >
-                    {showUpdateRegistration ? (
-                      <>
-                        <RefreshCw className="w-4 h-4" />
-                        <span className="hidden sm:inline">Cập nhật</span>
-                        <span className="sm:hidden">Cập nhật</span>
-                      </>
-                    ) : (
-                      <>
-                        <Trophy className="w-4 h-4" />
-                        <span className="hidden sm:inline">Đăng ký giải</span>
-                        <span className="sm:hidden">Đăng ký</span>
-                      </>
-                    )}
+                    {showUpdateRegistration ? "Cập nhật đăng ký" : "Đăng ký giải"}
                   </Button>
                 ) : null}
 
                 {canShowHeaderCheckIn ? (
                   isCheckInOpen ? (
                     <Button
-                      size="sm"
                       onClick={handleHeaderCheckIn}
                       disabled={
                         checkingInTeamId === myRegisteredTeamId ||
                         myTeamCheckedIn
                       }
-                      className="gap-1.5"
+                      className={actionBtn}
                     >
                       {checkingInTeamId === myRegisteredTeamId
-                        ? "Đang check-in..."
+                        ? "Đang check-in…"
                         : myTeamCheckedIn
                           ? "Đã check-in"
-                          : "Check-in đội của tôi"}
+                          : "Check-in"}
                     </Button>
                   ) : (
-                    <div className="flex items-center gap-2 rounded-full border border-border bg-card/80 px-3 py-2 backdrop-blur-sm">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage
-                          src={user?.team?.logo_url ?? undefined}
-                          alt={user?.team?.name ?? "Team"}
-                        />
-                        <AvatarFallback className="bg-primary text-primary-foreground text-[10px] font-bold">
-                          {
-                            (user?.team?.short_name ||
-                              user?.team?.name ||
-                              "T")[0]
-                          }
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="max-w-32 truncate text-sm font-semibold">
-                        {user?.team?.name}
-                      </span>
-                    </div>
+                    <span className="flex h-11 items-center px-1 text-sm text-[#9A9893]">
+                      {user?.team?.name}
+                    </span>
                   )
                 ) : null}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={logout}
-                  className="text-muted-foreground hover:text-foreground"
+
+                <button
+                  type="button"
+                  onClick={handleOpenInviteModal}
+                  className="flex h-11 items-center gap-2 border border-[#2C2B29] px-3 text-sm transition-colors hover:border-[#F2F0EB]"
+                  aria-label={`Lời mời vào đội${inviteCount ? `: ${inviteCount} mới` : ""}`}
                 >
-                  <LogOut className="w-4 h-4" />
-                </Button>
+                  <Bell className="h-4 w-4" aria-hidden="true" />
+                  {inviteCount > 0 ? (
+                    <span className="font-bold tabular-nums text-[#FF4A3D]">
+                      {inviteCount}
+                    </span>
+                  ) : null}
+                </button>
+
+                <Link
+                  to="/profile"
+                  title="Hồ sơ cá nhân"
+                  className="flex h-11 items-center gap-2 border border-[#2C2B29] pl-1 pr-3 no-underline transition-colors hover:border-[#F2F0EB]"
+                >
+                  <Avatar className="h-9 w-9 rounded-none">
+                    <AvatarImage
+                      src={user.profile_picture ?? undefined}
+                      alt=""
+                      className="object-cover"
+                    />
+                    <AvatarFallback className="rounded-none bg-[#151515] text-xs font-bold">
+                      {(user.nickname || "U")[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="max-w-28 truncate text-sm font-semibold sm:max-w-40">
+                    {user.nickname}
+                  </span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="flex h-11 items-center px-2 text-sm text-[#9A9893] hover:text-[#F2F0EB] hover:underline hover:underline-offset-4"
+                >
+                  Đăng xuất
+                </button>
               </>
             ) : (
-              <Button size="sm" onClick={handleLoginClick} className="gap-1.5">
-                <LogIn className="w-4 h-4" />
-                Đăng nhập
-              </Button>
+              isRegistrationOpen ? (
+                <Button onClick={handleLoginClick} className={actionBtn}>
+                  Đăng nhập để đăng ký
+                </Button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleLoginClick}
+                  className="flex h-11 items-center px-1 text-sm font-semibold underline underline-offset-4"
+                >
+                  Đăng nhập
+                </button>
+              )
             )}
           </div>
         </div>
-      </div>
+      </section>
 
       <TournamentRegistration
         open={regOpen}
@@ -785,7 +789,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
       />
 
       <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
-        <DialogContent className="sm:max-w-lg rounded-2xl border-border bg-card p-6 shadow-xl">
+        <DialogContent className="sm:max-w-lg border-[#F2F0EB] bg-[#0B0B0B] p-6 shadow-none">
           <DialogHeader>
             <DialogTitle>Lời mời team</DialogTitle>
             <DialogDescription>
@@ -797,14 +801,14 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
 
           <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
             {inviteCount === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+              <div className="border-t-2 border-[#F2F0EB] py-4 text-sm text-muted-foreground">
                 Không có lời mời nào.
               </div>
             ) : (
               pendingInvites.map((invite) => (
                 <div
                   key={invite.id}
-                  className="rounded-xl border border-border bg-background p-4 shadow-sm"
+                  className="border-t border-[#2C2B29] py-4"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -815,7 +819,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                         Mời bởi {invite.inviter_username}
                       </p>
                     </div>
-                    <div className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       Pending
                     </div>
                   </div>
@@ -831,7 +835,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                       Từ chối
                     </Button>
                     <Button
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                      className="h-11 flex-1"
                       onClick={() => handleAcceptInvite(invite.id)}
                       disabled={inviteActionId === invite.id || hasTeam}
                     >

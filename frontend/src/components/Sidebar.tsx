@@ -1,18 +1,7 @@
-import { ExternalLink } from "lucide-react";
-import { Link } from "react-router-dom";
-import {
-  TOURNAMENT_INFO_LABEL_CLASS,
-  TOURNAMENT_INFO_ROW_CLASS,
-  TOURNAMENT_INFO_VALUE_CLASS,
-  TOURNAMENT_PANEL_CLASS,
-  TOURNAMENT_PANEL_TITLE_CLASS,
-} from "@/components/tournamentTheme";
+import type { ReactNode } from "react";
 
 type SidebarProps = {
   tournament?: {
-    registered_count?: number;
-    max_participate?: number;
-    registration_mode?: "org" | "individual" | string;
     requirement?: {
       rank_min?: string;
       rank_max?: string;
@@ -27,35 +16,58 @@ type SidebarProps = {
       prize?: string;
       amount?: string | number;
     }>;
-  };
+  } | null;
   isLoading?: boolean;
 };
 
+/** Một mục bên phải trang tổng quan: tiêu đề + danh sách nhãn/giá trị kẻ mảnh. */
+const InfoSection = ({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) => (
+  <section>
+    <h2 className="m-0 text-lg font-extrabold leading-[1.3]">{title}</h2>
+    <dl className="m-0 mt-2 border-t-2 border-[#F2F0EB]">{children}</dl>
+  </section>
+);
+
+const InfoRow = ({
+  label,
+  children,
+  strong = false,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  strong?: boolean;
+}) => (
+  <div className="flex items-baseline justify-between gap-4 border-b border-[#2C2B29] py-2.5 text-sm">
+    <dt className={strong ? "font-bold" : "text-[#9A9893]"}>{label}</dt>
+    <dd className="m-0 min-w-0 text-right font-semibold tabular-nums">
+      {children}
+    </dd>
+  </div>
+);
+
 const Sidebar = ({ tournament, isLoading = false }: SidebarProps) => {
-  const registeredCount = Number(tournament?.registered_count ?? 0);
-  const maxParticipate = Number(tournament?.max_participate ?? 0);
-  const isIndividualMode =
-    String(tournament?.registration_mode ?? "org").toLowerCase() ===
-    "individual";
   const requirement = tournament?.requirement ?? {};
   const rankLabel = (() => {
     const min = String(requirement?.rank_min ?? "").trim();
     const max = String(requirement?.rank_max ?? "").trim();
-    if (!min || !max || min === "--" || max === "--") return "Tất cả rank";
-    return `${min} → ${max}`;
+    if (!min || !max || min === "--" || max === "--") return "Mọi rank";
+    return `${min} – ${max}`;
   })();
 
-  const progressPercent =
-    maxParticipate > 0
-      ? Math.min(100, Math.max(0, (registeredCount / maxParticipate) * 100))
-      : 0;
-
   const prizeItems = Array.isArray(tournament?.prizes)
-    ? tournament.prizes.map((item) => ({
-        key: String(item?.id ?? item?.place_label ?? item?.place_order ?? ""),
-        place: item?.place_label ?? "—",
-        prize: String(item?.prize ?? item?.amount ?? "—"),
-      }))
+    ? [...tournament.prizes]
+        .sort((a, b) => Number(a?.place_order ?? 0) - Number(b?.place_order ?? 0))
+        .map((item) => ({
+          key: String(item?.id ?? item?.place_label ?? item?.place_order ?? ""),
+          place: item?.place_label ?? "—",
+          prize: String(item?.prize ?? item?.amount ?? "—"),
+        }))
     : [];
 
   const deviceLabel = Array.isArray(requirement?.device)
@@ -63,127 +75,44 @@ const Sidebar = ({ tournament, isLoading = false }: SidebarProps) => {
     : (requirement?.device ?? "—");
 
   return (
-    <aside className="space-y-4">
-      <div className={`overflow-hidden ${TOURNAMENT_PANEL_CLASS}`}>
-        <div className="flex items-center justify-between gap-3 border-b border-neutral-700 bg-[#1a1a1a] px-4 py-3">
-          <span className="text-xs font-extrabold uppercase tracking-widest text-neutral-400">
-            Đăng ký
-          </span>
-          <Link
-            to="participants"
-            className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-300 transition-colors hover:text-white"
-          >
-            Xem danh sách
-          </Link>
-        </div>
-
-        <div className="px-4 py-4">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <p className="text-2xl font-extrabold tabular-nums text-white">
-                {isLoading
-                  ? "…"
-                  : `${tournament?.registered_count ?? "—"}`}
-                <span className="text-base font-bold text-neutral-500">
-                  {" "}
-                  / {tournament?.max_participate ?? "—"}
-                </span>
-              </p>
-              <p className="mt-1 text-[11px] font-bold uppercase tracking-wider text-neutral-500">
-                {isIndividualMode ? "Thành viên đã đăng ký" : "Đội đã đăng ký"}
-              </p>
-            </div>
-            <span className="text-sm font-extrabold tabular-nums text-neutral-400">
-              {isLoading ? "…" : `${Math.round(progressPercent)}%`}
-            </span>
-          </div>
-
-          <div className="mt-3 h-1.5 w-full bg-neutral-800">
-            <div
-              className="h-full bg-neutral-400 transition-all duration-300"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className={`overflow-hidden ${TOURNAMENT_PANEL_CLASS}`}>
-        <div className={TOURNAMENT_PANEL_TITLE_CLASS}>Yêu cầu tham gia</div>
-        <div>
-          <div className={TOURNAMENT_INFO_ROW_CLASS}>
-            <span className={TOURNAMENT_INFO_LABEL_CLASS}>Rank</span>
-            <span className={TOURNAMENT_INFO_VALUE_CLASS}>{rankLabel}</span>
-          </div>
-          <div className={TOURNAMENT_INFO_ROW_CLASS}>
-            <span className={TOURNAMENT_INFO_LABEL_CLASS}>Trường</span>
-            <span className={TOURNAMENT_INFO_VALUE_CLASS}>
-              {requirement?.pner_only ? "Phú Nhuận" : "Tất cả"}
-            </span>
-          </div>
-          <div className={TOURNAMENT_INFO_ROW_CLASS}>
-            <span className={TOURNAMENT_INFO_LABEL_CLASS}>Thiết bị</span>
-            <span className={TOURNAMENT_INFO_VALUE_CLASS}>{deviceLabel}</span>
-          </div>
-          <div className={TOURNAMENT_INFO_ROW_CLASS}>
-            <span className={TOURNAMENT_INFO_LABEL_CLASS}>Discord PN</span>
-            <span
-              className={`${TOURNAMENT_INFO_VALUE_CLASS} ${
-                requirement?.discord ? "text-emerald-300" : "text-neutral-400"
-              }`}
-            >
-              {requirement?.discord ? "Bắt buộc" : "Không"}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className={`overflow-hidden ${TOURNAMENT_PANEL_CLASS}`}>
-        <div className={TOURNAMENT_PANEL_TITLE_CLASS}>Giải thưởng</div>
+    <aside className="space-y-10">
+      <InfoSection title="Giải thưởng">
         {isLoading ? (
-          <p className="px-4 py-6 text-sm text-neutral-500">Đang tải…</p>
+          <p className="py-3 text-sm text-[#9A9893]">Đang tải…</p>
         ) : prizeItems.length ? (
-          <div>
-            {prizeItems.map((item) => (
-              <div key={item.key} className={TOURNAMENT_INFO_ROW_CLASS}>
-                <span className="text-sm font-bold text-white">{item.place}</span>
-                <span className="text-sm font-bold text-neutral-300">
-                  {item.prize}
-                </span>
-              </div>
-            ))}
-          </div>
+          prizeItems.map((item, index) => (
+            <InfoRow key={item.key} label={item.place} strong={index === 0}>
+              {item.prize}
+            </InfoRow>
+          ))
         ) : (
-          <p className="px-4 py-6 text-sm text-neutral-500">
-            Chưa cập nhật giải thưởng.
-          </p>
+          <p className="py-3 text-sm text-[#9A9893]">Chưa công bố giải thưởng.</p>
         )}
-      </div>
+      </InfoSection>
 
-      <div className={`overflow-hidden ${TOURNAMENT_PANEL_CLASS}`}>
-        <div className={TOURNAMENT_PANEL_TITLE_CLASS}>Liên hệ</div>
-        <div>
-          <div className={TOURNAMENT_INFO_ROW_CLASS}>
-            <span className={TOURNAMENT_INFO_LABEL_CLASS}>Facebook</span>
-            <a
-              href="#"
-              className={`${TOURNAMENT_INFO_VALUE_CLASS} inline-flex items-center gap-1 text-neutral-200 transition-colors hover:text-white`}
-            >
-              Dong Chuyen Nghiep
-              <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-            </a>
-          </div>
-          <div className={TOURNAMENT_INFO_ROW_CLASS}>
-            <span className={TOURNAMENT_INFO_LABEL_CLASS}>Discord</span>
-            <a
-              href="#"
-              className={`${TOURNAMENT_INFO_VALUE_CLASS} inline-flex items-center gap-1 text-neutral-200 transition-colors hover:text-white`}
-            >
-              THPT Phú Nhuận
-              <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
-            </a>
-          </div>
-        </div>
-      </div>
+      <InfoSection title="Điều kiện tham gia">
+        <InfoRow label="Rank">{rankLabel}</InfoRow>
+        <InfoRow label="Trường">
+          {requirement?.pner_only ? "THPT Phú Nhuận" : "Mọi trường"}
+        </InfoRow>
+        <InfoRow label="Thiết bị">{deviceLabel}</InfoRow>
+        <InfoRow label="Discord PN">
+          {requirement?.discord ? "Bắt buộc" : "Không bắt buộc"}
+        </InfoRow>
+      </InfoSection>
+
+      <InfoSection title="Liên hệ">
+        <InfoRow label="Facebook">
+          <a href="#" className="underline underline-offset-4">
+            Dong Chuyen Nghiep
+          </a>
+        </InfoRow>
+        <InfoRow label="Discord">
+          <a href="#" className="underline underline-offset-4">
+            THPT Phú Nhuận
+          </a>
+        </InfoRow>
+      </InfoSection>
     </aside>
   );
 };

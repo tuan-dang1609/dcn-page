@@ -70,6 +70,14 @@ export type AovMatchGamePlayer = {
   slot_no?: number;
 };
 
+export type AovGameMeta = {
+  blue_kills?: number | null;
+  red_kills?: number | null;
+  duration_sec?: number | null;
+  played_at?: string | null;
+  winner_side?: "blue" | "red" | null;
+};
+
 export type AovMatchGameStats = {
   match_game_id: number;
   match_id: number;
@@ -77,6 +85,8 @@ export type AovMatchGameStats = {
   info_game_id?: string | null;
   team_a_score?: number | null;
   team_b_score?: number | null;
+  winner_team_id?: number | null;
+  aov?: AovGameMeta | null;
   players: AovMatchGamePlayer[];
 };
 

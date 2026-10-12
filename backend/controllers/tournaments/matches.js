@@ -9,10 +9,9 @@ import {
   ensureDoubleElimLoserNextLinks,
 } from "../../utils/bracketProgression.js";
 import { tryApplyStagedAovStats, ensureMatchAovStatsFromStaging } from "../../utils/aovStagingDb.js";
-import {
-  fetchTftMatchData,
-  fetchValorantMatchData,
-} from "../../utils/bigtournamentClient.js";
+import { fetchTftMatchData } from "../../utils/bigtournamentClient.js";
+import { fetchValorantMatchFromRiot } from "../../utils/riotValorantClient.js";
+import { ensureRiotPuuidColumns } from "../../utils/riotPuuid.js";
 
 const matchRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Matches";
@@ -51,8 +50,7 @@ const providerAliases = {
 };
 
 const gameProviderRouteTemplates = {
-  valorant:
-    "https://bigtournament-1.onrender.com/api/auth/valorant/matchdata/valorant/match/:matchId",
+  valorant: "/api/tournaments/matches/external/valorant/:matchId",
   lol: "https://bigtournament-1.onrender.com/api/lol/match/:matchId",
   tft: "https://bigtournament-1.onrender.com/api/tft/match/:matchId",
   aov: "/api/tournaments/matches/games/:matchGameId/stats",
@@ -352,7 +350,7 @@ matchRouter.get(
     }
 
     try {
-      const payload = await fetchValorantMatchData(matchId);
+      const payload = await fetchValorantMatchFromRiot(matchId);
       set.status = 200;
       return payload;
     } catch (error) {
@@ -367,7 +365,7 @@ matchRouter.get(
   },
   {
     tags: [TAG],
-    summary: "Fetch Valorant match data via server-side BigTournament proxy",
+    summary: "Fetch Valorant match data directly from Riot (val-match-v1)",
   },
 );
 
@@ -443,6 +441,7 @@ matchRouter.get(
               g.short_name AS tournament_game_short_name,
               m.ban_pick_id,
               bp.turn_time_limit_seconds AS ban_pick_countdown_seconds,
+              bp.status AS ban_pick_status,
              m.team_a_id,
              m.team_b_id,
               m.next_match_id,
@@ -514,6 +513,9 @@ matchRouter.get(
       return { error: "Match not found" };
     }
 
+    // Cột puuid (riot_puuid_val / riot_puuid_lol) có thể chưa có trên DB cũ
+    await ensureRiotPuuidColumns();
+
     const { team_a_id: teamAId, team_b_id: teamBId, tournament_id: tournamentId } =
       matchRows[0];
 
@@ -522,7 +524,9 @@ matchRouter.get(
       u.username,
       u.nickname,
       u.profile_picture,
-      u.riot_account
+      u.riot_account,
+      u.riot_puuid_val,
+      u.riot_puuid_lol
     `;
 
     const fetchPlayersForTeam = async (teamId) => {
@@ -530,7 +534,7 @@ matchRouter.get(
 
       const { rows } = await pool.query(
         `
-        SELECT user_id, username, nickname, profile_picture, riot_account
+        SELECT user_id, username, nickname, profile_picture, riot_account, riot_puuid_val, riot_puuid_lol
         FROM (
           SELECT ${linkedPlayerSelect}
           FROM tournament_teams tt
@@ -564,7 +568,7 @@ matchRouter.get(
 
       const { rows } = await pool.query(
         `
-        SELECT user_id, username, nickname, profile_picture, riot_account
+        SELECT user_id, username, nickname, profile_picture, riot_account, riot_puuid_val, riot_puuid_lol
         FROM (
           SELECT ${linkedPlayerSelect}
           FROM tournament_teams tt

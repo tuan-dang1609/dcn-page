@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useOutletContext, useParams } from "react-router-dom";
+import { useOutletContext } from "react-router-dom";
 import {
   getMatchesByBracketId,
   type Match as ApiMatch,
@@ -37,15 +37,23 @@ import {
 } from "@/components/bracketConnectors";
 import {
   BRACKET_CARD_CLASS,
+  BRACKET_INNER_CARD_CLASS,
   BRACKET_MATCH_TITLE_H,
-  BRACKET_ROW_BASE_CLASS,
+  BRACKET_ROW_SPLIT_CLASS,
+  BRACKET_ROW_TBD_CLASS,
+  BRACKET_SCORE_CELL_CLASS,
   formatBracketSideScore,
   getBracketMatchCardHeight,
   getMatchCardConnectorY,
   getBracketRowStateClass,
   isBracketMatchCompletedStatus,
+  normalizeBracketMatchStatus,
+  isBanPickOpenStatus,
 } from "@/components/bracketTheme";
 import { BracketMatchCardShell } from "@/components/BracketMatchCardShell";
+import { MatchResultTrigger } from "@/components/MatchPanel";
+import MobileBracket from "@/components/MobileBracket";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type DoubleElimBracketProps = {
   bracketId?: number | null;
@@ -92,6 +100,8 @@ type DisplayMatch = {
   routeMatchId?: number;
   status?: string;
   dateScheduled?: string | null;
+  /** Phòng ban/pick đang mở (chờ / đang chạy). */
+  banPickOpen?: boolean;
   round: number;
   matchNo: number;
   nextMatchId: number | null;
@@ -109,8 +119,9 @@ type DisplayMatch = {
   winner: string | null;
 };
 
-const CARD_W = 252;
-const ROW_H = 42;
+// 5 cột × 220 + 4 khe × 56 = 1324px — vừa khung 1440 như design/Main.dc.html
+const CARD_W = 220;
+const ROW_H = 36;
 const ROW_BLOCK_H = ROW_H * 2;
 const CARD_H = getBracketMatchCardHeight(ROW_H);
 const CONN_GAP = 56;
@@ -454,6 +465,8 @@ const PlayerRow = ({
   score,
   otherScore,
   isWinner,
+  isLoser,
+  isLive,
   isSelected,
   pickState,
   isHoveredTeam,
@@ -470,6 +483,8 @@ const PlayerRow = ({
   score: number | null;
   otherScore: number | null;
   isWinner: boolean;
+  isLoser?: boolean;
+  isLive?: boolean;
   isSelected?: boolean;
   pickState?: PickVisualState | null;
   isHoveredTeam: boolean;
@@ -482,38 +497,42 @@ const PlayerRow = ({
 }) => {
   const canPick =
     typeof onPick === "function" && Number.isFinite(Number(teamId));
+  const isTbd = !isHoverableTeamId(teamId);
 
   const stateToneCls = getBracketRowStateClass({
     isHoveredTeam,
     pickState,
     isWinner,
+    isLoser,
+    isTbd,
   });
 
   const hoverCls = bracketRowHoverClass(hasHover, isHoveredTeam);
+  const scoreToneCls =
+    pickState || isHoveredTeam
+      ? ""
+      : isLive
+        ? "text-[#FF4A3D]"
+        : isWinner
+          ? "text-[#F2F0EB]"
+          : "text-[#9A9893]";
 
   return (
     <div
-      className={`${BRACKET_ROW_BASE_CLASS} ${canPick || isHoverableTeamId(teamId) ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls}`}
-      style={{ height: ROW_H }}
-      onMouseEnter={() =>
-        onHoverTeam(
-          isHoverableTeamId(teamId)
-            ? { teamId, matchId, round: matchRound }
-            : null,
-        )
-      }
-      onMouseLeave={() => onHoverTeam(null)}
+      className={`${BRACKET_ROW_SPLIT_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls}`}
+      // Chia đều chiều cao hộp: tâm giữa 2 hàng khớp getMatchCardConnectorY
+      style={{ flex: "1 1 0" }}
       onClick={() => {
         if (!canPick || !teamId) return;
         onPick(teamId);
       }}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[13px]">
-        <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
-        {name}
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-sm">
+        {isTbd ? null : <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} name={name} />}
+        <span className="min-w-0 truncate">{name}</span>
       </span>
-      <span className="ml-2 w-6 text-right text-sm font-bold tabular-nums">
-        {formatBracketSideScore(score, otherScore)}
+      <span className={`${BRACKET_SCORE_CELL_CLASS} ${scoreToneCls}`}>
+        {isTbd ? "" : formatBracketSideScore(score, otherScore)}
       </span>
     </div>
   );
@@ -536,33 +555,30 @@ const AdvancesSlot = ({
   const isHovered = Boolean(teamId && hoveredTeamId === teamId);
   const hoverCls = bracketRowHoverClass(hasHover, isHovered);
 
+  const isTbd = !isHoverableTeamId(teamId);
+
   return (
     <div
-      className={`${BRACKET_CARD_CLASS} flex flex-col overflow-hidden`}
+      className={`${BRACKET_CARD_CLASS} flex flex-col`}
       style={{ width: CARD_W, height: BRACKET_MATCH_TITLE_H + ROW_H }}
     >
       <div
-        className="flex shrink-0 items-center justify-center bg-[#D1D5DB] px-2 text-[10px] font-extrabold leading-tight tracking-wide text-neutral-900"
+        className="flex shrink-0 items-start text-xs font-bold text-[#F2F0EB]"
         style={{ height: BRACKET_MATCH_TITLE_H }}
       >
         Đi tiếp
       </div>
-      <div
-        className={`${BRACKET_ROW_BASE_CLASS} ${isHoverableTeamId(teamId) ? "cursor-pointer" : "cursor-default"} bg-[#141414] text-neutral-100 ${hoverCls}`}
-        style={{ height: ROW_H }}
-        onMouseEnter={() =>
-          onHoverTeam(
-            isHoverableTeamId(teamId)
-              ? { teamId: teamId!, matchId: -1, round: 99 }
-              : null,
-          )
-        }
-        onMouseLeave={() => onHoverTeam(null)}
-      >
-        <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[13px] font-semibold">
-          <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />
-          {teamName || "TBD"}
-        </span>
+      <div className={`${BRACKET_INNER_CARD_CLASS} flex flex-1 flex-col`}>
+        <div
+          className={`${BRACKET_ROW_SPLIT_CLASS} flex-1 cursor-default ${
+            isTbd ? BRACKET_ROW_TBD_CLASS : "bg-[#0B0B0B] font-bold text-[#F2F0EB]"
+          } ${hoverCls}`}
+        >
+          <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-sm">
+            {isTbd ? null : <BracketTeamIcon teamId={teamId} logoUrl={logoUrl} />}
+            <span className="min-w-0 truncate">{teamName || "TBD"}</span>
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -574,12 +590,15 @@ const MatchCard = ({
   hoveredTeamId,
   onHoverTeam,
   isInJourney,
+  fluid = false,
 }: {
   match: DisplayMatch;
   roundTitle: string;
   hoveredTeamId: number | null;
   onHoverTeam: (hover: BracketHover | null) => void;
   isInJourney: boolean;
+  /** Mobile: thẻ giãn hết chiều ngang. */
+  fluid?: boolean;
 }) => {
   const {
     selectedTeamByMatchId,
@@ -589,8 +608,6 @@ const MatchCard = ({
   } = useContext(PickemContext);
   const hasHover = hoveredTeamId !== null;
   const cardHoverCls = bracketCardHoverClass(hasHover, isInJourney);
-  const { game, slug } = useParams();
-  const matchParam = match.routeMatchId ? String(match.routeMatchId) : null;
   const realMatchId = toNumber(match.routeMatchId);
   const selectedTeamId = realMatchId
     ? selectedTeamByMatchId?.[realMatchId]
@@ -631,6 +648,10 @@ const MatchCard = ({
   };
 
   const canPick = Boolean(onPickTeam && realMatchId);
+  const isLive =
+    normalizeBracketMatchStatus(match.status, match.dateScheduled) ===
+    "ongoing";
+  const hasWinner = isMatchCompleted && Boolean(match.winner);
 
   const content = (
     <>
@@ -641,6 +662,8 @@ const MatchCard = ({
         score={match.s1}
         otherScore={match.s2}
         isWinner={isMatchCompleted && match.winner === match.p1}
+        isLoser={hasWinner && match.winner !== match.p1}
+        isLive={isLive}
         isSelected={selectedTeamId === match.teamAId}
         pickState={resolvePickState(match.teamAId)}
         isHoveredTeam={hoveredTeamId === match.teamAId}
@@ -658,6 +681,8 @@ const MatchCard = ({
         score={match.s2}
         otherScore={match.s1}
         isWinner={isMatchCompleted && match.winner === match.p2}
+        isLoser={hasWinner && match.winner !== match.p2}
+        isLive={isLive}
         isSelected={selectedTeamId === match.teamBId}
         pickState={resolvePickState(match.teamBId)}
         isHoveredTeam={hoveredTeamId === match.teamBId}
@@ -673,11 +698,12 @@ const MatchCard = ({
   if (!match.routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <BracketMatchCardShell
+        banPickMatchId={match.banPickOpen && !disableMatchLink ? realMatchId : null}
         title={roundTitle}
         status={match.status}
         dateScheduled={match.dateScheduled}
         className={`transition-opacity duration-150 ${cardHoverCls}`}
-        style={{ width: CARD_W, height: CARD_H }}
+        style={{ width: fluid ? "100%" : CARD_W, height: CARD_H }}
       >
         {content}
       </BracketMatchCardShell>
@@ -685,20 +711,22 @@ const MatchCard = ({
   }
 
   return (
-    <Link
-      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`block transition-all hover:outline hover:outline-1 hover:outline-white/20 ${cardHoverCls}`}
-      style={{ width: CARD_W }}
+    <MatchResultTrigger
+      matchId={match.routeMatchId}
+      ariaLabel={`Xem kết quả ${match.p1} – ${match.p2}`}
+      className={cardHoverCls}
+      style={{ width: fluid ? "100%" : CARD_W }}
     >
       <BracketMatchCardShell
         title={roundTitle}
         status={match.status}
         dateScheduled={match.dateScheduled}
-        style={{ width: CARD_W, height: CARD_H }}
+        isClickable
+        style={{ width: fluid ? "100%" : CARD_W, height: CARD_H }}
       >
         {content}
       </BracketMatchCardShell>
-    </Link>
+    </MatchResultTrigger>
   );
 };
 
@@ -751,7 +779,7 @@ const ElbowConnector = ({
           d={path}
           fill="none"
           stroke={BRACKET_CONN_BASE_STROKE}
-          strokeWidth={2}
+          strokeWidth={1}
           opacity={hasHover ? BRACKET_CONN_DIM_OPACITY : 1}
         />
       ) : (
@@ -823,7 +851,7 @@ const MergeConnector = ({
             x2={midX}
             y2={y}
             stroke={BRACKET_CONN_BASE_STROKE}
-            strokeWidth={2}
+            strokeWidth={1}
             opacity={baseOpacity}
           />
         ),
@@ -835,7 +863,7 @@ const MergeConnector = ({
         x2={midX}
         y2={trunkMax}
         stroke={BRACKET_CONN_BASE_STROKE}
-        strokeWidth={2}
+        strokeWidth={1}
         opacity={baseOpacity}
       />
 
@@ -847,7 +875,7 @@ const MergeConnector = ({
           x2={eX}
           y2={normToY}
           stroke={BRACKET_CONN_BASE_STROKE}
-          strokeWidth={2}
+          strokeWidth={1}
           opacity={baseOpacity}
         />
       ) : null}
@@ -891,6 +919,69 @@ const MergeConnector = ({
   );
 };
 
+/* ── Tiêu đề nhánh / vòng (design/Main.dc.html) ── */
+/** "Nhánh thắng" (22px) + khoảng cách. */
+const SECTION_TITLE_H = 40;
+/** Tiêu đề vòng: kẻ 2px, tên vòng, ngày — rồi khoảng cách tới thẻ đầu tiên. */
+const ROUND_HEAD_H = 56;
+const SECTION_HEAD_H = SECTION_TITLE_H + ROUND_HEAD_H;
+/** Từ đáy nhánh thắng tới thẻ đầu nhánh thua: khoảng trống + tiêu đề nhánh thua. */
+const LOWER_SECTION_GAP = 48 + SECTION_HEAD_H;
+/** Tiêu đề "Chung kết tổng" đặt ngay trên thẻ CK. */
+const FINAL_HEAD_H = 64;
+
+type BracketHeading =
+  | { kind: "section"; x: number; y: number; title: string }
+  | { kind: "round"; x: number; y: number; title: string; meta?: string }
+  | { kind: "final"; x: number; y: number; title: string; meta?: string };
+
+const BracketHeadings = ({ items }: { items: BracketHeading[] }) => (
+  <>
+    {items.map((item) =>
+      item.kind === "section" ? (
+        <h2
+          key={`s-${item.x}-${item.y}`}
+          className="absolute m-0 whitespace-nowrap text-[22px] font-extrabold leading-[1.3] tracking-[-0.01em]"
+          style={{ left: item.x, top: item.y }}
+        >
+          {item.title}
+        </h2>
+      ) : (
+        <div
+          key={`r-${item.x}-${item.y}`}
+          className="absolute border-t-2 border-[#F2F0EB] pt-1.5"
+          style={{ left: item.x, top: item.y, width: CARD_W }}
+        >
+          <div
+            className={
+              item.kind === "final"
+                ? "text-[22px] font-extrabold leading-[1.3] tracking-[-0.01em]"
+                : "text-[13px] font-bold"
+            }
+          >
+            {item.title}
+          </div>
+          {item.meta ? (
+            <div className="text-[13px] text-[#9A9893]">{item.meta}</div>
+          ) : null}
+        </div>
+      ),
+    )}
+  </>
+);
+
+/** Ngày của vòng = ngày sớm nhất trong các trận của vòng: "Thứ Năm, 9/10". */
+const formatRoundDate = (matches: DisplayMatch[]) => {
+  const times = matches
+    .map((match) => new Date(String(match.dateScheduled ?? "")).getTime())
+    .filter((time) => Number.isFinite(time));
+  if (!times.length) return undefined;
+
+  const date = new Date(Math.min(...times));
+  const weekday = date.toLocaleDateString("vi-VN", { weekday: "long" });
+  return `${weekday.charAt(0).toLocaleUpperCase("vi-VN")}${weekday.slice(1)}, ${date.getDate()}/${date.getMonth() + 1}`;
+};
+
 const DoubleElimBracket = ({
   bracketId,
   selectedTeamByMatchId,
@@ -902,6 +993,7 @@ const DoubleElimBracket = ({
   const outletContext = useOutletContext<BracketOutletContext | undefined>();
   const tournament = outletContext?.tournament;
   const [hover, setHover] = useState<BracketHover | null>(null);
+  const isMobile = useIsMobile();
   const hoveredTeamId = hover?.teamId ?? null;
 
   const withPickemContext = (content: ReactNode) => (
@@ -989,6 +1081,7 @@ const DoubleElimBracket = ({
           routeMatchId: Number(match.id),
           status: String(match.status ?? "").trim(),
           dateScheduled: match.date_scheduled ?? null,
+          banPickOpen: isBanPickOpenStatus(match.ban_pick_status),
           round: Number(match.round_number ?? 0),
           matchNo: Number(match.match_no ?? 0),
           nextMatchId: toNumber(match.next_match_id),
@@ -1222,13 +1315,13 @@ const DoubleElimBracket = ({
   );
 
   if (isLoading) {
-    return <p className="text-sm text-[#EEEEEE]">Ă„Âang tĂ¡ÂºÂ£i bracket...</p>;
+    return <p className="text-sm text-[#9A9893]">Đang tải nhánh đấu...</p>;
   }
 
   if (isError) {
     return (
       <p className="text-sm text-destructive">
-        KhÄ‚Â´ng tĂ¡ÂºÂ£i Ă„â€˜Ă†Â°Ă¡Â»Â£c dĂ¡Â»Â¯ liĂ¡Â»â€¡u double elimination.
+        Không tải được dữ liệu nhánh đấu loại kép.
       </p>
     );
   }
@@ -1242,7 +1335,19 @@ const DoubleElimBracket = ({
   const totalRounds = rounds.length;
   const firstRoundMatchCount = rounds[0]?.[1]?.length ?? 0;
   const isAdvanceMode = Boolean(fourTeamAdvanceSpecial);
+
+  // Layout có tiêu đề nhánh/vòng: thẻ trận chỉ cần mã ngắn U1, L1, CK
+  const shortCodes = new Map<number, string>();
+  const assignCodes = (prefix: string, groups: DisplayMatch[][]) => {
+    let n = 0;
+    groups.flat().forEach((match) => {
+      n += 1;
+      shortCodes.set(match.id, `${prefix}${n}`);
+    });
+  };
+
   const getMatchTitle = (match: DisplayMatch) =>
+    shortCodes.get(match.id) ??
     formatDoubleElimMatchFooterTitle(
       getDoubleElimRoundTitle(
         match.round,
@@ -1253,6 +1358,58 @@ const DoubleElimBracket = ({
       ),
       match.matchNo,
     );
+
+  if (isMobile) {
+    // Nhánh suy ra từ tên vòng (API không có trường nhánh thắng/thua)
+    const sectionOf = (title: string) => {
+      const upper = title.toLocaleUpperCase("vi-VN");
+      if (/TỔNG|QUYẾT ĐỊNH/.test(upper)) return "Chung kết";
+      if (/NHÁNH TRÊN|NHÁNH THẮNG|MỞ MÀN/.test(upper)) return "Nhánh thắng";
+      if (/NHÁNH THUA|LOẠI|TRANH HẠNG/.test(upper)) return "Nhánh thua";
+      return undefined;
+    };
+    const toSentence = (value: string) => {
+      const lower = value.toLocaleLowerCase("vi-VN");
+      return lower.charAt(0).toLocaleUpperCase("vi-VN") + lower.slice(1);
+    };
+    const mobileRounds = rounds.map(([round, matches]) => {
+      const full = getDoubleElimRoundTitle(
+        round,
+        totalRounds,
+        firstRoundMatchCount,
+        teamCount || inferredTeamCount,
+        { isAdvanceMode },
+      );
+      const short = toSentence(full).replace(/s*nhánh (trên|thua|thắng)$/i, "");
+      return {
+        key: `r${round}`,
+        section: sectionOf(full),
+        title: short || toSentence(full),
+        fullTitle: toSentence(full),
+        meta: formatRoundDate(matches),
+        groups: [{ key: "all", matches }],
+      };
+    });
+    // Có vòng không xác định được nhánh → hiển thị phẳng theo vòng
+    const flat = mobileRounds.some((round) => !round.section);
+    return withPickemContext(
+      <MobileBracket
+        rounds={flat ? mobileRounds.map((round) => ({ ...round, section: undefined })) : mobileRounds}
+        getMatchKey={(match) => match.id}
+        isMatchDone={(match) => isBracketMatchCompletedStatus(match.status)}
+        renderMatch={(match) => (
+          <MatchCard
+            match={match}
+            roundTitle={getMatchTitle(match)}
+            hoveredTeamId={null}
+            onHoverTeam={() => {}}
+            isInJourney
+            fluid
+          />
+        )}
+      />,
+    );
+  }
 
   if (fourTeamAdvanceSpecial) {
     const x1 = 0;
@@ -1501,7 +1658,7 @@ const DoubleElimBracket = ({
     const y2B = (y1C + y1D + CARD_H) / 2 - CARD_H / 2;
     const y3 = (y2A + y2B + CARD_H) / 2 - CARD_H / 2;
 
-    const lowerBase = y1D + CARD_H + 120;
+    const lowerBase = y1D + CARD_H + LOWER_SECTION_GAP;
     const y4A = lowerBase;
     const y4B = lowerBase + CARD_H + 42;
     const y5A = y4A;
@@ -1529,8 +1686,30 @@ const DoubleElimBracket = ({
     const c7 = getMatchCardConnectorY(y7 + HEADER_H, ROW_H);
     const c8 = getMatchCardConnectorY(y8 + HEADER_H, ROW_H);
 
+    const { r1, r2, r3, r4, r5, r6, r7, r8 } = eightTeamSpecial;
+    assignCodes("U", [r1, r2, [r3]]);
+    assignCodes("L", [r4, r5, [r6], [r7]]);
+    shortCodes.set(r8.id, "CK");
+
+    // Toạ độ tiêu đề theo khung ngoài (sơ đồ bị đẩy xuống SECTION_HEAD_H):
+    // tiêu đề nhánh thua nằm ngay SECTION_HEAD_H phía trên thẻ đầu nhánh thua
+    const lowerTop = lowerBase;
+    const headings: BracketHeading[] = [
+      { kind: "section", x: x1, y: 0, title: "Nhánh thắng" },
+      { kind: "round", x: x1, y: SECTION_TITLE_H, title: "Tứ kết", meta: formatRoundDate(r1) },
+      { kind: "round", x: x2, y: SECTION_TITLE_H, title: "Bán kết", meta: formatRoundDate(r2) },
+      { kind: "round", x: x4, y: SECTION_TITLE_H, title: "Chung kết nhánh thắng", meta: formatRoundDate([r3]) },
+      { kind: "section", x: x1, y: lowerTop, title: "Nhánh thua" },
+      { kind: "round", x: x1, y: lowerTop + SECTION_TITLE_H, title: "Vòng 1", meta: formatRoundDate(r4) },
+      { kind: "round", x: x2, y: lowerTop + SECTION_TITLE_H, title: "Vòng 2", meta: formatRoundDate(r5) },
+      { kind: "round", x: x3, y: lowerTop + SECTION_TITLE_H, title: "Bán kết", meta: formatRoundDate([r6]) },
+      { kind: "round", x: x4, y: lowerTop + SECTION_TITLE_H, title: "Chung kết nhánh thua", meta: formatRoundDate([r7]) },
+      { kind: "final", x: x5, y: SECTION_HEAD_H + y8 - FINAL_HEAD_H, title: "Chung kết tổng", meta: formatRoundDate([r8]) },
+    ];
+
     return withPickemContext(
-      <div className="space-y-3">
+      <div className="relative" style={{ paddingTop: SECTION_HEAD_H }}>
+        <BracketHeadings items={headings} />
         <div className="relative" style={{ width: totalW, height: totalH }}>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
@@ -1848,7 +2027,7 @@ const DoubleElimBracket = ({
     const y2B = y1B;
     const y3 = (y2A + y2B + CARD_H) / 2 - CARD_H / 2;
 
-    const lowerBase = y1B + CARD_H + 120;
+    const lowerBase = y1B + CARD_H + LOWER_SECTION_GAP;
     const y4A = lowerBase;
     const y4B = lowerBase + CARD_H + 40;
     const y5 = (y4A + y4B + CARD_H) / 2 - CARD_H / 2;
@@ -1869,8 +2048,27 @@ const DoubleElimBracket = ({
     const c6 = getMatchCardConnectorY(y6 + HEADER_H, ROW_H);
     const c7 = getMatchCardConnectorY(y7 + HEADER_H, ROW_H);
 
+    const { r1, r2, r3, r4, r5, r6, r7 } = sixTeamSpecial;
+    assignCodes("U", [r1, r2, [r3]]);
+    assignCodes("L", [r4, [r5], [r6]]);
+    shortCodes.set(r7.id, "CK");
+
+    const lowerTop = lowerBase;
+    const headings: BracketHeading[] = [
+      { kind: "section", x: x1, y: 0, title: "Nhánh thắng" },
+      { kind: "round", x: x1, y: SECTION_TITLE_H, title: "Vòng loại", meta: formatRoundDate(r1) },
+      { kind: "round", x: x2, y: SECTION_TITLE_H, title: "Bán kết", meta: formatRoundDate(r2) },
+      { kind: "round", x: x4, y: SECTION_TITLE_H, title: "Chung kết nhánh thắng", meta: formatRoundDate([r3]) },
+      { kind: "section", x: x1, y: lowerTop, title: "Nhánh thua" },
+      { kind: "round", x: x1, y: lowerTop + SECTION_TITLE_H, title: "Vòng 1", meta: formatRoundDate(r4) },
+      { kind: "round", x: x2, y: lowerTop + SECTION_TITLE_H, title: "Vòng 2", meta: formatRoundDate([r5]) },
+      { kind: "round", x: x4, y: lowerTop + SECTION_TITLE_H, title: "Chung kết nhánh thua", meta: formatRoundDate([r6]) },
+      { kind: "final", x: x5, y: SECTION_HEAD_H + y7 - FINAL_HEAD_H, title: "Chung kết tổng", meta: formatRoundDate([r7]) },
+    ];
+
     return withPickemContext(
-      <div className="space-y-3">
+      <div className="relative" style={{ paddingTop: SECTION_HEAD_H }}>
+        <BracketHeadings items={headings} />
         <div className="relative" style={{ width: totalW, height: totalH }}>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
@@ -2064,7 +2262,7 @@ const DoubleElimBracket = ({
     const y1B = CARD_H + 68;
     const y2 = (y1A + y1B + CARD_H) / 2 - CARD_H / 2;
 
-    const y3 = y1B + CARD_H + 92;
+    const y3 = y1B + CARD_H + LOWER_SECTION_GAP;
     const y4 = y3;
     const y5 = (y2 + y4 + CARD_H) / 2 - CARD_H / 2;
 
@@ -2084,8 +2282,26 @@ const DoubleElimBracket = ({
     const c4 = getMatchCardConnectorY(y4 + HEADER_H, ROW_H);
     const c5 = getMatchCardConnectorY(y5 + HEADER_H, ROW_H);
 
+    const { match1A, match1B, match2, match3, match4, match5 } =
+      fourTeamSpecial;
+    assignCodes("U", [[match1A, match1B], [match2]]);
+    assignCodes("L", [[match3], [match4]]);
+    shortCodes.set(match5.id, "CK");
+
+    const lowerTop = y3;
+    const headings: BracketHeading[] = [
+      { kind: "section", x: x1, y: 0, title: "Nhánh thắng" },
+      { kind: "round", x: x1, y: SECTION_TITLE_H, title: "Bán kết", meta: formatRoundDate([match1A, match1B]) },
+      { kind: "round", x: x2, y: SECTION_TITLE_H, title: "Chung kết nhánh thắng", meta: formatRoundDate([match2]) },
+      { kind: "section", x: x1, y: lowerTop, title: "Nhánh thua" },
+      { kind: "round", x: x1, y: lowerTop + SECTION_TITLE_H, title: "Tranh hạng 4", meta: formatRoundDate([match3]) },
+      { kind: "round", x: x2, y: lowerTop + SECTION_TITLE_H, title: "Chung kết nhánh thua", meta: formatRoundDate([match4]) },
+      { kind: "final", x: x5, y: SECTION_HEAD_H + y5 - FINAL_HEAD_H, title: "Chung kết tổng", meta: formatRoundDate([match5]) },
+    ];
+
     return withPickemContext(
-      <div className="space-y-3">
+      <div className="relative" style={{ paddingTop: SECTION_HEAD_H }}>
+        <BracketHeadings items={headings} />
         <div className="relative" style={{ width: totalW, height: totalH }}>
 
           <div className="absolute" style={{ left: x1, top: y1A + HEADER_H }}>
@@ -2216,7 +2432,7 @@ const DoubleElimBracket = ({
 
   if (!layout) {
     return (
-      <p className="text-sm text-[#EEEEEE]">KhÄ‚Â´ng thĂ¡Â»Æ’ dĂ¡Â»Â±ng layout bracket.</p>
+      <p className="text-sm text-[#9A9893]">Không dựng được layout nhánh đấu.</p>
     );
   }
 

@@ -20,19 +20,17 @@ type TournamentSubpageHeaderProps = {
 export const TournamentSubpageHeader = ({
   title,
   subtitle,
-  bannerUrl,
   backTo,
   backLabel = "Quay lại",
   leftSlot,
   rightSlot,
 }: TournamentSubpageHeaderProps) => {
-  const hasBanner = Boolean(String(bannerUrl ?? "").trim());
   const displayTitle = String(title ?? "").trim() || "Giải đấu";
 
   const defaultBack = backTo ? (
     <Link
       to={backTo}
-      className="inline-flex h-8 items-center gap-1.5 rounded border border-neutral-600 bg-black/30 px-2.5 text-xs font-semibold text-neutral-300 backdrop-blur-sm transition-colors hover:border-neutral-500 hover:text-white"
+      className="inline-flex h-11 items-center gap-1.5 text-sm font-semibold hover:underline hover:underline-offset-4"
     >
       <ArrowLeft className="h-3.5 w-3.5" />
       <span className="hidden sm:inline">{backLabel}</span>
@@ -43,21 +41,7 @@ export const TournamentSubpageHeader = ({
   const right = rightSlot ?? null;
 
   return (
-    <header className="relative overflow-hidden border-b border-neutral-700 bg-[#141414] text-white">
-      {hasBanner ? (
-        <>
-          <div
-            className="absolute inset-0 scale-105 bg-cover bg-center"
-            style={{ backgroundImage: `url(${bannerUrl})` }}
-            aria-hidden
-          />
-          <div className="absolute inset-0 bg-[#0a0a0a]/75" aria-hidden />
-          <div
-            className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/55 to-[#0a0a0a]/35"
-            aria-hidden
-          />
-        </>
-      ) : null}
+    <header className="relative border-b border-[#F2F0EB] bg-[#0B0B0B] text-[#F2F0EB]">
 
       {/* Mobile: slots on top row, title below — tránh đè chữ */}
       <div className="relative mx-auto px-4 py-3 md:hidden">
@@ -70,10 +54,10 @@ export const TournamentSubpageHeader = ({
           </div>
         )}
         <div className="text-center">
-          <p className="text-[13px] font-bold uppercase leading-snug tracking-normal text-white">
+          <p className="text-[15px] font-extrabold leading-snug">
             {displayTitle}
           </p>
-          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+          <p className="mt-0.5 text-xs text-[#9A9893]">
             {subtitle}
           </p>
         </div>
@@ -82,10 +66,10 @@ export const TournamentSubpageHeader = ({
       {/* Desktop: title centered, slots on sides */}
       <div className="relative mx-auto hidden min-h-[80px] items-center px-8 py-3.5 md:flex">
         <div className="pointer-events-none absolute inset-x-24 top-1/2 z-0 -translate-y-1/2 text-center">
-          <p className="mx-auto max-w-[min(720px,70%)] truncate text-[15px] font-bold uppercase leading-snug tracking-normal text-white">
+          <p className="mx-auto max-w-[min(720px,70%)] truncate text-[17px] font-extrabold leading-snug">
             {displayTitle}
           </p>
-          <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+          <p className="mt-0.5 text-[13px] text-[#9A9893]">
             {subtitle}
           </p>
         </div>

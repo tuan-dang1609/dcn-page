@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useOutletContext, useParams } from "react-router-dom";
+import { useOutletContext } from "react-router-dom";
 import {
   getMatchesByBracketId,
   type Match as ApiMatch,
@@ -24,14 +24,19 @@ import {
   RoundConnector,
 } from "@/components/bracketConnectors";
 import {
-  BRACKET_ROW_BASE_CLASS,
+  BRACKET_ROW_SPLIT_CLASS,
+  BRACKET_SCORE_CELL_CLASS,
   formatBracketSideScore,
   getBracketMatchCardHeight,
   getMatchCardConnectorY,
   getBracketRowStateClass,
   isBracketMatchCompletedStatus,
+  isBanPickOpenStatus,
 } from "@/components/bracketTheme";
 import { BracketMatchCardShell } from "@/components/BracketMatchCardShell";
+import { MatchResultTrigger } from "@/components/MatchPanel";
+import MobileBracket from "@/components/MobileBracket";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const CARD_W = 252;
 const ROW_H = 42;
@@ -103,6 +108,8 @@ type DisplayMatch = {
   routeMatchId: number;
   status: string;
   dateScheduled?: string | null;
+  /** Phòng ban/pick đang mở (chờ / đang chạy). */
+  banPickOpen?: boolean;
   round: number;
   matchNo: number;
   nextMatchId: number | null;
@@ -197,6 +204,7 @@ const toDisplayMatches = (
         routeMatchId: matchId,
         status: String(match.status ?? "").trim(),
         dateScheduled: match.date_scheduled ?? null,
+        banPickOpen: isBanPickOpenStatus(match.ban_pick_status),
         round: Number(match.round_number ?? 0),
         matchNo: Number(match.match_no ?? 0),
         nextMatchId: toNumber(match.next_match_id),
@@ -359,6 +367,7 @@ interface PlayerRowProps {
   score: number | null;
   otherScore: number | null;
   isWinner: boolean;
+  isLoser?: boolean;
   isSelected?: boolean;
   pickState?: PickVisualState | null;
   isHoveredTeam: boolean;
@@ -377,6 +386,7 @@ const PlayerRow = ({
   score,
   otherScore,
   isWinner,
+  isLoser = false,
   isSelected,
   pickState,
   isHoveredTeam,
@@ -390,37 +400,39 @@ const PlayerRow = ({
   const canPick =
     typeof onPick === "function" && Number.isFinite(Number(teamId));
 
+  const isTbd = !isHoverableTeamId(teamId);
   const stateToneCls = getBracketRowStateClass({
     isHoveredTeam,
     pickState,
     isWinner,
+    isLoser,
+    isTbd,
   });
 
   const hoverCls = bracketRowHoverClass(hasHover, isHoveredTeam);
+  const scoreToneCls =
+    pickState || isHoveredTeam
+      ? ""
+      : isWinner
+        ? "text-[#F2F0EB]"
+        : "text-[#9A9893]";
 
   return (
     <div
-      className={`${BRACKET_ROW_BASE_CLASS} ${canPick || isHoverableTeamId(teamId) ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls}`}
-      style={{ height: ROW_H }}
-      onMouseEnter={() =>
-        onHoverTeam(
-          isHoverableTeamId(teamId)
-            ? { teamId, matchId, round: matchRound }
-            : null,
-        )
-      }
-      onMouseLeave={() => onHoverTeam(null)}
+      className={`${BRACKET_ROW_SPLIT_CLASS} ${canPick ? "cursor-pointer" : "cursor-default"} ${stateToneCls} ${hoverCls}`}
+      // Chia đều chiều cao hộp: tâm giữa 2 hàng khớp đường nối
+      style={{ flex: "1 1 0" }}
       onClick={() => {
         if (!canPick || !teamId) return;
         onPick(teamId);
       }}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-[13px]">
-        <BracketTeamIcon teamId={teamId} logoUrl={logo_url} />
-        {name}
+      <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-sm">
+        {isTbd ? null : <BracketTeamIcon teamId={teamId} logoUrl={logo_url} name={name} />}
+        <span className="min-w-0 truncate">{name}</span>
       </span>
-      <span className="ml-2 w-6 text-right text-sm font-bold tabular-nums">
-        {formatBracketSideScore(score, otherScore)}
+      <span className={`${BRACKET_SCORE_CELL_CLASS} ${scoreToneCls}`}>
+        {isTbd ? "" : formatBracketSideScore(score, otherScore)}
       </span>
     </div>
   );
@@ -432,12 +444,15 @@ const MatchCard = ({
   hoveredTeamId,
   onHoverTeam,
   isInJourney = true,
+  fluid = false,
 }: {
   match: DisplayMatch;
   roundTitle: string;
   hoveredTeamId: number | null;
   onHoverTeam: (hover: BracketHover | null) => void;
   isInJourney?: boolean;
+  /** Mobile: thẻ giãn hết chiều ngang. */
+  fluid?: boolean;
 }) => {
   const {
     selectedTeamByMatchId,
@@ -459,8 +474,6 @@ const MatchCard = ({
   } = match;
   const hasHover = hoveredTeamId !== null;
   const cardHoverCls = bracketCardHoverClass(hasHover, isInJourney);
-  const { game, slug } = useParams();
-  const matchParam = routeMatchId ? String(routeMatchId) : null;
   const realMatchId = toNumber(routeMatchId);
   const selectedTeamId = realMatchId
     ? selectedTeamByMatchId?.[realMatchId]
@@ -511,6 +524,7 @@ const MatchCard = ({
         score={s1}
         otherScore={s2}
         isWinner={isMatchCompleted && winner === p1}
+        isLoser={isMatchCompleted && Boolean(winner) && winner !== p1}
         isSelected={selectedTeamId === teamAId}
         pickState={resolvePickState(teamAId)}
         isHoveredTeam={hoveredTeamId === teamAId}
@@ -528,6 +542,7 @@ const MatchCard = ({
         score={s2}
         otherScore={s1}
         isWinner={isMatchCompleted && winner === p2}
+        isLoser={isMatchCompleted && Boolean(winner) && winner !== p2}
         isSelected={selectedTeamId === teamBId}
         pickState={resolvePickState(teamBId)}
         isHoveredTeam={hoveredTeamId === teamBId}
@@ -543,11 +558,12 @@ const MatchCard = ({
   if (!routeMatchId || disableMatchLink || canPick || !isMatchCompleted) {
     return (
       <BracketMatchCardShell
+        banPickMatchId={match.banPickOpen && !disableMatchLink ? realMatchId : null}
         title={roundTitle}
         status={match.status}
         dateScheduled={match.dateScheduled}
         className={`transition-opacity duration-150 ${cardHoverCls}`}
-        style={{ width: CARD_W, height: CARD_H }}
+        style={{ width: fluid ? "100%" : CARD_W, height: CARD_H }}
       >
         {content}
       </BracketMatchCardShell>
@@ -555,20 +571,22 @@ const MatchCard = ({
   }
 
   return (
-    <Link
-      to={`/tournament/${game ?? ""}/${slug ?? ""}/match/${matchParam}`}
-      className={`block transition-all hover:outline hover:outline-1 hover:outline-white/20 ${cardHoverCls}`}
-      style={{ width: CARD_W }}
+    <MatchResultTrigger
+      matchId={routeMatchId}
+      ariaLabel={`Xem kết quả ${p1} – ${p2}`}
+      className={cardHoverCls}
+      style={{ width: fluid ? "100%" : CARD_W }}
     >
       <BracketMatchCardShell
         title={roundTitle}
         status={match.status}
         dateScheduled={match.dateScheduled}
-        style={{ width: CARD_W, height: CARD_H }}
+        isClickable
+        style={{ width: fluid ? "100%" : CARD_W, height: CARD_H }}
       >
         {content}
       </BracketMatchCardShell>
-    </Link>
+    </MatchResultTrigger>
   );
 };
 
@@ -617,7 +635,7 @@ const Connector = ({
         x2={midX}
         y2={lY1}
         stroke={baseStroke}
-        strokeWidth={2}
+        strokeWidth={1}
         opacity={baseOpacity}
       />
       <line
@@ -626,7 +644,7 @@ const Connector = ({
         x2={midX}
         y2={lY2}
         stroke={baseStroke}
-        strokeWidth={2}
+        strokeWidth={1}
         opacity={baseOpacity}
       />
       <line
@@ -635,7 +653,7 @@ const Connector = ({
         x2={midX}
         y2={Math.max(lY1, lY2, lOut)}
         stroke={baseStroke}
-        strokeWidth={2}
+        strokeWidth={1}
         opacity={baseOpacity}
       />
       <line
@@ -644,7 +662,7 @@ const Connector = ({
         x2={CONN_W}
         y2={lOut}
         stroke={baseStroke}
-        strokeWidth={2}
+        strokeWidth={1}
         opacity={baseOpacity}
       />
 
@@ -695,6 +713,7 @@ const SingleElimBracket = ({
   const outletContext = useOutletContext<BracketOutletContext | undefined>();
   const tournament = outletContext?.tournament;
   const [hover, setHover] = useState<BracketHover | null>(null);
+  const isMobile = useIsMobile();
   const hoveredTeamId = hover?.teamId ?? null;
   const registeredTeams = tournamentRegistered ?? tournament?.registered ?? [];
 
@@ -856,6 +875,39 @@ const SingleElimBracket = ({
   if (!projectedMatches.length) {
     return (
       <p className="text-sm text-[#EEEEEE]">Chưa có match trong bracket này.</p>
+    );
+  }
+
+  if (isMobile) {
+    const mobileRounds = roundGroups.map((group, index) => ({
+      key: `r${group.round}`,
+      title: getSingleElimRoundTitle(index + 1, roundGroups.length, group.round),
+      groups: [{ key: "all", matches: group.matches }],
+    }));
+    return (
+      <PickemContext.Provider
+        value={{
+          selectedTeamByMatchId,
+          pickStatusByMatchId,
+          onPickTeam,
+          disableMatchLink,
+        }}
+      >
+        <MobileBracket
+          rounds={mobileRounds}
+          getMatchKey={(match) => match.id}
+          isMatchDone={(match) => isBracketMatchCompletedStatus(match.status)}
+          renderMatch={(match, round) => (
+            <MatchCard
+              match={match}
+              roundTitle={`${round.title} #${match.matchNo || 1}`}
+              hoveredTeamId={null}
+              onHoverTeam={() => {}}
+              fluid
+            />
+          )}
+        />
+      </PickemContext.Provider>
     );
   }
 

@@ -113,6 +113,8 @@ export interface Match {
   score_a?: number | null;
   score_b?: number | null;
   winner_team_id?: number | null;
+  /** ban_picks.status: waiting | running | done ("active" = phiên cũ). */
+  ban_pick_status?: string | null;
   team_a?: {
     id?: number | null;
     name?: string | null;
@@ -140,6 +142,9 @@ export interface TournamentTeamPlayer {
   nickname?: string;
   profile_picture?: string;
   riot_account?: string | null;
+  /** puuid theo key Valorant / LMHT (Riot mã hoá puuid theo từng ứng dụng). */
+  riot_puuid_val?: string | null;
+  riot_puuid_lol?: string | null;
   role_in_team?: string;
 }
 
@@ -157,6 +162,8 @@ export interface MatchLinkedPlayer {
   nickname?: string;
   profile_picture?: string | null;
   riot_account?: string | null;
+  riot_puuid_val?: string | null;
+  riot_puuid_lol?: string | null;
   tournament_team_id?: number | string;
 }
 
