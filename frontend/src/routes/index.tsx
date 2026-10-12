@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, type ReactNode } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Outlet } from "react-router-dom";
 import PageLoader from "@/components/PageLoader";
+import BanPickAlertBar from "@/components/BanPickAlertBar";
 
 const BRAND_TITLE = "DCN Championship Series";
 
@@ -98,4 +99,12 @@ const routes = [
   { path: "*", element: withTitle(withSuspense(<NotFound />), "404") },
 ];
 
-export const router = createBrowserRouter(routes);
+/** Khung chung mọi trang: dải báo ban/pick cho chủ đội ở trên cùng. */
+const RootShell = () => (
+  <>
+    <BanPickAlertBar />
+    <Outlet />
+  </>
+);
+
+export const router = createBrowserRouter([{ element: <RootShell />, children: routes }]);

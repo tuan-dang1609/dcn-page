@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import HeroBanner from "@/components/HeroBanner";
-import Navigation from "@/components/Navigation";
-import InfoGrid from "@/components/InfoGrid";
 import Timeline from "@/components/Timeline";
 import Sidebar from "@/components/Sidebar";
 import PageLoader from "@/components/PageLoader";
-import { TournamentSubpageHeader } from "@/components/TournamentSubpageHeader";
+import {
+  PAGE_FRAME_CLASS,
+  TournamentMasthead,
+  TournamentPageIntro,
+} from "@/components/TournamentMasthead";
 import { useTournamentBySlug } from "@/hooks/useTournamentBySlug";
 import {
   useTournamentPrefetch,
@@ -16,10 +18,10 @@ import { Outlet, useMatch, useLocation, useParams } from "react-router-dom";
 
 const TAB_SUBTITLE: Record<TournamentTab, string> = {
   overview: "Tổng quan",
-  participants: "Danh sách",
+  participants: "Đội tham gia",
   bracket: "Nhánh đấu",
-  leaderboard: "BXH",
-  rule: "Luật",
+  leaderboard: "Xếp hạng",
+  rule: "Luật thi đấu",
 };
 
 const Layout = () => {
@@ -56,7 +58,6 @@ const Layout = () => {
   const location = useLocation();
 
   const tournamentTitle = tournament?.name?.trim() || "Giải đấu";
-  const bannerUrl = tournament?.banner_url ?? null;
 
   useEffect(() => {
     const pageTitle = isMatchDetailPage
@@ -113,72 +114,47 @@ const Layout = () => {
     );
   }
 
+  const masthead = (
+    <TournamentMasthead name={tournament?.name} tournamentId={tournament?.id} />
+  );
+
   if (isTournamentHome && isLoading && !tournament) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="space-y-8">
-          <HeroBanner tournament={null} />
-          <div className="flex justify-center px-4 md:px-8">
-            <div className="w-full max-w-4xl">
-              <Navigation tournamentId={null} />
-            </div>
-          </div>
-          <div className="px-4 pb-10 md:px-8">
-            <PageLoader label="Đang tải giải đấu..." fullScreen={false} />
-          </div>
-        </div>
+        {masthead}
+        <PageLoader label="Đang tải giải đấu..." fullScreen={false} />
       </div>
     );
   }
 
-  // Overview: full hero. Other tabs: compact header + banner background.
+  // Tổng quan: tiêu đề giải + thông tin + đăng ký, rồi lịch trình và cột thông tin.
   if (isTournamentHome) {
     return (
-      <div className="min-h-screen bg-background">
-        <div className="space-y-8">
-          <HeroBanner tournament={tournament} />
-          <div className="flex justify-center px-4 md:px-8">
-            <div className="w-full max-w-4xl">
-              <Navigation tournamentId={tournament?.id} />
-            </div>
-          </div>
-          <div className="px-4 pb-10 md:px-8">
-            <div
-              className={`grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8 xl:grid-cols-[minmax(0,1fr)_400px] ${TOURNAMENT_PAGE_BG_CLASS}`}
-            >
-              <div className="min-w-0 space-y-6">
-                <InfoGrid tournament={tournament} isLoading={isLoading} />
-                <Timeline tournament={tournament} />
-              </div>
-              <div className="min-w-0">
-                <Sidebar tournament={tournament} isLoading={isLoading} />
-              </div>
-            </div>
-          </div>
+      <div className={`min-h-screen bg-background ${TOURNAMENT_PAGE_BG_CLASS}`}>
+        {masthead}
+        <HeroBanner tournament={tournament} />
+        <div
+          className={`${PAGE_FRAME_CLASS} grid grid-cols-1 gap-12 pb-20 pt-12 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-16`}
+        >
+          <Timeline tournament={tournament} />
+          <Sidebar tournament={tournament} isLoading={isLoading} />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="space-y-6">
-        <TournamentSubpageHeader
-          title={tournamentTitle}
-          subtitle={TAB_SUBTITLE[activeTab]}
-          bannerUrl={bannerUrl}
-        />
-        <div className="flex justify-center px-4 md:px-8">
-          <div className="w-full max-w-4xl">
-            <Navigation tournamentId={tournament?.id} />
-          </div>
-        </div>
-        <div className="px-4 pb-10 md:px-8">
-          <div className={TOURNAMENT_PAGE_BG_CLASS}>
-            <Outlet context={{ tournament, isLoading, refetch }} />
-          </div>
-        </div>
-      </div>
+    <div className={`min-h-screen bg-background ${TOURNAMENT_PAGE_BG_CLASS}`}>
+      {masthead}
+      <TournamentPageIntro
+        eyebrow={tournament?.game_name || tournament?.short_name}
+        title={TAB_SUBTITLE[activeTab]}
+        tournament={tournament}
+        isLoading={isLoading}
+      />
+      <main className={`${PAGE_FRAME_CLASS} pb-16 pt-10`}>
+        <Outlet context={{ tournament, isLoading, refetch }} />
+      </main>
     </div>
   );
 };

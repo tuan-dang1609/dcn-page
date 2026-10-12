@@ -1,50 +1,51 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Quicksand:wght@300..700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 @config "../tailwind.config.ts";
 
 @layer base {
+  /*
+   * Palette "bảng đấu in" (design/Main.dc.html):
+   * nền #0B0B0B · chữ #F2F0EB · phụ #9A9893 · kẻ #2C2B29 · nhấn #FF4A3D.
+   * Góc vuông, không bóng đổ. Nút/tab chính = đảo màu (nền chữ, chữ nền).
+   */
   :root {
-    --background: 240 10% 5%;
-    --foreground: 40 10% 90%;
+    --background: 0 0% 4%;
+    --foreground: 43 21% 94%;
 
-    --card: 240 8% 10%;
-    --card-foreground: 40 10% 90%;
+    --card: 0 0% 4%;
+    --card-foreground: 43 21% 94%;
 
-    --popover: 240 8% 10%;
-    --popover-foreground: 40 10% 90%;
-    --border: 220 15% 28%;
-    --input: 220 15% 28%;
-    --ring: 50 100% 55%;
+    --popover: 0 0% 6%;
+    --popover-foreground: 43 21% 94%;
 
-    --radius: 1rem;
+    --neo-shadow: none;
+    --neo-shadow-sm: none;
+    --neo-shadow-lg: none;
+    --neo-border: 1px solid hsl(40 4% 17%);
+    --neo-border-sm: 1px solid hsl(40 4% 17%);
+    --primary: 43 21% 94%;
+    --primary-foreground: 0 0% 4%;
 
-    --neo-shadow: 4px 4px 0px hsl(0 0% 0% / 0.5);
-    --neo-shadow-sm: 2px 2px 0px hsl(0 0% 0% / 0.5);
-    --neo-shadow-lg: 6px 6px 0px hsl(0 0% 0% / 0.5);
-    --neo-border: 3px solid hsl(220 15% 28%);
-    --neo-border-sm: 2px solid hsl(220 15% 28%);
-    --primary: 160 50% 45%;
-    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 9%;
+    --secondary-foreground: 43 21% 94%;
 
-    --secondary: 240 6% 18%;
-    --secondary-foreground: 40 10% 80%;
+    --muted: 0 0% 9%;
+    --muted-foreground: 43 3% 59%;
 
-    --muted: 240 6% 14%;
-    --muted-foreground: 240 5% 50%;
+    --accent: 4 100% 62%;
+    --accent-foreground: 0 0% 4%;
 
-    --accent: 160 50% 45%;
-    --accent-foreground: 0 0% 100%;
+    --destructive: 4 100% 62%;
+    --destructive-foreground: 0 0% 4%;
 
-    --destructive: 0 60% 50%;
-    --destructive-foreground: 0 0% 100%;
+    --border: 40 4% 17%;
+    --input: 40 4% 17%;
+    --ring: 43 21% 94%;
 
-    --border: 240 6% 16%;
-    --input: 240 6% 16%;
-    --ring: 160 50% 45%;
-
-    --radius: 0.625rem;
+    --radius: 0px;
 
     --success: 160 50% 40%;
     --success-foreground: 0 0% 100%;
@@ -52,14 +53,14 @@
     --warning: 35 80% 55%;
     --warning-foreground: 0 0% 100%;
 
-    --sidebar-background: 240 10% 5%;
-    --sidebar-foreground: 40 10% 90%;
-    --sidebar-primary: 160 50% 45%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 160 50% 45%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 240 6% 16%;
-    --sidebar-ring: 160 50% 45%;
+    --sidebar-background: 0 0% 4%;
+    --sidebar-foreground: 43 21% 94%;
+    --sidebar-primary: 43 21% 94%;
+    --sidebar-primary-foreground: 0 0% 4%;
+    --sidebar-accent: 0 0% 9%;
+    --sidebar-accent-foreground: 43 21% 94%;
+    --sidebar-border: 40 4% 17%;
+    --sidebar-ring: 43 21% 94%;
   }
 }
 @layer utilities {
@@ -115,7 +116,7 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: "Quicksand", sans-serif;
+    font-family: "Be Vietnam Pro", sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -126,8 +127,14 @@
   h4,
   h5,
   h6 {
-    font-family: "Quicksand", sans-serif;
-    font-weight: 700;
+    font-family: "Be Vietnam Pro", sans-serif;
+    font-weight: 800;
+    /* Không cắt dấu tiếng Việt ở tiêu đề lớn */
+    line-height: 1.15;
+  }
+
+  a:hover {
+    color: #ff4a3d;
   }
 }
 .reveal {

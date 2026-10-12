@@ -5,6 +5,7 @@ import { pool } from "../utils/db.js";
 import middleware from "../utils/middleware.js";
 import config from "../utils/config.js";
 import { syncSoloRegistrationsForUser } from "../utils/soloRiotSync.js";
+import { ensureRiotPuuidColumns, resolveRiotPuuids } from "../utils/riotPuuid.js";
 
 const usersRouter = new Elysia({ name: "Users" }).derive(
   middleware.deriveAuthContext,
@@ -592,15 +593,27 @@ usersRouter.get(
         throw new Error("invalid state");
       }
 
+      // puuid theo từng key (Valorant / LMHT) — tra ngay lúc tên vừa được Riot xác nhận
+      await ensureRiotPuuidColumns();
+      const puuids = await resolveRiotPuuids(riot.gameName, riot.tagLine);
+
       const { rows: existingOwners } = await pool.query(
         `
         SELECT id
         FROM users
-        WHERE lower(riot_account) = lower($1)
-          AND id <> $2
+        WHERE id <> $2
+          AND (
+            ($3::text IS NOT NULL AND riot_puuid_val = $3)
+            OR ($4::text IS NOT NULL AND riot_puuid_lol = $4)
+            OR (
+              riot_puuid_val IS NULL
+              AND riot_puuid_lol IS NULL
+              AND lower(riot_account) = lower($1)
+            )
+          )
         LIMIT 1
         `,
-        [riot.riotAccount, userId],
+        [riot.riotAccount, userId, puuids.val, puuids.lol],
       );
 
       if (existingOwners.length > 0) {
@@ -613,10 +626,17 @@ usersRouter.get(
         );
       }
 
-      await pool.query("UPDATE users SET riot_account = $1 WHERE id = $2", [
-        riot.riotAccount,
-        userId,
-      ]);
+      // Tra puuid lỗi (rate limit…) → giữ giá trị cũ; script backfill bổ sung sau
+      await pool.query(
+        `
+        UPDATE users
+        SET riot_account = $1,
+            riot_puuid_val = COALESCE($3, riot_puuid_val),
+            riot_puuid_lol = COALESCE($4, riot_puuid_lol)
+        WHERE id = $2
+        `,
+        [riot.riotAccount, userId, puuids.val, puuids.lol],
+      );
 
       // Keep TFT/solo tournament display names in sync with the new Riot ID
       // so players don't need to cancel and re-register.

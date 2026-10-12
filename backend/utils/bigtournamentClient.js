@@ -1,5 +1,4 @@
-import { fetchValorantMatchFromRiot } from "./riotValorantClient.js";
-
+// Valorant không còn đi qua BigTournament — xem riotValorantClient.js (gọi thẳng Riot)
 const BIGTOURNAMENT_BASE_URL = "https://bigtournament-1.onrender.com";
 
 const readEnv = (...keys) => {
@@ -43,29 +42,6 @@ const buildAuthVariants = () => {
   return variants;
 };
 
-const buildValorantPaths = (matchId) => {
-  const encodedId = encodeURIComponent(matchId);
-  return [
-    `/api/auth/valorant/matchdata/valorant/match/${encodedId}`,
-    `/api/auth/valorant/matchdata/${encodedId}`,
-  ];
-};
-
-const normalizeValorantPayload = (payload) => {
-  if (payload?.matchData) {
-    return payload;
-  }
-
-  if (payload?.players || payload?.matchInfo) {
-    return {
-      source: "bigtournament",
-      matchData: payload,
-    };
-  }
-
-  return payload;
-};
-
 const fetchUpstreamJson = async (path, extraHeaders = {}) => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const url = `${BIGTOURNAMENT_BASE_URL}${normalizedPath}`;
@@ -94,48 +70,6 @@ const fetchUpstreamJson = async (path, extraHeaders = {}) => {
     return JSON.parse(text);
   } catch {
     throw new Error("BigTournament upstream returned invalid JSON.");
-  }
-};
-
-export const fetchValorantMatchData = async (matchId) => {
-  const normalizedMatchId = String(matchId ?? "").trim();
-  if (!normalizedMatchId) {
-    throw new Error("match_id is required");
-  }
-
-  const bigTournamentErrors = [];
-  const authVariants = buildAuthVariants();
-  const paths = buildValorantPaths(normalizedMatchId);
-
-  if (authVariants.length === 0) {
-    bigTournamentErrors.push("No BigTournament API key configured.");
-  }
-
-  for (const path of paths) {
-    for (const variant of authVariants) {
-      try {
-        const payload = await fetchUpstreamJson(path, variant.headers);
-        return normalizeValorantPayload(payload);
-      } catch (error) {
-        bigTournamentErrors.push(
-          `${variant.label} ${path}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-  }
-
-  try {
-    return await fetchValorantMatchFromRiot(normalizedMatchId);
-  } catch (riotError) {
-    throw new Error(
-      `Valorant match data unavailable. BigTournament attempts failed (${bigTournamentErrors.join(
-        " | ",
-      )}). Riot fallback failed (${
-        riotError instanceof Error ? riotError.message : String(riotError)
-      }).`,
-    );
   }
 };
 

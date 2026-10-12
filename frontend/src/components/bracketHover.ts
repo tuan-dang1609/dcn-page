@@ -1,4 +1,5 @@
-export const BRACKET_CONN_BASE_STROKE = "rgb(55, 65, 81)";
+/** Đường nối bracket: 1px màu chữ như bảng đấu in. */
+export const BRACKET_CONN_BASE_STROKE = "#F2F0EB";
 /** Active path — xanh lá khi hover hành trình đội */
 export const BRACKET_CONN_ACTIVE_STROKE = "rgb(52, 211, 153)";
 export const BRACKET_CONN_DIM_OPACITY = 0.42;

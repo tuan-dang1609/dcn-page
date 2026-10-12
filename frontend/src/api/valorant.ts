@@ -14,9 +14,13 @@ export interface ValorantApiPlayerStats {
 }
 
 export interface ValorantApiPlayer {
+  puuid?: string;
   gameName: string;
   tagLine: string;
   teamId: string;
+  /** UUID đặc vụ (Riot characterId). */
+  characterId?: string;
+  /** Tên đặc vụ đã dịch ở backend; dữ liệu cũ có thể vẫn là UUID. */
   characterName?: string;
   imgCharacter?: string;
   stats?: ValorantApiPlayerStats;
@@ -29,8 +33,12 @@ export interface ValorantApiTeam {
 }
 
 export interface ValorantApiMatchInfo {
+  /** Đường dẫn map của Riot, vd "/Game/Maps/Bonsai/Bonsai". */
+  mapId?: string;
+  /** Tên map hiển thị ("Split"); dữ liệu cũ có thể là đường dẫn. */
   mapName?: string;
   gameStartMillis?: number;
+  gameLengthMillis?: number;
 }
 
 export interface ValorantApiRoundResult {

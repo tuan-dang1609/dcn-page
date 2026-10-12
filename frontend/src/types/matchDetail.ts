@@ -1,3 +1,5 @@
+import type { ValorantApiMatchData } from "@/api/valorant";
+
 export type GameType = "cs2" | "valorant" | "lol" | "wildrift" | "tft" | "aov";
 
 export interface MapScore {
@@ -34,8 +36,7 @@ export interface PlayerStat {
   placement?: number;
   role?: string;
   performanceScore?: number;
-  gold?: number;
-  firstDeaths?: number;
+  gold?: number;  firstDeaths?: number;
   firstKills?: number;
   multiKills?: number;
   acs?: number;
@@ -58,6 +59,12 @@ export interface AovGameRoster {
   label: string;
   team1Kills: number;
   team2Kills: number;
+  /** match_games.payload.aov.duration_sec */
+  durationSec?: number | null;
+  /** null = chưa biết đội thắng ván */
+  team1Won?: boolean | null;
+  /** Phe của team1 trong ván (blue = Phe xanh) */
+  team1Side?: "blue" | "red";
   team1Roster: TeamRoster;
   team2Roster: TeamRoster;
 }
@@ -90,5 +97,10 @@ export interface MatchDetail {
   team2Roster: TeamRoster;
   statTabs?: string[];
   fpsMapRosters?: FPSMapRoster[];
+  /**
+   * Dữ liệu Riot từng map, đã đổi Blue/Red để team1 luôn là "Blue"
+   * (Riot đổi phe theo phòng) — dùng cho ValorantMatchResult.
+   */
+  valorantGames?: ValorantApiMatchData[];
   aovGameRosters?: AovGameRoster[];
 }

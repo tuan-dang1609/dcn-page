@@ -1,7 +1,9 @@
 export const BRACKET_BG_CLASS = "";
 
-export const BRACKET_MATCH_TITLE_H = 28;
-export const BRACKET_MATCH_FOOTER_H = 26;
+/** Dòng nhãn phía trên khung trận: mã/vòng bên trái, trạng thái bên phải. */
+export const BRACKET_MATCH_TITLE_H = 22;
+/** Canvas không có footer — trạng thái nằm trên dòng nhãn. */
+export const BRACKET_MATCH_FOOTER_H = 0;
 
 export type BracketMatchDisplayStatus =
   | "upcoming"
@@ -101,40 +103,77 @@ export const formatBracketMatchDate = (
   return `${weekday}, ${day} ${month} - ${time}`;
 };
 
-export const BRACKET_INNER_CARD_CLASS =
-  "box-border block overflow-hidden border border-neutral-600 bg-[#141414]";
+/** Ngắn gọn cho dòng nhãn thẻ trận: "T5, 9/10 · 18:00". */
+export const formatBracketMatchShortDate = (
+  dateScheduled?: string | null,
+): string => {
+  const raw = String(dateScheduled ?? "").trim();
+  if (!raw) return "Chưa có lịch";
 
-export const BRACKET_CARD_CLASS =
-  "box-border block overflow-hidden border border-neutral-600 bg-[#141414]";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "Chưa có lịch";
+
+  const weekday = parsed.toLocaleDateString("vi-VN", { weekday: "short" });
+  const time = parsed.toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  return `${weekday}, ${parsed.getDate()}/${parsed.getMonth() + 1} · ${time}`;
+};
+
+/* Palette canvas: nền #0B0B0B, chữ #F2F0EB, phụ #9A9893, chờ #8C8A85, kẻ #2C2B29, nhấn #FF4A3D */
+
+/** Khung ngoài của thẻ trận (chứa dòng nhãn + hộp đội). */
+export const BRACKET_CARD_CLASS = "box-border block";
+
+/** Hộp chứa 2 hàng đội: viền 1px màu chữ, góc vuông. */
+export const BRACKET_INNER_CARD_CLASS =
+  "box-border overflow-hidden border border-[#F2F0EB] bg-[#0B0B0B]";
 
 export const BRACKET_ROW_BASE_CLASS =
-  "flex shrink-0 items-center justify-between px-4 transition-all duration-150";
+  "flex shrink-0 items-center justify-between px-3 transition-colors duration-150";
 
-export const BRACKET_ROW_DEFAULT_CLASS = "bg-[#141414] text-neutral-100";
+/** Hàng đội có ô tỉ số kẻ riêng bên phải (dùng với BRACKET_SCORE_CELL_CLASS). */
+export const BRACKET_ROW_SPLIT_CLASS =
+  "flex min-h-0 items-stretch justify-between pl-2.5 transition-colors duration-150";
+
+export const BRACKET_ROW_DEFAULT_CLASS = "bg-[#0B0B0B] text-[#F2F0EB]";
 
 export const BRACKET_ROW_WINNER_CLASS =
-  "bg-emerald-950/40 text-emerald-100 font-semibold border-l-[3px] border-l-emerald-400";
+  "bg-[#0B0B0B] text-[#F2F0EB] font-bold";
 
+export const BRACKET_ROW_LOSER_CLASS = "bg-[#0B0B0B] text-[#9A9893]";
+
+/** Ô trống / TBD: chữ nghiêng màu chờ. */
+export const BRACKET_ROW_TBD_CLASS = "bg-[#0B0B0B] text-[#8C8A85] italic";
+
+/** Pick'em: đội đang chọn — đảo màu như "tab đang chọn" trên canvas. */
 export const BRACKET_ROW_SELECTED_CLASS =
-  "bg-neutral-900 text-white font-semibold border-l-[3px] border-l-neutral-400";
+  "bg-[#F2F0EB] text-[#0B0B0B] font-bold";
 
 export const BRACKET_ROW_CORRECT_CLASS =
-  "bg-emerald-950/40 text-emerald-100 font-semibold border-l-[3px] border-l-emerald-400";
+  "bg-emerald-950/40 text-emerald-100 font-bold";
 
 export const BRACKET_ROW_WRONG_CLASS =
-  "bg-rose-950/40 text-rose-100 font-semibold border-l-[3px] border-l-rose-400";
+  "bg-rose-950/40 text-rose-100 font-bold";
+
+/** Ô tỉ số bên phải mỗi hàng, ngăn bằng 1 đường kẻ. */
+export const BRACKET_SCORE_CELL_CLASS =
+  "flex w-9 shrink-0 items-center justify-center border-l border-[#2C2B29] text-sm font-bold tabular-nums";
 
 export const BRACKET_MATCH_TITLE_CLASS =
-  "flex h-[28px] shrink-0 items-center justify-center bg-[#D1D5DB] px-2 text-[10px] font-extrabold uppercase leading-tight tracking-wide text-neutral-900";
+  "flex h-[28px] shrink-0 items-center border-t-2 border-[#F2F0EB] pt-1 text-[13px] font-bold leading-tight text-[#F2F0EB]";
 
 export const BRACKET_HEADER_CLASS =
-  "bg-[#D1D5DB] px-4 py-2 text-sm font-extrabold uppercase tracking-widest text-neutral-900 text-center";
+  "border-t-2 border-[#F2F0EB] pt-1.5 text-[13px] font-bold text-[#F2F0EB]";
 
 export const BRACKET_STAGE_HEADER_CLASS =
-  "flex h-9 shrink-0 items-center justify-between bg-[#D1D5DB] px-3 text-xs font-extrabold uppercase tracking-widest text-neutral-900";
+  "flex h-9 shrink-0 items-center justify-between border-b border-[#F2F0EB] px-3 text-[13px] font-bold text-[#F2F0EB]";
 
 export const BRACKET_STAGE_WRAPPER_CLASS =
-  "overflow-hidden border border-neutral-600 bg-[#141414] box-border";
+  "overflow-hidden border border-[#2C2B29] bg-[#0B0B0B] box-border";
 
 export const BRACKET_OUTCOME_DOT_CLASS = "h-2.5 w-2.5 shrink-0";
 
@@ -145,28 +184,34 @@ export const BRACKET_OUTCOME_DOT_COLORS = {
 } as const;
 
 export const BRACKET_SIDE_TITLE_CLASS =
-  "text-base font-extrabold uppercase tracking-widest text-white";
+  "text-[22px] font-extrabold leading-tight tracking-[-0.01em] text-[#F2F0EB]";
 
 export const BRACKET_SIDE_TEAM_ROW_CLASS =
-  "flex h-11 items-center gap-2 border border-neutral-600 bg-[#141414] px-3 transition-all duration-150";
+  "flex h-11 items-center gap-2 border border-[#F2F0EB] bg-[#0B0B0B] px-3 transition-colors duration-150";
 
 export const BRACKET_TEAM_ICON_CLASS =
-  "flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden ";
+  "flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden ";
 
 export const getBracketRowStateClass = ({
   isHoveredTeam,
   pickState,
   isWinner,
+  isLoser = false,
+  isTbd = false,
 }: {
   isHoveredTeam: boolean;
   pickState?: "selected" | "correct" | "wrong" | null;
   isWinner: boolean;
+  isLoser?: boolean;
+  isTbd?: boolean;
 }): string => {
-  if (isHoveredTeam) return "bg-[#1c1c1c] text-white";
+  if (isHoveredTeam) return BRACKET_ROW_SELECTED_CLASS;
   if (pickState === "correct") return BRACKET_ROW_CORRECT_CLASS;
   if (pickState === "wrong") return BRACKET_ROW_WRONG_CLASS;
   if (pickState === "selected") return BRACKET_ROW_SELECTED_CLASS;
+  if (isTbd) return BRACKET_ROW_TBD_CLASS;
   if (isWinner) return BRACKET_ROW_WINNER_CLASS;
+  if (isLoser) return BRACKET_ROW_LOSER_CLASS;
   return BRACKET_ROW_DEFAULT_CLASS;
 };
 
@@ -236,3 +281,7 @@ export const formatBracketMatchScores = (
     right: s2 !== null ? String(s2) : "-",
   };
 };
+
+/** Phòng ban/pick của trận đang mở (ban_picks.status; "active" = phiên luồng cũ chưa xong). */
+export const isBanPickOpenStatus = (status?: string | null): boolean =>
+  ["waiting", "running", "active"].includes(String(status ?? "").trim().toLowerCase());

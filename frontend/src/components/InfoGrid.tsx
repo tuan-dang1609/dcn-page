@@ -1,19 +1,11 @@
-import {
-  CalendarCheck,
-  CalendarDays,
-  Gamepad2,
-  Trophy,
-  UserCheck,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+import { formatDateRange, formatTotalPrize, isIndividualTournament } from "@/lib/tournamentFormat";
 
 type TournamentInfo = {
   game_name?: string;
   short_name?: string;
-  icon_game_url?: string;
-  max_player_per_team?: number;
+  max_player_per_team?: number | string;
   max_participate?: number;
+  registered_count?: number;
   registration_mode?: "org" | "individual" | string;
   prizes?: Array<{ prize?: string }>;
   date_start?: string;
@@ -21,148 +13,59 @@ type TournamentInfo = {
 };
 
 type InfoGridProps = {
-  tournament?: TournamentInfo;
+  tournament?: TournamentInfo | null;
   isLoading?: boolean;
+  className?: string;
 };
 
-type InfoItem = {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  imageUrl?: string | null;
-};
+/** Các ô thông tin chính của giải — dùng ở trang tổng quan và đầu trang con. */
+export const getTournamentFacts = (tournament?: TournamentInfo | null) => {
+  const individual = isIndividualTournament(tournament?.registration_mode);
+  const max = tournament?.max_participate;
+  const count = tournament?.registered_count;
 
-const formatDateTime = (value?: string) => {
-  if (!value) return "—";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-
-  return new Intl.DateTimeFormat("vi-VN", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Ho_Chi_Minh",
-  }).format(date);
-};
-
-const displayValue = (isLoading: boolean, value: string) =>
-  isLoading ? "…" : value;
-
-const parseVndAmounts = (text: string) => {
-  const matches = text.matchAll(/(\d[\d.,\s]*)\s*VND/gi);
-  let total = 0;
-
-  for (const match of matches) {
-    const digits = match[1].replace(/[^\d]/g, "");
-    const amount = Number(digits);
-    if (Number.isFinite(amount) && amount > 0) {
-      total += amount;
-    }
-  }
-
-  return total;
-};
-
-const formatTotalPrize = (prizes?: Array<{ prize?: string }>) => {
-  if (!prizes?.length) return "—";
-
-  const total = prizes.reduce(
-    (sum, item) => sum + parseVndAmounts(String(item?.prize ?? "")),
-    0,
-  );
-
-  if (total <= 0) return "—";
-
-  return `${total.toLocaleString("vi-VN")} VND`;
-};
-
-const InfoGrid = ({ tournament, isLoading = false }: InfoGridProps) => {
-  const isIndividualMode =
-    String(tournament?.registration_mode ?? "org").toLowerCase() ===
-    "individual";
-
-  const infoItems: InfoItem[] = [
+  return [
     {
-      icon: Gamepad2,
-      label: "Game",
-      value: displayValue(
-        isLoading,
-        tournament?.game_name ?? tournament?.short_name ?? "—",
-      ),
-      imageUrl: tournament?.icon_game_url,
+      label: "Hình thức",
+      value: individual
+        ? "Cá nhân"
+        : tournament?.max_player_per_team
+          ? `Đội ${tournament.max_player_per_team} người`
+          : "Theo đội",
     },
     {
-      icon: Users,
-      label: isIndividualMode ? "Hình thức" : "Số người trong đội",
-      value: displayValue(
-        isLoading,
-        isIndividualMode
-          ? "Cá nhân"
-          : String(tournament?.max_player_per_team ?? "—"),
-      ),
+      label: individual ? "Người chơi" : "Số đội",
+      value:
+        count != null && max ? `${count} / ${max}` : String(max ?? count ?? "—"),
     },
+    { label: "Giải thưởng", value: formatTotalPrize(tournament?.prizes) },
     {
-      icon: UserCheck,
-      label: isIndividualMode ? "Giới hạn thành viên" : "Giới hạn",
-      value: displayValue(
-        isLoading,
-        String(tournament?.max_participate ?? "—"),
-      ),
-    },
-    {
-      icon: Trophy,
-      label: "Tổng giải thưởng",
-      value: displayValue(isLoading, formatTotalPrize(tournament?.prizes)),
-    },
-    {
-      icon: CalendarDays,
-      label: "Bắt đầu",
-      value: displayValue(isLoading, formatDateTime(tournament?.date_start)),
-    },
-    {
-      icon: CalendarCheck,
-      label: "Kết thúc",
-      value: displayValue(isLoading, formatDateTime(tournament?.date_end)),
+      label: "Thời gian",
+      value: formatDateRange(tournament?.date_start, tournament?.date_end),
     },
   ];
+};
+
+/**
+ * Hàng thông tin kiểu "bảng đấu in": kẻ 1px màu chữ phía trên, nhãn xám nhỏ,
+ * giá trị đậm vừa. Không icon, không khung.
+ */
+const InfoGrid = ({ tournament, isLoading = false, className = "" }: InfoGridProps) => {
+  const facts = getTournamentFacts(tournament);
 
   return (
-    <section>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 xl:grid-cols-3">
-        {infoItems.map((item) => (
-          <div
-            key={item.label}
-            className="flex min-h-[72px] items-center gap-2.5 border border-neutral-700 bg-[#141414] p-2.5 sm:min-h-[76px] sm:gap-3 sm:p-3"
-          >
-            {item.imageUrl ? (
-              <img
-                src={item.imageUrl}
-                alt=""
-                className="h-10 w-10 shrink-0 object-contain sm:h-11 sm:w-11"
-              />
-            ) : (
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center sm:h-11 sm:w-11">
-                <item.icon className="h-6 w-6 text-neutral-200 sm:h-7 sm:w-7" />
-              </div>
-            )}
-
-            <div className="min-w-0 flex-1">
-              <p className="text-[9px] font-extrabold uppercase tracking-wider text-neutral-500 sm:text-[10px]">
-                {item.label}
-              </p>
-              <p className="mt-0.5 text-xs font-bold leading-snug text-white sm:text-sm">
-                <span className="line-clamp-2 break-words">{item.value}</span>
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
+    <dl
+      className={`m-0 grid grid-cols-2 border-t border-[#F2F0EB] text-sm md:grid-cols-4 ${className}`}
+    >
+      {facts.map((fact) => (
+        <div key={fact.label} className="py-2.5 pr-4">
+          <dt className="text-xs text-[#9A9893]">{fact.label}</dt>
+          <dd className="m-0 mt-1 font-semibold tabular-nums">
+            {isLoading ? "…" : fact.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 };
 

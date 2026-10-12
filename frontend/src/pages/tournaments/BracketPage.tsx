@@ -18,6 +18,9 @@ import {
   TOURNAMENT_TAB_ROW_CLASS,
 } from "@/components/tournamentTheme";
 import PageLoader from "@/components/PageLoader";
+import { MatchPanelProvider } from "@/components/MatchPanel";
+import { getMatchesByBracketId } from "@/api/tournaments/index";
+import { normalizeBracketMatchStatus } from "@/components/bracketTheme";
 import { resolveActiveBracketId } from "@/lib/resolveActiveBracket";
 
 const SingleElimBracket = lazy(() => import("@/components/BracketView"));
@@ -141,6 +144,24 @@ const BracketPage = () => {
 
   const resolvedActiveId = activeBracketId ?? brackets[0]?.id ?? null;
 
+  // Dải "TRỰC TIẾP": trận đang diễn ra trong nhánh đang xem
+  const { data: bracketMatches = [] } = useQuery({
+    queryKey: ["bracket-live-strip", selectedBracketId],
+    enabled: Boolean(selectedBracketId),
+    queryFn: async () => {
+      const response = await getMatchesByBracketId(selectedBracketId!);
+      return response.data?.data ?? [];
+    },
+    refetchInterval: 30_000,
+  });
+  const liveMatches = bracketMatches.filter(
+    (match) =>
+      match.team_a_id &&
+      match.team_b_id &&
+      normalizeBracketMatchStatus(match.status, match.date_scheduled) ===
+        "ongoing",
+  );
+
   const bracketView = (() => {
     if (!selectedBracket) return null;
 
@@ -170,69 +191,81 @@ const BracketPage = () => {
   })();
 
   return (
-    <div className={`space-y-5 ${TOURNAMENT_PAGE_BG_CLASS}`}>
-      {isLoading ? (
-        <PageLoader label="Đang tải danh sách bracket..." fullScreen={false} />
-      ) : null}
+    <MatchPanelProvider>
+      <div className={`space-y-6 ${TOURNAMENT_PAGE_BG_CLASS}`}>
+        {isLoading ? (
+          <PageLoader label="Đang tải nhánh đấu..." fullScreen={false} />
+        ) : null}
 
-      {isError ? (
-        <p className="text-sm text-rose-400">
-          Không tải được danh sách bracket.
-        </p>
-      ) : null}
+        {isError ? (
+          <p className="text-sm text-[#FF4A3D]">Không tải được nhánh đấu.</p>
+        ) : null}
 
-      {bracketTabs.length ? (
-        <>
-          <div className={`hidden md:flex ${TOURNAMENT_TAB_ROW_CLASS}`}>
-            {bracketTabs.map((tab) => (
-              <TournamentTabCard
-                key={tab.id}
-                title={tab.title}
-                isActive={resolvedActiveId === tab.id}
-                onClick={() => selectBracket(tab.id)}
-              />
+        {liveMatches.length ? (
+          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 border-y border-b-[#2C2B29] border-t-[#F2F0EB] py-3 text-sm">
+            <span className="font-bold tracking-[0.04em] text-[#FF4A3D]">
+              TRỰC TIẾP
+            </span>
+            {liveMatches.map((match) => (
+              <span key={match.id} className="tabular-nums">
+                <strong>{match.team_a?.name ?? "TBD"}</strong>{" "}
+                {match.score_a ?? 0} : {match.score_b ?? 0}{" "}
+                <strong>{match.team_b?.name ?? "TBD"}</strong>
+              </span>
             ))}
           </div>
+        ) : null}
 
-          <div className="md:hidden">
-            <Select
-              value={String(resolvedActiveId ?? "")}
-              onValueChange={(value) => selectBracket(Number(value))}
+        {bracketTabs.length > 1 ? (
+          <>
+            <div className={`hidden md:flex ${TOURNAMENT_TAB_ROW_CLASS}`}>
+              {bracketTabs.map((tab) => (
+                <TournamentTabCard
+                  key={tab.id}
+                  title={tab.title}
+                  isActive={resolvedActiveId === tab.id}
+                  onClick={() => selectBracket(tab.id)}
+                />
+              ))}
+            </div>
+
+            <div className="md:hidden">
+              <Select
+                value={String(resolvedActiveId ?? "")}
+                onValueChange={(value) => selectBracket(Number(value))}
+              >
+                <SelectTrigger className="h-11 w-full border border-[#F2F0EB] bg-[#0B0B0B] text-[#F2F0EB]">
+                  <SelectValue placeholder="Chọn nhánh" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bracketTabs.map((tab) => (
+                    <SelectItem key={tab.id} value={String(tab.id)}>
+                      {tab.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        ) : null}
+
+        {!isLoading && !brackets.length ? (
+          <p className="border-t-2 border-[#F2F0EB] py-4 text-sm text-[#9A9893]">
+            Nhánh đấu sẽ được công bố khi giải bắt đầu.
+          </p>
+        ) : (
+          <div className="overflow-x-auto pb-2 pt-2">
+            <Suspense
+              fallback={
+                <PageLoader label="Đang tải nhánh đấu..." fullScreen={false} />
+              }
             >
-              <SelectTrigger className="w-full border border-[#333] bg-[#141414] text-white">
-                <SelectValue placeholder="Chọn bracket" />
-              </SelectTrigger>
-              <SelectContent>
-                {bracketTabs.map((tab) => (
-                  <SelectItem key={tab.id} value={String(tab.id)}>
-                    {tab.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {bracketView}
+            </Suspense>
           </div>
-        </>
-      ) : null}
-
-      {!isLoading && !brackets.length ? (
-        <p className="text-md text-center font-bold text-neutral-300">
-          Hiện giải đấu chưa bắt đầu, vui lòng quay lại sau.
-        </p>
-      ) : (
-        <div className="overflow-x-auto pt-2">
-          <Suspense
-            fallback={
-              <PageLoader
-                label="Đang tải nhánh đấu..."
-                fullScreen={false}
-              />
-            }
-          >
-            {bracketView}
-          </Suspense>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </MatchPanelProvider>
   );
 };
 

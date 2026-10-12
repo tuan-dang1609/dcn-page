@@ -264,7 +264,7 @@ export const RoundConnector = ({
 
           stroke={baseStroke}
 
-          strokeWidth={2}
+          strokeWidth={1}
 
           opacity={baseOpacity}
 
@@ -286,7 +286,7 @@ export const RoundConnector = ({
 
         stroke={baseStroke}
 
-        strokeWidth={2}
+        strokeWidth={1}
 
         opacity={baseOpacity}
 
@@ -306,7 +306,7 @@ export const RoundConnector = ({
 
         stroke={baseStroke}
 
-        strokeWidth={2}
+        strokeWidth={1}
 
         opacity={baseOpacity}
 
@@ -500,7 +500,7 @@ export const GapBracketConnector = ({
 
           stroke={baseStroke}
 
-          strokeWidth={2}
+          strokeWidth={1}
 
           opacity={baseOpacity}
 
@@ -522,7 +522,7 @@ export const GapBracketConnector = ({
 
         stroke={baseStroke}
 
-        strokeWidth={2}
+        strokeWidth={1}
 
         opacity={baseOpacity}
 
@@ -542,7 +542,7 @@ export const GapBracketConnector = ({
 
         stroke={baseStroke}
 
-        strokeWidth={2}
+        strokeWidth={1}
 
         opacity={baseOpacity}
 

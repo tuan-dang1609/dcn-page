@@ -5,11 +5,15 @@ import { ArrowLeft } from "lucide-react";
 import type { MatchDetail, RoundHistoryEntry, AovGameRoster } from "@/types/matchDetail";
 import { useAuth } from "@/contexts/AuthContext";
 import type { RoundBanPickPayload } from "@/api/banpick";
-import { MapCard } from "@/components/MapCard";
-import { SideSelectModal } from "@/components/SideSelectModal";
 import PageLoader from "@/components/PageLoader";
 import { TournamentSubpageHeader } from "@/components/TournamentSubpageHeader";
-import { useRoundBanPickSocket } from "@/hooks/useRoundBanPickSocket";
+import {
+  MatchPanelCloseButton,
+  MatchPanelHeader,
+} from "@/components/MatchPanel";
+import { useBanPickRoom } from "@/hooks/useBanPickRoom";
+import BanPickBoard from "@/components/valorant/BanPickBoard";
+import ValorantMatchResult from "@/components/valorant/ValorantMatchResult";
 import {
   getValorantMatchData,
   type ValorantApiMatchData,
@@ -51,16 +55,16 @@ import {
   TOURNAMENT_TEAM_TAG_BADGE_CLASS,
 } from "@/components/tournamentTheme";
 
-const MATCH_STAT_PANEL =
-  "overflow-hidden border border-neutral-700 bg-[#141414]";
+// Bảng chỉ số kiểu canvas: tiêu đề chữ xám không nền, kẻ 2px màu chữ dưới tiêu đề
+const MATCH_STAT_PANEL = "overflow-hidden bg-[#0B0B0B]";
 const MATCH_STAT_TH =
-  "px-2 py-1.5 text-center text-[11px] font-extrabold uppercase tracking-wider text-neutral-900 bg-[#D1D5DB]";
+  "px-2 py-1.5 text-center text-xs font-normal text-[#9A9893] bg-[#0B0B0B]";
 const MATCH_STAT_TH_NAME =
-  "sticky left-0 z-20 min-w-[120px] max-w-[140px] bg-[#D1D5DB] px-2.5 py-1.5 text-left border-r border-neutral-600 text-neutral-900 sm:min-w-[140px] sm:max-w-[180px] sm:px-3";
+  "sticky left-0 z-20 min-w-[120px] max-w-[140px] bg-[#0B0B0B] px-2.5 py-1.5 text-left text-[#F2F0EB] sm:min-w-[140px] sm:max-w-[180px] sm:px-3";
 const MATCH_STAT_TD =
-  "px-2 py-3 text-[11px] text-neutral-200 text-center tabular-nums";
+  "px-2 py-3 text-[13px] text-[#F2F0EB] text-center tabular-nums";
 const MATCH_STAT_TD_NAME =
-  "sticky left-0 z-10 max-w-[140px] bg-[#141414] group-hover:bg-[#1c1c1c] px-2.5 py-3 border-r border-neutral-800 sm:max-w-[180px] sm:px-3";
+  "sticky left-0 z-10 max-w-[140px] bg-[#0B0B0B] group-hover:bg-[#151515] px-2.5 py-3 sm:max-w-[180px] sm:px-3";
 const MATCH_STAT_TR = `${TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS} group`;
 
 const formatDate = (d: string) =>
@@ -114,6 +118,10 @@ type LinkedTeamContext = {
   team2Players: TournamentTeamPlayersResponse["players"];
   team1RiotAccounts: Set<string>;
   team2RiotAccounts: Set<string>;
+  /** puuid (Valorant + LMHT) của người chơi từng đội — ghép phe chắc hơn Riot ID (không đổi khi đổi tên). */
+  team1Puuids: Set<string>;
+  team2Puuids: Set<string>;
+  profileByPuuid: Map<string, { nickname?: string; avatar?: string }>;
   nicknameByRiotAccount: Map<string, string>;
   avatarByRiotAccount: Map<string, string>;
   nicknameByUsername: Map<string, string>;
@@ -210,6 +218,9 @@ const createEmptyLinkedTeamContext = (): LinkedTeamContext => ({
   team2Players: [],
   team1RiotAccounts: new Set(),
   team2RiotAccounts: new Set(),
+  team1Puuids: new Set(),
+  team2Puuids: new Set(),
+  profileByPuuid: new Map(),
   nicknameByRiotAccount: new Map(),
   avatarByRiotAccount: new Map(),
   nicknameByUsername: new Map(),
@@ -410,12 +421,15 @@ const findLinkedProfileForAovIgn = (
 const findLinkedProfileFromValorantPlayer = (
   player: ValorantApiPlayer,
   linkedContext: LinkedTeamContext,
-): { nickname?: string; avatar?: string } =>
-  lookupLinkedProfile(linkedContext, [
+): { nickname?: string; avatar?: string } => {
+  const byPuuid = player.puuid ? linkedContext.profileByPuuid.get(player.puuid) : undefined;
+  if (byPuuid?.nickname || byPuuid?.avatar) return byPuuid;
+  return lookupLinkedProfile(linkedContext, [
     buildRiotAccount(player.gameName, player.tagLine),
     player.gameName,
     player.tagLine,
   ]);
+};
 
 const enrichRosterWithLinkedProfiles = (
   roster: MatchDetail["team1Roster"],
@@ -558,6 +572,15 @@ const enrichMatchWithLinkedProfiles = (
       ...game,
       team1Kills: assigned.swapped ? game.team2Kills : game.team1Kills,
       team2Kills: assigned.swapped ? game.team1Kills : game.team2Kills,
+      team1Won:
+        assigned.swapped && game.team1Won != null
+          ? !game.team1Won
+          : game.team1Won,
+      team1Side: assigned.swapped
+        ? game.team1Side === "red"
+          ? "blue"
+          : "red"
+        : game.team1Side,
       team1Roster: {
         ...game.team1Roster,
         players: assigned.blue.map((row) => toDisplayPlayer(row, team1Players)),
@@ -909,8 +932,12 @@ const resolvePlayerAvatarUrl = (player: {
 
 const PlayerStatAvatar = ({
   player,
+  imgClassName = "h-5 w-5 shrink-0 rounded-sm object-cover sm:h-6 sm:w-6",
+  fallbackClassName = "flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-neutral-800 text-[10px] font-bold text-neutral-300 sm:h-6 sm:w-6 sm:text-[11px]",
 }: {
   player: { avatar?: string | null; icon?: string | null; name?: string };
+  imgClassName?: string;
+  fallbackClassName?: string;
 }) => {
   const [failed, setFailed] = useState(false);
   const src = resolvePlayerAvatarUrl(player);
@@ -922,17 +949,13 @@ const PlayerStatAvatar = ({
       <img
         src={src}
         alt=""
-        className="h-5 w-5 shrink-0 rounded-sm object-cover sm:h-6 sm:w-6"
+        className={imgClassName}
         onError={() => setFailed(true)}
       />
     );
   }
 
-  return (
-    <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-neutral-800 text-[10px] font-bold text-neutral-300 sm:h-6 sm:w-6 sm:text-[11px]">
-      {initial}
-    </div>
-  );
+  return <div className={fallbackClassName}>{initial}</div>;
 };
 
 const buildMatchDetailFromApi = ({
@@ -1098,13 +1121,17 @@ const mergeTftApiIntoMatch = (
       const linkedAvatar = normalizedRiotAccount
         ? linkedContext.avatarByRiotAccount.get(normalizedRiotAccount)
         : undefined;
-      const inferredSide: TeamSide | null = linkedContext.team1RiotAccounts.has(
-        normalizedRiotAccount,
-      )
-        ? "team1"
-        : linkedContext.team2RiotAccounts.has(normalizedRiotAccount)
-          ? "team2"
-          : null;
+      const participantPuuid = String(
+        (participant as { puuid?: string | null }).puuid ?? "",
+      ).trim();
+      const inferredSide: TeamSide | null =
+        (participantPuuid && linkedContext.team1Puuids.has(participantPuuid)) ||
+        linkedContext.team1RiotAccounts.has(normalizedRiotAccount)
+          ? "team1"
+          : (participantPuuid && linkedContext.team2Puuids.has(participantPuuid)) ||
+              linkedContext.team2RiotAccounts.has(normalizedRiotAccount)
+            ? "team2"
+            : null;
       const name =
         linkedNickname ||
         (gameName && tagLine
@@ -1272,10 +1299,22 @@ const mergeAovStatsIntoMatch = (
     const team2Players =
       team2FromStats.length > 0 ? team2FromStats : fallbackTeam2;
 
+    // team1 = phe xanh (cùng quy ước với team1Kills = team_a_score = blue_kills)
+    const team1Kills = toNumber(game.team_a_score) ?? 0;
+    const team2Kills = toNumber(game.team_b_score) ?? 0;
+    const winnerSide = game.aov?.winner_side;
+    const team1Won =
+      winnerSide === "blue" || winnerSide === "red"
+        ? winnerSide === "blue"
+        : null;
+
     return {
       label: `Ván ${game.game_no}`,
-      team1Kills: toNumber(game.team_a_score) ?? 0,
-      team2Kills: toNumber(game.team_b_score) ?? 0,
+      team1Kills,
+      team2Kills,
+      durationSec: toNumber(game.aov?.duration_sec) ?? null,
+      team1Won,
+      team1Side: "blue",
       team1Roster: {
         ...baseMatch.team1Roster,
         players: team1Players,
@@ -1497,11 +1536,17 @@ const resolveValorantSideMapping = (
       const riotAccount = normalizeRiotAccount(
         buildRiotAccount(player.gameName, player.tagLine),
       );
-      if (!riotAccount) return;
+      const puuid = String(player.puuid ?? "").trim();
+      if (!riotAccount && !puuid) return;
 
       const playerTeamId = normalizeTeamId(player.teamId);
-      const inTeam1 = linkedContext.team1RiotAccounts.has(riotAccount);
-      const inTeam2 = linkedContext.team2RiotAccounts.has(riotAccount);
+      // puuid không đổi khi đổi tên Riot → ưu tiên; không có thì so Riot ID
+      const inTeam1 =
+        (puuid && linkedContext.team1Puuids.has(puuid)) ||
+        (riotAccount && linkedContext.team1RiotAccounts.has(riotAccount));
+      const inTeam2 =
+        (puuid && linkedContext.team2Puuids.has(puuid)) ||
+        (riotAccount && linkedContext.team2RiotAccounts.has(riotAccount));
 
       if (!inTeam1 && !inTeam2) return;
 
@@ -1828,8 +1873,34 @@ const mergeValorantApiIntoMatch = (
         : undefined,
     );
 
+    // team1 luôn là "Blue" trong dữ liệu gửi cho ValorantMatchResult
+    const team1IsBlue =
+      normalizeTeamId(effectiveSideMapping?.team1ApiTeamId ?? "Red") === "blue";
+    const swapSide = (value?: string) => {
+      const id = normalizeTeamId(value);
+      return id === "blue" ? "Red" : id === "red" ? "Blue" : value;
+    };
+    const normalizedGame: ValorantApiMatchData = team1IsBlue
+      ? apiData
+      : {
+          ...apiData,
+          players: apiData.players?.map((player) => ({
+            ...player,
+            teamId: swapSide(player.teamId) ?? player.teamId,
+          })),
+          teams: apiData.teams?.map((team) => ({
+            ...team,
+            teamId: swapSide(team.teamId) ?? team.teamId,
+          })),
+          roundResults: apiData.roundResults?.map((round) => ({
+            ...round,
+            winningTeam: swapSide(round.winningTeam),
+          })),
+        };
+
     return {
       apiData,
+      normalizedGame,
       mapTeam1Players,
       mapTeam2Players,
       team1Score,
@@ -1918,6 +1989,7 @@ const mergeValorantApiIntoMatch = (
     maps,
     statTabs: ["All Maps", ...mapLabels],
     fpsMapRosters,
+    valorantGames: mappedMatches.map((mappedMatch) => mappedMatch.normalizedGame),
     team1Roster:
       team1Players.length > 0
         ? buildValorantRosterFromApi(
@@ -2350,361 +2422,6 @@ const TeamLobbyRoster = ({
   />
 );
 
-const BanPickLobbyPanel = ({
-  match,
-  session,
-  isLoading,
-  error,
-  viewerTeamSlot,
-  canAct,
-  selectMap,
-  confirmAction,
-  selectSide,
-  linkedContext,
-}: {
-  match: MatchDetail;
-  session: RoundBanPickPayload | null;
-  isLoading: boolean;
-  error: string | null;
-  viewerTeamSlot: "team1" | "team2" | null;
-  canAct: boolean;
-  selectMap: (mapId: string) => void | Promise<void>;
-  confirmAction: () => void | Promise<void>;
-  selectSide: (side: "ATK" | "DEF") => void | Promise<void>;
-  linkedContext: LinkedTeamContext;
-}) => {
-  if (isLoading && !session) {
-    return (
-      <section className="mx-auto px-4 md:px-8 py-6">
-        <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-6 text-sm text-muted-foreground">
-          Đang tải lobby ban/pick...
-        </div>
-      </section>
-    );
-  }
-
-  if (!session?.state) {
-    return (
-      <section className="mx-auto px-4 md:px-8 py-6">
-        <div className="rounded-xl border border-border/70 bg-card/30 px-4 py-6 space-y-2">
-          <p className="text-sm">Chưa có phiên ban/pick cho trận này.</p>
-          {error ? (
-            <p className="text-xs text-rose-300">{error}</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Có thể cần setup ban/pick trước ở trang quản trị.
-            </p>
-          )}
-        </div>
-      </section>
-    );
-  }
-
-  const banPick = session.state;
-  const mapByCode = Object.fromEntries(
-    (session.map_pool ?? []).map((item) => [item.map_code, item]),
-  );
-  const currentAction = session.current_action;
-  const sideSelectMap =
-    banPick.sideSelectMapId && mapByCode[banPick.sideSelectMapId]
-      ? mapByCode[banPick.sideSelectMapId]
-      : null;
-
-  const isMyTurn =
-    Boolean(viewerTeamSlot) &&
-    ((banPick.phase === "ban_pick" && currentAction?.team === viewerTeamSlot) ||
-      (banPick.phase === "side_select" &&
-        banPick.sideSelectTeam === viewerTeamSlot));
-  const isRiotGame = ["valorant", "lol", "wildrift", "tft"].includes(
-    match.gameType,
-  );
-
-  const currentActionLabel = (() => {
-    if (banPick.phase === "side_select" && banPick.sideSelectTeam) {
-      return `${banPick.teamNames[banPick.sideSelectTeam]} chọn side`;
-    }
-
-    if (!currentAction) return "Đang chờ thao tác";
-
-    return `${banPick.teamNames[currentAction.team]} ${
-      currentAction.type === "ban" ? "ban map" : "pick map"
-    }`;
-  })();
-
-  const [countdownNow, setCountdownNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const hasLiveCountdown =
-      banPick.phase !== "complete" && Boolean(session.turn_deadline_at);
-
-    if (!hasLiveCountdown) return;
-
-    const timerId = window.setInterval(() => {
-      setCountdownNow(Date.now());
-    }, 1000);
-
-    return () => {
-      window.clearInterval(timerId);
-    };
-  }, [banPick.phase, session.turn_deadline_at]);
-
-  const countdownRemainingSeconds = useMemo(() => {
-    if (banPick.phase === "complete") return null;
-
-    const deadlineRaw = String(session.turn_deadline_at ?? "").trim();
-    if (deadlineRaw) {
-      const deadlineMs = new Date(deadlineRaw).getTime();
-      if (Number.isFinite(deadlineMs)) {
-        return Math.max(0, Math.ceil((deadlineMs - countdownNow) / 1000));
-      }
-    }
-
-    const fallbackSeconds = Number(session.turn_remaining_seconds);
-    if (Number.isFinite(fallbackSeconds) && fallbackSeconds >= 0) {
-      return Math.max(0, Math.floor(fallbackSeconds));
-    }
-
-    return null;
-  }, [
-    banPick.phase,
-    countdownNow,
-    session.turn_deadline_at,
-    session.turn_remaining_seconds,
-  ]);
-
-  const formatCountdown = (totalSeconds: number) => {
-    const safe = Math.max(0, Math.floor(totalSeconds));
-    const minutes = Math.floor(safe / 60);
-    const seconds = safe % 60;
-
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  };
-
-  const mapRows = banPick.maps.map((mapState, index) => {
-    const mapMeta = mapByCode[mapState.mapId];
-    const fallbackMapName = String(mapState.mapId ?? "").trim().toUpperCase();
-
-    return {
-      mapId: mapState.mapId,
-      status: mapState.status,
-      actionBy: mapState.actionBy,
-      actionType: mapState.actionType,
-      mapName: mapMeta?.map_name ?? (fallbackMapName || `MAP ${index + 1}`),
-      imageUrl: mapMeta?.image_url ?? "",
-    };
-  });
-
-  const mapPanelStatusText =
-    banPick.phase === "side_select"
-      ? "Đang chờ chọn side"
-      : isMyTurn
-        ? "Bạn đang vote"
-        : "Đang chờ đối thủ";
-
-  return (
-    <section className="mx-auto px-4 md:px-8 py-6 space-y-3">
-      <div className="rounded-2xl border border-border/70 /25 p-4 md:p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-primary">
-            Lobby Ban/Pick
-          </p>
-          <div className="flex items-center gap-2">
-            <p className="text-xs text-muted-foreground">{currentActionLabel}</p>
-            {countdownRemainingSeconds !== null ? (
-              <span
-                className={`inline-flex h-7 items-center rounded-md border px-2.5 text-xs font-black tabular-nums ${
-                  countdownRemainingSeconds <= 5
-                    ? "border-rose-500/50 bg-rose-500/10 text-rose-300"
-                    : "border-primary/45 bg-primary/10 text-primary"
-                }`}
-              >
-                {formatCountdown(countdownRemainingSeconds)}
-              </span>
-            ) : null}
-          </div>
-        </div>
-
-        {!canAct ? (
-          <div className="rounded-md border border-border/60 /20 px-3 py-2 text-xs text-muted-foreground">
-            Chế độ xem: chỉ thành viên của 2 team trong trận mới có thể thao tác.
-          </div>
-        ) : null}
-
-        <div className="grid gap-4 xl:grid-cols-[minmax(200px,1fr)_minmax(0,1.7fr)_minmax(200px,1fr)]">
-          <TeamLobbyRoster
-            team={match.team1}
-            players={match.team1Roster.players}
-            align="left"
-            showRiotMeta={isRiotGame}
-            linkedContext={linkedContext}
-          />
-
-          <div className="space-y-3">
-            <div
-              className={`rounded-lg border px-3 py-3 space-y-2.5 ${
-                isMyTurn
-                  ? "border-primary/45 bg-primary/5"
-                  : "border-border/60 /20"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-bold uppercase truncate">Map Pool</p>
-                <p className="text-[10px] uppercase tracking-[0.13em] text-muted-foreground">
-                  {mapPanelStatusText}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                {mapRows.map((row) => {
-                  const canSelectMap =
-                    banPick.phase === "ban_pick" &&
-                    isMyTurn &&
-                    row.status === "available";
-                  const isSelected = banPick.selectedMapId === row.mapId;
-
-                  const statusBadge =
-                    row.status === "banned"
-                      ? "BAN"
-                      : row.status === "picked"
-                        ? "PICK"
-                        : row.status === "decider"
-                          ? "DECIDER"
-                          : isSelected
-                            ? "SELECTED"
-                            : null;
-
-                  const statusToneClass =
-                    row.status === "banned"
-                      ? "text-rose-300 border-rose-500/40 bg-rose-500/10"
-                      : row.status === "picked"
-                        ? "text-emerald-300 border-emerald-500/40 bg-emerald-500/10"
-                        : row.status === "decider"
-                          ? "text-sky-300 border-sky-500/40 bg-sky-500/10"
-                          : isSelected
-                            ? "text-amber-300 border-amber-500/40 bg-amber-500/10"
-                            : "text-muted-foreground border-border/50 /10";
-
-                  const actionMeta =
-                    row.actionBy && row.actionType
-                      ? `${banPick.teamNames[row.actionBy]} ${
-                          row.actionType === "ban" ? "ban" : "pick"
-                        }`
-                      : row.status === "decider"
-                        ? "Map quyết định"
-                        : null;
-
-                  return (
-                    <button
-                      key={row.mapId}
-                      type="button"
-                      onClick={() => {
-                        if (!canSelectMap) return;
-                        void selectMap(row.mapId);
-                      }}
-                      disabled={!canSelectMap}
-                      className={`w-full rounded-md border border-border/50 px-2.5 py-2 flex items-center justify-between gap-2 transition-colors ${
-                        canSelectMap
-                          ? "hover:bg-primary/10 hover:border-primary/40"
-                          : "cursor-default"
-                      }`}
-                    >
-                      <span className="min-w-0 flex items-center gap-2">
-                        {row.imageUrl ? (
-                          <img
-                            src={row.imageUrl}
-                            alt={row.mapName}
-                            className="w-12 h-7 rounded object-cover border border-border/40"
-                          />
-                        ) : (
-                          <span className="w-12 h-7 rounded border border-border/40 /30" />
-                        )}
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold">
-                            {row.mapName}
-                          </span>
-                          {actionMeta ? (
-                            <span className="block truncate text-[10px] text-muted-foreground text-left">
-                              {actionMeta}
-                            </span>
-                          ) : null}
-                        </span>
-                      </span>
-
-                      {statusBadge ? (
-                        <span
-                          className={`shrink-0 inline-flex h-6 items-center rounded-md border px-2 text-[10px] font-black uppercase  ${statusToneClass}`}
-                        >
-                          {statusBadge}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2">
-              {banPick.phase === "ban_pick" && isMyTurn ? (
-                <button
-                  onClick={() => void confirmAction()}
-                  disabled={!banPick.selectedMapId}
-                  className={`h-10 rounded-md px-4 text-xs font-black uppercase  transition-colors ${
-                    banPick.selectedMapId
-                      ? currentAction?.type === "ban"
-                        ? "bg-rose-500/90 text-white hover:bg-rose-400"
-                        : "bg-emerald-500/90 text-black hover:bg-emerald-400"
-                      : "bg-muted text-muted-foreground cursor-not-allowed"
-                  }`}
-                >
-                  {banPick.selectedMapId
-                    ? `Lock ${currentAction?.type === "ban" ? "Ban" : "Pick"}`
-                    : "Select map"}
-                </button>
-              ) : (
-                <button
-                  disabled
-                  className="h-10 rounded-md px-4 text-xs font-black uppercase  bg-muted text-muted-foreground cursor-not-allowed"
-                >
-                  {banPick.phase === "side_select"
-                    ? "Đang chọn side"
-                    : "Đang chờ lượt"}
-                </button>
-              )}
-            </div>
-          </div>
-
-          <TeamLobbyRoster
-            team={match.team2}
-            players={match.team2Roster.players}
-            align="right"
-            showRiotMeta={isRiotGame}
-            linkedContext={linkedContext}
-          />
-        </div>
-
-        {error ? (
-          <p className="text-xs text-rose-300">{error}</p>
-        ) : null}
-      </div>
-
-      {banPick.phase === "side_select" && sideSelectMap ? (
-        <SideSelectModal
-          mapName={sideSelectMap.map_name}
-          teamName={
-            banPick.sideSelectTeam
-              ? banPick.teamNames[banPick.sideSelectTeam]
-              : "Team"
-          }
-          onSelect={(side) => {
-            if (!isMyTurn) return;
-            void selectSide(side);
-          }}
-        />
-      ) : null}
-    </section>
-  );
-};
-
 const PendingMatchOverviewPanel = ({
   match,
   session,
@@ -3091,6 +2808,29 @@ const FPSStatTable = ({
 };
 
 /* ── AOV Stat Table ── */
+// Phong cách "bảng đấu in" theo design/LienQuan.dc.html: góc vuông, kẻ 1px,
+// không nền xám, tab đang chọn đảo màu. Chỉ hiện chỉ số có trong DB.
+const AOV_FONT = "font-['Be_Vietnam_Pro',sans-serif]";
+const AOV_INK = "text-[#F2F0EB]";
+const AOV_GREY = "text-[#9A9893]";
+const AOV_ACCENT = "text-[#FF4A3D]";
+const AOV_RULE = "border-[#2C2B29]";
+const AOV_ROW_GRID = "md:grid-cols-[minmax(0,1fr)_120px_80px_64px]";
+
+const formatAovDuration = (sec?: number | null) => {
+  if (sec == null || !Number.isFinite(sec) || sec <= 0) return null;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+};
+
+const formatAovGold = (gold: number) => `${(gold / 1000).toFixed(1)}k`;
+
+const sumOrNull = (values: Array<number | undefined>) => {
+  const present = values.filter((v): v is number => v != null);
+  return present.length ? present.reduce((s, v) => s + v, 0) : null;
+};
+
 const AOVStatTable = ({ match }: { match: MatchDetail }) => {
   const games = match.aovGameRosters ?? [];
   const [activeTab, setActiveTab] = useState(0);
@@ -3098,10 +2838,11 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
 
   if (!currentGame) return null;
 
-  const hasNumericStats = [
-    ...(currentGame.team1Roster.players ?? []),
-    ...(currentGame.team2Roster.players ?? []),
-  ].some(
+  const team1Players = currentGame.team1Roster.players ?? [];
+  const team2Players = currentGame.team2Roster.players ?? [];
+  const allPlayers = [...team1Players, ...team2Players];
+
+  const hasNumericStats = allPlayers.some(
     (p) =>
       (p.kills ?? 0) > 0 ||
       (p.deaths ?? 0) > 0 ||
@@ -3109,129 +2850,256 @@ const AOVStatTable = ({ match }: { match: MatchDetail }) => {
       p.performanceScore != null ||
       p.gold != null,
   );
+  const team1Gold = sumOrNull(team1Players.map((p) => p.gold));
+  const team2Gold = sumOrNull(team2Players.map((p) => p.gold));
+
+  const sideLabel = (side?: "blue" | "red") =>
+    side === "blue" ? "Phe xanh" : side === "red" ? "Phe đỏ" : null;
+  const team1SideLabel = sideLabel(currentGame.team1Side);
+  const team2SideLabel = sideLabel(
+    currentGame.team1Side === "blue"
+      ? "red"
+      : currentGame.team1Side === "red"
+        ? "blue"
+        : undefined,
+  );
+  const duration = formatAovDuration(currentGame.durationSec);
+  const tag1 = currentGame.team1Roster.teamTag || currentGame.team1Roster.teamName;
+  const tag2 = currentGame.team2Roster.teamTag || currentGame.team2Roster.teamName;
+
+  const compareRows = [
+    hasNumericStats
+      ? {
+          label: "Hạ gục",
+          a: currentGame.team1Kills,
+          b: currentGame.team2Kills,
+          fmt: String,
+        }
+      : null,
+    team1Gold != null && team2Gold != null
+      ? { label: "Vàng", a: team1Gold, b: team2Gold, fmt: formatAovGold }
+      : null,
+  ].filter((row): row is NonNullable<typeof row> => row !== null);
+
+  const teams = [
+    {
+      roster: currentGame.team1Roster,
+      players: team1Players,
+      side: team1SideLabel,
+      won: currentGame.team1Won,
+      kills: currentGame.team1Kills,
+      gold: team1Gold,
+    },
+    {
+      roster: currentGame.team2Roster,
+      players: team2Players,
+      side: team2SideLabel,
+      won: currentGame.team1Won == null ? null : !currentGame.team1Won,
+      kills: currentGame.team2Kills,
+      gold: team2Gold,
+    },
+  ];
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-foreground">
-            Match Stats
-          </h3>
-          <p className="mt-0.5 text-xs text-[#EEEEEE]">
-            {hasNumericStats
-              ? "Thống kê chi tiết từng người chơi (AOV / Liên Quân)"
-              : "Danh sách người chơi 2 đội"}
-          </p>
-        </div>
-        {games.length > 1 ? (
-          <div className="flex flex-wrap gap-2">
-            {games.map((game, i) => (
+    <div className={`${AOV_FONT} ${AOV_INK}`}>
+      {games.length > 1 ? (
+        <div
+          role="tablist"
+          aria-label="Chọn ván"
+          className="grid border border-[#F2F0EB]"
+          style={{ gridTemplateColumns: `repeat(${games.length}, minmax(0, 1fr))` }}
+        >
+          {games.map((game, i) => {
+            const on = activeTab === i;
+            const winnerTag =
+              game.team1Won == null
+                ? null
+                : game.team1Won
+                  ? game.team1Roster.teamTag || game.team1Roster.teamName
+                  : game.team2Roster.teamTag || game.team2Roster.teamName;
+            const sub = [
+              winnerTag ? `${winnerTag} thắng` : null,
+              formatAovDuration(game.durationSec),
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return (
               <button
                 key={game.label}
                 type="button"
+                role="tab"
+                aria-selected={on}
                 onClick={() => setActiveTab(i)}
-                className={`border px-4 py-1.5 text-xs font-semibold transition-all ${
-                  activeTab === i
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-border bg-transparent text-[#EEEEEE] hover:text-foreground"
+                className={`min-h-14 px-2.5 py-2 text-left transition-colors md:min-h-14 md:px-4 md:py-2 ${
+                  i > 0 ? "border-l border-[#F2F0EB]" : ""
+                } ${
+                  on
+                    ? "bg-[#F2F0EB] text-[#0B0B0B]"
+                    : "bg-transparent text-[#F2F0EB] hover:bg-[#F2F0EB]/5"
                 }`}
               >
-                {game.label}
+                <span className="block text-sm font-extrabold md:text-base">
+                  {game.label}
+                </span>
+                {sub ? (
+                  <span
+                    className={`mt-0.5 block text-[11px] md:text-[13px] ${
+                      on ? "text-[#4A4844]" : AOV_GREY
+                    }`}
+                  >
+                    {sub}
+                  </span>
+                ) : null}
               </button>
-            ))}
+            );
+          })}
+        </div>
+      ) : null}
+
+      {compareRows.length > 0 ? (
+        <div className="mt-5 md:mt-6">
+          <div className="grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] pb-1.5 text-xs md:grid-cols-[minmax(0,1fr)_120px_minmax(0,1fr)] md:pb-2.5 md:text-[13px]">
+            <span>
+              <strong>{tag1}</strong>
+              {team1SideLabel ? (
+                <span className={AOV_GREY}> · {team1SideLabel}</span>
+              ) : null}
+            </span>
+            <span className={`text-center ${AOV_GREY}`}>
+              {[currentGame.label, duration].filter(Boolean).join(" · ")}
+            </span>
+            <span className="text-right">
+              {team2SideLabel ? (
+                <span className={AOV_GREY}>{team2SideLabel} · </span>
+              ) : null}
+              <strong>{tag2}</strong>
+            </span>
           </div>
-        ) : null}
-      </div>
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
-        {[currentGame.team1Roster, currentGame.team2Roster].map((roster) => (
-          <div key={roster.teamTag} className={MATCH_STAT_PANEL}>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[280px] table-fixed border-collapse sm:min-w-[380px]">
-                <colgroup>
-                  <col className="w-[38%] max-w-[140px]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[18%]" />
-                </colgroup>
-                <thead>
-                  <tr className={TOURNAMENT_TABLE_HEADER_ROW_CLASS}>
-                    <th className={MATCH_STAT_TH_NAME}>
-                      <div className="flex min-w-0 items-center gap-1.5 normal-case">
-                        <img
-                          src={roster.teamLogo}
-                          alt={roster.teamTag}
-                          className="h-5 w-5 shrink-0 rounded-sm"
-                        />
-                        <span className="truncate text-xs font-extrabold uppercase tracking-wide sm:text-sm md:hidden">
-                          {roster.teamTag || roster.teamName}
+          {compareRows.map((row) => (
+            <div
+              key={row.label}
+              className={`grid grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)] items-center border-t ${AOV_RULE} py-1.5 tabular-nums md:grid-cols-[minmax(0,1fr)_120px_minmax(0,1fr)] md:py-2`}
+            >
+              <span
+                className={`text-sm md:text-base ${
+                  row.a >= row.b ? "font-extrabold" : `font-normal ${AOV_GREY}`
+                }`}
+              >
+                {row.fmt(row.a)}
+              </span>
+              <span className={`text-center text-[11px] md:text-xs ${AOV_GREY}`}>
+                {row.label}
+              </span>
+              <span
+                className={`text-right text-sm md:text-base ${
+                  row.b >= row.a ? "font-extrabold" : `font-normal ${AOV_GREY}`
+                }`}
+              >
+                {row.fmt(row.b)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {teams.map((team) => (
+        <section
+          key={team.roster.teamTag || team.roster.teamName}
+          className="mt-6 md:mt-8"
+        >
+          <div className="flex items-baseline gap-2 border-b-2 border-[#F2F0EB] pb-1.5 md:gap-3 md:pb-2">
+            <h3 className="m-0 min-w-0 truncate text-sm font-extrabold md:text-base">
+              {team.roster.teamName}
+            </h3>
+            <span className={`shrink-0 text-xs md:text-[13px] ${AOV_GREY}`}>
+              {[
+                team.side,
+                hasNumericStats ? `${team.kills} hạ gục` : null,
+                team.gold != null ? `${formatAovGold(team.gold)} vàng` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+            {team.won != null ? (
+              <span
+                className={`ml-auto shrink-0 text-xs font-extrabold tracking-[0.04em] md:text-[13px] ${
+                  team.won ? AOV_ACCENT : AOV_GREY
+                }`}
+              >
+                {team.won ? "THẮNG" : "THUA"}
+              </span>
+            ) : null}
+          </div>
+
+          <div
+            className={`hidden gap-3 pb-1.5 pt-2.5 text-xs md:grid ${AOV_ROW_GRID} ${AOV_GREY}`}
+          >
+            <span>Tuyển thủ</span>
+            <span>K / D / A</span>
+            <span>Vàng</span>
+            <span>Điểm</span>
+          </div>
+
+          {team.players.length === 0 ? (
+            <div className={`border-t ${AOV_RULE} py-4 text-sm ${AOV_GREY}`}>
+              Chưa có người chơi
+            </div>
+          ) : (
+            team.players.map((p, playerIndex) => {
+              const kda = hasNumericStats
+                ? `${p.kills ?? 0} / ${p.deaths ?? 0} / ${p.assists ?? 0}`
+                : "–";
+              const score =
+                p.performanceScore != null ? p.performanceScore.toFixed(1) : "–";
+              const gold = p.gold != null ? formatAovGold(p.gold) : "–";
+              const ignHint =
+                p.originalIgn && p.originalIgn !== p.name
+                  ? `${p.name} (${p.originalIgn})`
+                  : p.name;
+
+              return (
+                <div
+                  key={`${team.roster.teamTag}-${p.name}-${playerIndex}`}
+                  className={`border-t ${AOV_RULE} py-2.5 text-[13px] tabular-nums md:grid md:items-center md:gap-3 md:py-2 ${AOV_ROW_GRID}`}
+                >
+                  <div className="flex min-w-0 items-center gap-3 md:gap-2.5">
+                    <PlayerStatAvatar
+                      player={p}
+                      imgClassName={`h-9 w-9 shrink-0 border ${AOV_RULE} object-cover md:h-8 md:w-8`}
+                      fallbackClassName={`flex h-9 w-9 shrink-0 items-center justify-center border ${AOV_RULE} text-xs font-extrabold ${AOV_GREY} md:h-8 md:w-8`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span
+                          className="min-w-0 truncate text-sm font-bold md:text-[13px]"
+                          title={ignHint}
+                        >
+                          {p.name}
                         </span>
-                        <span className="hidden truncate text-xs font-extrabold uppercase tracking-wide sm:text-sm md:inline">
-                          {roster.teamName}
+                        {/* Mobile: K/D/A nằm cùng dòng tên */}
+                        <span className="ml-auto shrink-0 text-sm font-bold md:hidden">
+                          {kda.replace(/ /g, "")}
                         </span>
                       </div>
-                    </th>
-                    <th className={MATCH_STAT_TH}>K</th>
-                    <th className={MATCH_STAT_TH}>D</th>
-                    <th className={MATCH_STAT_TH}>A</th>
-                    <th className={MATCH_STAT_TH}>Điểm</th>
-                    <th className={MATCH_STAT_TH}>Vàng</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(roster.players ?? []).length === 0 ? (
-                    <tr className={MATCH_STAT_TR}>
-                      <td
-                        colSpan={6}
-                        className="px-3 py-4 text-center text-xs text-neutral-500"
+                      <div
+                        className={`mt-px flex justify-between gap-2 text-xs md:hidden ${AOV_GREY}`}
                       >
-                        Chưa có người chơi
-                      </td>
-                    </tr>
-                  ) : (
-                    roster.players.map((p, playerIndex) => (
-                      <tr
-                        key={`${roster.teamTag}-${p.name}-${playerIndex}`}
-                        className={MATCH_STAT_TR}
-                      >
-                        <td className={MATCH_STAT_TD_NAME}>
-                          <div className="flex min-w-0 max-w-full items-center gap-1.5">
-                            <PlayerStatAvatar player={p} />
-                            <span
-                              className="block min-w-0 truncate text-[11px] font-semibold text-white"
-                              title={
-                                p.originalIgn && p.originalIgn !== p.name
-                                  ? `${p.name} (${p.originalIgn})`
-                                  : p.name
-                              }
-                            >
-                              {p.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className={MATCH_STAT_TD}>
-                          {hasNumericStats ? (p.kills ?? 0) : "-"}
-                        </td>
-                        <td className={MATCH_STAT_TD}>
-                          {hasNumericStats ? (p.deaths ?? 0) : "-"}
-                        </td>
-                        <td className={MATCH_STAT_TD}>
-                          {hasNumericStats ? (p.assists ?? 0) : "-"}
-                        </td>
-                        <td className={MATCH_STAT_TD}>
-                          {p.performanceScore ?? "-"}
-                        </td>
-                        <td className={MATCH_STAT_TD}>{p.gold ?? "-"}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
-      </div>
+                        <span className="min-w-0 truncate">{gold} vàng</span>
+                        <span className="shrink-0">
+                          Điểm <strong className={AOV_INK}>{score}</strong>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <span className="hidden font-semibold md:block">{kda}</span>
+                  <span className="hidden md:block">{gold}</span>
+                  <span className="hidden font-extrabold md:block">{score}</span>
+                </div>
+              );
+            })
+          )}
+        </section>
+      ))}
     </div>
   );
 };
@@ -3447,15 +3315,245 @@ const RosterSection = ({
 };
 
 /* ── Main Page ── */
-const MatchDetailPage = () => {
+/* ── Sidebar kết quả trận: header dùng chung trong MatchPanel ── */
+const MatchDetailPanelHeader = ({
+  match,
+  isCompleted,
+  onClose,
+}: {
+  match: MatchDetail;
+  isCompleted: boolean;
+  onClose?: () => void;
+}) => (
+  <MatchPanelHeader
+    title={match.roundName || match.tournamentName}
+    meta={[formatDate(match.date), match.format].filter(Boolean).join(" · ")}
+    isLive={!isCompleted}
+    team1={match.team1}
+    team2={match.team2}
+    onClose={onClose}
+  />
+);
+
+/* ── Trang trận Valorant / Liên Quân: đầu trang kiểu trang báo (design/Valorant.dc.html) ── */
+const GAME_LABEL: Partial<Record<MatchDetail["gameType"], string>> = {
+  valorant: "Valorant",
+  aov: "Liên Quân",
+};
+
+const PageTeamLogo = ({ team }: { team: MatchDetail["team1"] }) => {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden border border-[#2C2B29] md:h-[72px] md:w-[72px]">
+      {team.logo && !failed ? (
+        <img
+          src={team.logo}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className="text-xs font-extrabold text-[#9A9893] md:text-[15px]">{team.tag}</span>
+      )}
+    </div>
+  );
+};
+
+const PageTeamBlock = ({
+  team,
+  lost,
+  align,
+}: {
+  team: MatchDetail["team1"];
+  lost: boolean;
+  align: "left" | "right";
+}) => (
+  <div
+    className={`flex min-w-0 items-center gap-3 md:gap-[18px] ${
+      align === "right" ? "flex-row-reverse text-right" : ""
+    }`}
+  >
+    <PageTeamLogo team={team} />
+    <div className="min-w-0">
+      <div className="hidden text-xs text-[#9A9893] md:block">{team.tag}</div>
+      <div
+        className={`truncate text-[17px] font-extrabold leading-[1.25] tracking-[-0.02em] transition-colors md:text-[36px] md:leading-[1.2] ${
+          lost ? "text-[#9A9893]" : ""
+        }`}
+      >
+        {team.name}
+      </div>
+    </div>
+  </div>
+);
+
+/** Phòng ban/pick (trang lobby): giữa 2 đội hiện mũi tên chỉ đội đang tới lượt thay cho tỉ số. */
+type HeaderBanPickTurn = {
+  status: "waiting" | "running" | "done";
+  actingSlot: "team1" | "team2" | null;
+  action: "ban" | "pick" | "side" | null;
+};
+
+const TURN_VERB = { ban: "đang cấm", pick: "đang chọn map", side: "đang chọn bên" } as const;
+
+const TurnArrow = ({ direction }: { direction: "left" | "right" }) => (
+  <svg
+    viewBox="0 0 96 40"
+    className={`h-8 w-[72px] md:h-14 md:w-32 ${direction === "left" ? "" : "rotate-180"}`}
+    aria-hidden="true"
+  >
+    <path
+      d="M94 20H6M24 3L6 20l18 17"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="5"
+      strokeLinecap="square"
+    />
+  </svg>
+);
+
+const MatchPageHeader = ({
+  match,
+  isCompleted,
+  backTo,
+  prevLink,
+  nextLink,
+  banPickTurn,
+}: {
+  match: MatchDetail;
+  isCompleted: boolean;
+  backTo: string;
+  prevLink?: string | null;
+  nextLink?: string | null;
+  banPickTurn?: HeaderBanPickTurn | null;
+}) => {
+  const s1 = toNumber(match.team1.score) ?? 0;
+  const s2 = toNumber(match.team2.score) ?? 0;
+  const decided = isCompleted && s1 !== s2;
+  const actingSlot = banPickTurn?.status === "running" ? banPickTurn.actingSlot : null;
+
+  // Tổng thời gian thi đấu các ván (Riot gameLengthMillis / AOV duration_sec)
+  const minutes = Math.round(
+    (match.valorantGames ?? []).reduce(
+      (sum, game) => sum + (game.matchInfo?.gameLengthMillis ?? 0) / 60000,
+      0,
+    ) +
+      (match.aovGameRosters ?? []).reduce(
+        (sum, game) => sum + (toNumber(game.durationSec) ?? 0) / 60,
+        0,
+      ),
+  );
+
+  return (
+    <header className="mx-auto w-full max-w-[1440px] px-4 pt-7 md:px-8">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 text-sm">
+        <div className="min-w-0">
+          <Link to={backTo} className="font-semibold">
+            ← Nhánh đấu
+          </Link>{" "}
+          <span className="text-[#9A9893]">
+            / {[match.roundName, match.tournamentName].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+        {prevLink || nextLink ? (
+          <div className="flex gap-5 text-[13px]">
+            {prevLink ? (
+              <Link to={prevLink} className="text-[#9A9893] hover:text-[#F2F0EB]">
+                ← Trận trước
+              </Link>
+            ) : null}
+            {nextLink ? (
+              <Link to={nextLink} className="text-[#9A9893] hover:text-[#F2F0EB]">
+                Trận sau →
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-8 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 text-[13px] text-[#9A9893]">
+        <span>
+          <strong className="text-[#F2F0EB]">{GAME_LABEL[match.gameType] ?? match.gameType}</strong>
+          {[match.format, formatDate(match.date)]
+            .filter(Boolean)
+            .map((part) => ` · ${part}`)
+            .join("")}
+        </span>
+        <span>
+          {isCompleted ? (
+            <>Kết thúc{minutes > 0 ? ` · ${minutes} phút` : ""}</>
+          ) : (
+            <strong className="text-[#FF4A3D]">Chưa kết thúc</strong>
+          )}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-t-2 border-[#F2F0EB] pt-4 md:gap-8 md:pt-6">
+        <PageTeamBlock
+          team={match.team1}
+          lost={banPickTurn ? actingSlot === "team2" : decided && s1 < s2}
+          align="left"
+        />
+        {banPickTurn ? (
+          <div className="flex min-w-[96px] flex-col items-center gap-1.5 md:min-w-[160px]">
+            {actingSlot ? (
+              <TurnArrow direction={actingSlot === "team1" ? "left" : "right"} />
+            ) : (
+              <span className="text-[40px] font-extrabold leading-none tracking-[-0.03em] text-[#9A9893] md:text-[64px]">
+                VS
+              </span>
+            )}
+            <span className="whitespace-nowrap text-[11px] font-bold text-[#9A9893] md:text-[13px]">
+              {actingSlot && banPickTurn.action
+                ? `${(actingSlot === "team1" ? match.team1 : match.team2).tag} ${TURN_VERB[banPickTurn.action]}`
+                : banPickTurn.status === "done"
+                  ? "Ban/pick xong"
+                  : "Chờ bắt đầu ban/pick"}
+            </span>
+          </div>
+        ) : (
+          <div className="whitespace-nowrap text-[48px] font-extrabold leading-[1.05] tracking-[-0.04em] tabular-nums md:text-[96px]">
+            {s1}
+            <span className="mx-1.5 font-normal text-[#9A9893] md:mx-4">–</span>
+            {s2}
+          </div>
+        )}
+        <PageTeamBlock
+          team={match.team2}
+          lost={banPickTurn ? actingSlot === "team1" : decided && s2 < s1}
+          align="right"
+        />
+      </div>
+
+      <div className="mt-5 border-t border-[#2C2B29]" />
+    </header>
+  );
+};
+
+type MatchDetailPageProps = {
+  /** Mở từ sidebar trên trang bracket (không lấy từ route /match/:id). */
+  matchId?: string;
+  /** "panel" = nội dung bên trong sidebar kết quả (MatchPanelProvider). */
+  variant?: "page" | "panel";
+  onClose?: () => void;
+};
+
+const MatchDetailPage = ({
+  matchId,
+  variant = "page",
+  onClose,
+}: MatchDetailPageProps = {}) => {
+  const isPanel = variant === "panel";
   const { user, token } = useAuth();
   const { tournament } = useOutletContext<{
     tournament?: TournamentBySlugResponse["info"];
   }>();
-  const { id, game, slug } = useParams();
+  const params = useParams();
+  const { game, slug } = params;
+  const id = matchId ?? params.id;
   const location = useLocation();
   const normalizedRouteGame = normalizeGameSlug(game);
-  const isLobbyRoute = /\/lobby\//.test(location.pathname);
+  const isLobbyRoute = !isPanel && /\/lobby\//.test(location.pathname);
   const backTo =
     normalizedRouteGame && slug
       ? `/tournament/${normalizedRouteGame}/${slug}/bracket`
@@ -3590,6 +3688,19 @@ const MatchDetailPage = () => {
           avatar,
         );
 
+        [player?.riot_puuid_val, player?.riot_puuid_lol]
+          .map((value) => String(value ?? "").trim())
+          .filter(Boolean)
+          .forEach((puuid) => {
+            (side === "team1" ? context.team1Puuids : context.team2Puuids).add(puuid);
+            if (!context.profileByPuuid.has(puuid)) {
+              context.profileByPuuid.set(puuid, {
+                nickname: nickname || undefined,
+                avatar: avatar || undefined,
+              });
+            }
+          });
+
         if (!riotAccount) return;
 
         if (side === "team1") {
@@ -3619,36 +3730,14 @@ const MatchDetailPage = () => {
     matchId: toNumber(currentMatchRow?.id) ?? numId,
   });
 
-  const requestedBanPickFormat = useMemo(() => {
-    const bestOf = toNumber((currentMatchRow as { best_of?: unknown } | null)?.best_of);
-
-    if (bestOf === 1) return "BO1";
-    if (bestOf === 5) return "BO5";
-    if (bestOf === 3) return "BO3";
-
-    return undefined;
-  }, [currentMatchRow]);
-
-  const {
-    session: liveBanPickSession,
-    isLoading: isLobbyBanPickLoading,
-    error: lobbyBanPickError,
-    viewerTeamSlot,
-    canAct,
-    selectMap,
-    confirmAction,
-    selectSide,
-  } = useRoundBanPickSocket({
+  const banPickRoom = useBanPickRoom({
     roundSlug:
       normalizedRouteGame === "val" && Boolean(numId) ? roundSlug : undefined,
     matchId: numId,
-    format: requestedBanPickFormat,
     token,
-    pollEnabled:
-      isLobbyRoute &&
-      normalizedRouteGame === "val" &&
-      !isCompletedMatchStatus(currentMatchRow?.status),
+    enabled: normalizedRouteGame === "val" && Boolean(numId),
   });
+  const liveBanPickSession = banPickRoom.session;
 
   const currentBracketName = useMemo(() => {
     const bracketId = toNumber(currentMatchRow?.bracket_id);
@@ -3920,7 +4009,18 @@ const MatchDetailPage = () => {
 
   if (!match) {
     if (isMatchListLoading) {
-      return <PageLoader label="Đang tải trận đấu..." />;
+      return (
+        <PageLoader label="Đang tải trận đấu..." fullScreen={!isPanel} />
+      );
+    }
+
+    if (isPanel) {
+      return (
+        <div className="flex items-start justify-between gap-4 px-4 py-6 md:px-8">
+          <p className="text-sm text-[#9A9893]">Không tìm thấy trận đấu.</p>
+          <MatchPanelCloseButton onClose={onClose} />
+        </div>
+      );
     }
 
     return (
@@ -3973,14 +4073,9 @@ const MatchDetailPage = () => {
   const isValorantMatch = match.gameType === "valorant";
   const isMatchCompleted = isCompletedMatchStatus(match.status);
   const shouldShowLobby = isLobbyRoute && isValorantMatch && !isMatchCompleted;
-  const shouldShowEmbeddedBanPick =
-    shouldShowLobby &&
-    Boolean(liveBanPickSession) &&
-    liveBanPickSession?.phase !== "complete";
+  const shouldShowEmbeddedBanPick = shouldShowLobby && Boolean(liveBanPickSession);
   const shouldShowPendingMatchOverview =
-    shouldShowLobby &&
-    Boolean(liveBanPickSession) &&
-    liveBanPickSession?.phase === "complete";
+    shouldShowLobby && liveBanPickSession?.status === "done";
   const shouldShowPostMatchData =
     !isLobbyRoute && (!isValorantMatch || isMatchCompleted);
   const shouldShowMatchDetailBlockedNotice =
@@ -3998,11 +4093,43 @@ const MatchDetailPage = () => {
         (isValorantStatsLoading || isLinkedPlayersLoading)));
 
   if (isWaitingPostMatchStats) {
-    return <PageLoader label="Đang tải dữ liệu sau trận..." />;
+    return (
+      <PageLoader
+        label="Đang tải dữ liệu sau trận..."
+        fullScreen={!isPanel}
+      />
+    );
   }
 
   return (
-    <div className={`min-h-screen ${TOURNAMENT_PAGE_BG_CLASS}`}>
+    <div
+      className={`${isPanel ? "pb-12" : "min-h-screen"} ${TOURNAMENT_PAGE_BG_CLASS}`}
+    >
+      {isPanel ? (
+        <MatchDetailPanelHeader
+          match={match}
+          isCompleted={isMatchCompleted}
+          onClose={onClose}
+        />
+      ) : match.gameType === "valorant" || match.gameType === "aov" ? (
+        <MatchPageHeader
+          match={match}
+          isCompleted={isMatchCompleted}
+          backTo={backTo}
+          prevLink={prevDetail ? buildMatchLink(prevDetail.id) : null}
+          nextLink={nextDetail ? buildMatchLink(nextDetail.id) : null}
+          banPickTurn={
+            shouldShowLobby && liveBanPickSession
+              ? {
+                  status: liveBanPickSession.status,
+                  actingSlot: liveBanPickSession.current_action?.team ?? null,
+                  action: liveBanPickSession.current_action?.type ?? null,
+                }
+              : null
+          }
+        />
+      ) : (
+      <>
       <TournamentSubpageHeader
         title={match.tournamentName}
         subtitle={[match.roundName, match.format].filter(Boolean).join(" · ")}
@@ -4198,23 +4325,24 @@ const MatchDetailPage = () => {
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {shouldShowMatchDetailBlockedNotice ? (
-        <section className="mx-auto px-4 md:px-8 py-6">
-          <div className="space-y-2">
-            <p className="text-sm font-semibold">
-              Trang này chỉ hiển thị dữ liệu sau trận khi match đã completed.
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Trận này đang diễn ra hoặc chưa hoàn tất. Vui lòng mở lobby page
-              riêng để theo dõi ban/pick và tiến trình map.
-            </p>
+        <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 border border-[#2C2B29] px-4 py-4 md:px-5">
+            <div className="min-w-0">
+              <p className="m-0 text-base font-extrabold">Trận chưa kết thúc</p>
+              <p className="m-0 mt-1 text-sm text-[#9A9893]">
+                Ban/pick map và kết quả sẽ hiện ở đây khi trận xong. Chủ đội vào phòng ban/pick để cấm/chọn map.
+              </p>
+            </div>
             {numId ? (
               <Link
                 to={buildLobbyLink(numId)}
-                className="inline-flex h-9 items-center rounded-md border border-primary/60 px-3 text-xs font-bold uppercase  text-primary hover:bg-primary/10"
+                className="inline-flex min-h-11 shrink-0 items-center bg-[#F2F0EB] px-5 text-sm font-extrabold text-[#0B0B0B] hover:opacity-90"
               >
-                Mở Lobby Page
+                Vào ban/pick
               </Link>
             ) : null}
           </div>
@@ -4222,7 +4350,7 @@ const MatchDetailPage = () => {
       ) : null}
 
       {shouldShowLobbyCompletedNotice ? (
-        <section className="mx-auto px-4 md:px-8 py-6">
+        <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">
           <div className="space-y-2">
             <p className="text-sm font-semibold">
               Match đã completed.
@@ -4244,7 +4372,7 @@ const MatchDetailPage = () => {
       ) : null}
 
       {shouldShowLobbyUnsupportedNotice ? (
-        <section className="mx-auto px-4 md:px-8 py-6">
+        <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">
           <div className="text-sm text-neutral-400">
             Lobby page hiện chỉ áp dụng cho Valorant.
           </div>
@@ -4252,18 +4380,16 @@ const MatchDetailPage = () => {
       ) : null}
 
       {shouldShowEmbeddedBanPick ? (
-        <BanPickLobbyPanel
-          match={match}
-          session={liveBanPickSession}
-          isLoading={isLobbyBanPickLoading}
-          error={lobbyBanPickError}
-          viewerTeamSlot={viewerTeamSlot}
-          canAct={canAct}
-          selectMap={selectMap}
-          confirmAction={confirmAction}
-          selectSide={selectSide}
-          linkedContext={linkedTeamContext}
-        />
+        <section className="mx-auto w-full max-w-[1440px] px-4 pt-6 md:px-8">
+          <BanPickBoard
+            room={banPickRoom}
+            teams={{
+              team1: { name: match.team1.name, tag: match.team1.tag || match.team1.name },
+              team2: { name: match.team2.name, tag: match.team2.tag || match.team2.name },
+            }}
+            isLoggedIn={Boolean(token)}
+          />
+        </section>
       ) : null}
 
       {shouldShowPendingMatchOverview ? (
@@ -4278,24 +4404,54 @@ const MatchDetailPage = () => {
       {shouldShowLobby &&
       !shouldShowEmbeddedBanPick &&
       !shouldShowPendingMatchOverview ? (
-        <section className="mx-auto px-4 md:px-8 py-6">
+        <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">
           <div className="space-y-2">
-            <p className="text-sm text-white">Đang chờ setup ban/pick cho lobby trận này.</p>
-            {lobbyBanPickError ? (
-              <p className="text-xs text-rose-300">{lobbyBanPickError}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Hãy khởi tạo ban/pick ở trang quản trị nếu trận chưa được setup.
-              </p>
-            )}
+            <p className="text-sm text-white">
+              {banPickRoom.isLoading
+                ? "Đang tải ban/pick..."
+                : "Trận này chưa được BTC tạo phòng ban/pick."}
+            </p>
+            {banPickRoom.error ? (
+              <p className="text-xs text-[#FF4A3D]">{banPickRoom.error}</p>
+            ) : null}
           </div>
         </section>
       ) : null}
 
       {shouldShowPostMatchData ? (
         <>
-          {(hasMapData || hasBanPickTimeline) && (
-            <div className="mx-auto px-4 md:px-8 py-6">
+          {match.gameType === "valorant" && match.valorantGames?.length ? (
+            <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-8">
+              {hasBanPickTimeline ? (
+                <div className="mb-8">
+                  <BanPickTimelinePanel
+                    timeline={banPickTimeline}
+                    team1={match.team1}
+                    team2={match.team2}
+                  />
+                </div>
+              ) : null}
+              <ValorantMatchResult
+                games={match.valorantGames}
+                team1={{
+                  name: match.team1.name,
+                  tag: match.team1.tag || match.team1.name,
+                  apiTeamId: "Blue",
+                }}
+                team2={{
+                  name: match.team2.name,
+                  tag: match.team2.tag || match.team2.name,
+                  apiTeamId: "Red",
+                }}
+              />
+            </div>
+          ) : null}
+
+          {/* Valorant / Liên Quân có tab ván riêng (kèm tỉ số) → bỏ hàng tỉ số từng map kiểu cũ */}
+          {!(match.gameType === "valorant" && match.valorantGames?.length) &&
+            !(match.gameType === "aov" && hasAovData) &&
+            (hasMapData || hasBanPickTimeline) && (
+            <div className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">
               <div
                 className={`grid gap-4 ${
                   hasBanPickTimeline
@@ -4331,7 +4487,8 @@ const MatchDetailPage = () => {
             </div>
           )}
 
-          <div className="mx-auto px-4 md:px-8 py-8 md:py-5 space-y-6">
+          {match.gameType === "valorant" && match.valorantGames?.length ? null : (
+          <div className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-8 md:py-5 space-y-6">
             {!hasRosterData && !hasMapData && !hasBanPickTimeline ? (
               <section className="text-sm text-neutral-300">
                 {isAovStatsLoading
@@ -4356,7 +4513,7 @@ const MatchDetailPage = () => {
                 ) : null}
 
                 {(match.gameType === "cs2" ||
-                  match.gameType === "valorant") && (
+                  (match.gameType === "valorant" && !match.valorantGames?.length)) && (
                   <section>
                     <FPSStatTable
                       match={match}
@@ -4383,6 +4540,7 @@ const MatchDetailPage = () => {
               </>
             )}
           </div>
+          )}
         </>
       ) : null}
     </div>

@@ -82,7 +82,11 @@ export const getDoubleElimRoundTitle = (
   return `VÒNG ${roundNumber}`;
 };
 
+/** Nhãn trên thẻ trận: viết hoa chữ đầu như canvas ("Tứ kết nhánh trên #1"). */
 export const formatDoubleElimMatchFooterTitle = (
   roundTitle: string,
   matchNo: number,
-) => `${roundTitle} #${matchNo}`;
+) => {
+  const lower = roundTitle.toLocaleLowerCase("vi-VN");
+  return `${lower.charAt(0).toLocaleUpperCase("vi-VN")}${lower.slice(1)} #${matchNo}`;
+};
