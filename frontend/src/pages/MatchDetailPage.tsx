@@ -118,7 +118,7 @@ type LinkedTeamContext = {
   team2Players: TournamentTeamPlayersResponse["players"];
   team1RiotAccounts: Set<string>;
   team2RiotAccounts: Set<string>;
-  /** puuid (Valorant + LMHT) của người chơi từng đội — ghép phe chắc hơn Riot ID (không đổi khi đổi tên). */
+  /** puuid (Valorant / LMHT / TFT) của người chơi từng đội — ghép phe chắc hơn Riot ID (không đổi khi đổi tên). */
   team1Puuids: Set<string>;
   team2Puuids: Set<string>;
   profileByPuuid: Map<string, { nickname?: string; avatar?: string }>;
@@ -3688,7 +3688,7 @@ const MatchDetailPage = ({
           avatar,
         );
 
-        [player?.riot_puuid_val, player?.riot_puuid_lol]
+        [player?.riot_puuid_val, player?.riot_puuid_lol, player?.riot_puuid_tft]
           .map((value) => String(value ?? "").trim())
           .filter(Boolean)
           .forEach((puuid) => {

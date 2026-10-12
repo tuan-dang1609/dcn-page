@@ -5,7 +5,11 @@ import { pool } from "../utils/db.js";
 import middleware from "../utils/middleware.js";
 import config from "../utils/config.js";
 import { syncSoloRegistrationsForUser } from "../utils/soloRiotSync.js";
-import { ensureRiotPuuidColumns, resolveRiotPuuids } from "../utils/riotPuuid.js";
+import {
+  RIOT_PUUID_APPS,
+  ensureRiotPuuidColumns,
+  resolveRiotPuuids,
+} from "../utils/riotPuuid.js";
 
 const usersRouter = new Elysia({ name: "Users" }).derive(
   middleware.deriveAuthContext,
@@ -593,27 +597,38 @@ usersRouter.get(
         throw new Error("invalid state");
       }
 
-      // puuid theo từng key (Valorant / LMHT) — tra ngay lúc tên vừa được Riot xác nhận
+      // puuid theo từng key (Valorant / LMHT / TFT) — tra ngay lúc tên vừa được Riot xác nhận
       await ensureRiotPuuidColumns();
       const puuids = await resolveRiotPuuids(riot.gameName, riot.tagLine);
+      // [{ column: "riot_puuid_val", puuid }, …] cho mọi game (Valorant / LMHT / TFT)
+      const puuidColumns = Object.entries(RIOT_PUUID_APPS).map(([app, { column }]) => ({
+        app,
+        column,
+        puuid: puuids[app] ?? null,
+      }));
+      console.info(
+        `[riot/callback] user ${userId} ${riot.riotAccount}: puuid ${puuidColumns
+          .map((item) => `${item.app}=${item.puuid ? "ok" : "trống"}`)
+          .join(" ")}`,
+      );
 
+      // Trùng nếu user khác giữ 1 trong các puuid này; user cũ chưa có puuid nào thì so theo tên
+      const puuidMatch = puuidColumns
+        .map((item, index) => `($${index + 3}::text IS NOT NULL AND ${item.column} = $${index + 3})`)
+        .join(" OR ");
+      const noPuuid = puuidColumns.map((item) => `${item.column} IS NULL`).join(" AND ");
       const { rows: existingOwners } = await pool.query(
         `
         SELECT id
         FROM users
         WHERE id <> $2
           AND (
-            ($3::text IS NOT NULL AND riot_puuid_val = $3)
-            OR ($4::text IS NOT NULL AND riot_puuid_lol = $4)
-            OR (
-              riot_puuid_val IS NULL
-              AND riot_puuid_lol IS NULL
-              AND lower(riot_account) = lower($1)
-            )
+            ${puuidMatch}
+            OR (${noPuuid} AND lower(riot_account) = lower($1))
           )
         LIMIT 1
         `,
-        [riot.riotAccount, userId, puuids.val, puuids.lol],
+        [riot.riotAccount, userId, ...puuidColumns.map((item) => item.puuid)],
       );
 
       if (existingOwners.length > 0) {
@@ -631,11 +646,12 @@ usersRouter.get(
         `
         UPDATE users
         SET riot_account = $1,
-            riot_puuid_val = COALESCE($3, riot_puuid_val),
-            riot_puuid_lol = COALESCE($4, riot_puuid_lol)
+            ${puuidColumns
+              .map((item, index) => `${item.column} = COALESCE($${index + 3}, ${item.column})`)
+              .join(", ")}
         WHERE id = $2
         `,
-        [riot.riotAccount, userId, puuids.val, puuids.lol],
+        [riot.riotAccount, userId, ...puuidColumns.map((item) => item.puuid)],
       );
 
       // Keep TFT/solo tournament display names in sync with the new Riot ID
