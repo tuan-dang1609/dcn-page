@@ -8,6 +8,7 @@ import { syncSoloRegistrationsForUser } from "../utils/soloRiotSync.js";
 import {
   RIOT_PUUID_APPS,
   ensureRiotPuuidColumns,
+  fillMissingRiotPuuids,
   resolveRiotPuuids,
 } from "../utils/riotPuuid.js";
 
@@ -719,6 +720,9 @@ usersRouter.get(
       set.status = 404;
       return { error: "user not found" };
     }
+
+    // Có Riot ID mà thiếu puuid (callback liên kết không lưu được) → bổ sung ở nền
+    if (user_info[0].riot_account) void fillMissingRiotPuuids(id);
 
     const team_id = user_info[0].team_id;
 

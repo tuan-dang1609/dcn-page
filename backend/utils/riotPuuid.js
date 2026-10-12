@@ -83,3 +83,57 @@ export const resolveRiotPuuids = async (gameName, tagLine) => {
   const puuids = await Promise.all(apps.map((app) => lookupPuuidByRiotId(app, gameName, tagLine)));
   return Object.fromEntries(apps.map((app, index) => [app, puuids[index]]));
 };
+
+/**
+ * Bổ sung puuid còn thiếu cho 1 user đã có riot_account (chạy nền, không chặn response).
+ * Dùng khi callback liên kết Riot không đi qua code lưu puuid (vd. callback về backend khác)
+ * hoặc lần tra lúc liên kết bị lỗi. Mỗi user thử tối đa 1 lần / 10 phút.
+ */
+const FILL_RETRY_MS = 10 * 60 * 1000;
+const lastFillAttempt = new Map();
+
+export const fillMissingRiotPuuids = async (userId) => {
+  const id = Number(userId);
+  if (!Number.isFinite(id)) return;
+  const last = lastFillAttempt.get(id) ?? 0;
+  if (Date.now() - last < FILL_RETRY_MS) return;
+  lastFillAttempt.set(id, Date.now());
+
+  try {
+    await ensureRiotPuuidColumns();
+    const columns = Object.values(RIOT_PUUID_APPS).map((app) => app.column);
+    const { rows } = await pool.query(
+      `SELECT riot_account, ${columns.join(", ")} FROM users WHERE id = $1`,
+      [id],
+    );
+    const user = rows[0];
+    const [gameName, ...rest] = String(user?.riot_account ?? "").split("#");
+    const tagLine = rest.join("#").trim();
+    if (!gameName?.trim() || !tagLine) return;
+
+    const missing = Object.entries(RIOT_PUUID_APPS).filter(([, app]) => !user[app.column]);
+    if (!missing.length) return;
+
+    const results = [];
+    for (const [app, { column }] of missing) {
+      const puuid = await lookupPuuidByRiotId(app, gameName.trim(), tagLine);
+      if (!puuid) {
+        results.push(`${app}=trống`);
+        continue;
+      }
+      try {
+        await pool.query(`UPDATE users SET ${column} = $1 WHERE id = $2 AND ${column} IS NULL`, [
+          puuid,
+          id,
+        ]);
+        results.push(`${app}=ok`);
+      } catch (error) {
+        // Trùng unique: puuid này đang thuộc user khác
+        results.push(`${app}=trùng user khác`);
+      }
+    }
+    console.info(`[riot-puuid] bổ sung user ${id} ${user.riot_account}: ${results.join(" ")}`);
+  } catch (error) {
+    console.warn(`[riot-puuid] bổ sung user ${id} lỗi — ${error instanceof Error ? error.message : error}`);
+  }
+};
