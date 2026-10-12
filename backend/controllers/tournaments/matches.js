@@ -526,7 +526,8 @@ matchRouter.get(
       u.profile_picture,
       u.riot_account,
       u.riot_puuid_val,
-      u.riot_puuid_lol
+      u.riot_puuid_lol,
+      u.riot_puuid_tft
     `;
 
     const fetchPlayersForTeam = async (teamId) => {
@@ -534,7 +535,7 @@ matchRouter.get(
 
       const { rows } = await pool.query(
         `
-        SELECT user_id, username, nickname, profile_picture, riot_account, riot_puuid_val, riot_puuid_lol
+        SELECT user_id, username, nickname, profile_picture, riot_account, riot_puuid_val, riot_puuid_lol, riot_puuid_tft
         FROM (
           SELECT ${linkedPlayerSelect}
           FROM tournament_teams tt
@@ -568,7 +569,7 @@ matchRouter.get(
 
       const { rows } = await pool.query(
         `
-        SELECT user_id, username, nickname, profile_picture, riot_account, riot_puuid_val, riot_puuid_lol
+        SELECT user_id, username, nickname, profile_picture, riot_account, riot_puuid_val, riot_puuid_lol, riot_puuid_tft
         FROM (
           SELECT ${linkedPlayerSelect}
           FROM tournament_teams tt

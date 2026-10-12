@@ -142,9 +142,10 @@ export interface TournamentTeamPlayer {
   nickname?: string;
   profile_picture?: string;
   riot_account?: string | null;
-  /** puuid theo key Valorant / LMHT (Riot mã hoá puuid theo từng ứng dụng). */
+  /** puuid theo key Valorant / LMHT / TFT (Riot mã hoá puuid theo từng ứng dụng). */
   riot_puuid_val?: string | null;
   riot_puuid_lol?: string | null;
+  riot_puuid_tft?: string | null;
   role_in_team?: string;
 }
 
@@ -164,6 +165,7 @@ export interface MatchLinkedPlayer {
   riot_account?: string | null;
   riot_puuid_val?: string | null;
   riot_puuid_lol?: string | null;
+  riot_puuid_tft?: string | null;
   tournament_team_id?: number | string;
 }
 

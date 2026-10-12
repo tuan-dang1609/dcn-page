@@ -1,5 +1,5 @@
 /**
- * Điền riot_puuid_val / riot_puuid_lol cho user đã liên kết Riot trước khi có cột puuid.
+ * Điền riot_puuid_val / riot_puuid_lol / riot_puuid_tft cho user đã liên kết Riot trước khi có cột puuid.
  * Tra theo riot_account (gameName#tagLine) bằng từng key → chỉ đúng với người CHƯA đổi tên Riot;
  * người đã đổi tên sẽ không tìm thấy và để trống (liên kết lại là có).
  *
@@ -34,7 +34,7 @@ const main = async () => {
 
   const apps = Object.entries(RIOT_PUUID_APPS).filter(([, app]) => app.apiKey());
   if (!apps.length) {
-    console.error("Không có key Riot nào (API_KEY_VALORANT_RIOT / LOL_RIOT_API_KEY).");
+    console.error("Không có key Riot nào (API_KEY_VALORANT_RIOT / LOL_RIOT_API_KEY / TFT_KEY).");
     process.exit(1);
   }
   console.log(`Ứng dụng có key: ${apps.map(([name]) => name).join(", ")}${APPLY ? "" : " — CHẠY THỬ, không ghi DB"}`);
@@ -45,7 +45,9 @@ const main = async () => {
     .join(" OR ");
   const { rows } = await pool.query(
     `
-    SELECT id, riot_account, ${colOrNull("riot_puuid_val")}, ${colOrNull("riot_puuid_lol")}
+    SELECT id, riot_account, ${Object.values(RIOT_PUUID_APPS)
+      .map((app) => colOrNull(app.column))
+      .join(", ")}
     FROM users
     WHERE riot_account IS NOT NULL AND TRIM(riot_account) <> '' AND (${missing})
     ORDER BY id
