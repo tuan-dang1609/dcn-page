@@ -236,10 +236,17 @@ const fetchRiotAccountByToken = async (accessToken) => {
     throw new Error("riot account is empty");
   }
 
+  // accounts/me chỉ trả puuid của ứng dụng đăng nhập (RSO). Mỗi game (Valorant / LMHT / TFT)
+  // dùng key riêng → puuid riêng: tra by-riot-id/{gameName}/{tagLine} bằng từng key.
+  await ensureRiotPuuidColumns();
+  const puuids = await resolveRiotPuuids(gameName, tagLine);
+
   return {
     gameName,
     tagLine,
     riotAccount,
+    /** { val, lol, tft } — null nếu tra không được (thiếu key, hết hạn…). */
+    puuids,
   };
 };
 
@@ -597,9 +604,8 @@ usersRouter.get(
         throw new Error("invalid state");
       }
 
-      // puuid theo từng key (Valorant / LMHT / TFT) — tra ngay lúc tên vừa được Riot xác nhận
-      await ensureRiotPuuidColumns();
-      const puuids = await resolveRiotPuuids(riot.gameName, riot.tagLine);
+      // puuid theo từng key (Valorant / LMHT / TFT) — đã tra trong fetchRiotAccountByToken
+      const puuids = riot.puuids ?? {};
       // [{ column: "riot_puuid_val", puuid }, …] cho mọi game (Valorant / LMHT / TFT)
       const puuidColumns = Object.entries(RIOT_PUUID_APPS).map(([app, { column }]) => ({
         app,
