@@ -12,7 +12,8 @@ const STAFF_ROLE_IDS = new Set([1, 2, 3]);
  *   running  — lần lượt từng bước trong state.steps (cấm / chọn map / chọn bên).
  *              Hết giờ → server tự chọn ngẫu nhiên (xử lý khi có người tải trạng thái).
  *   done     — xong; map còn lại là map quyết định.
- * Chỉ chủ đội (teams.created_by) thao tác lượt; BTC chỉ bắt đầu / bỏ qua lượt (ngẫu nhiên) / làm lại.
+ * Chỉ đội trưởng của lượt đăng ký giải (tournament_teams.captain_user_id, không có thì chủ đội) thao tác lượt;
+ * BTC chỉ bắt đầu / bỏ qua lượt (ngẫu nhiên) / làm lại.
  */
 
 const DEFAULT_VALORANT_MAP_POOL = [
@@ -644,14 +645,19 @@ const getBanPickRowBySlug = async (roundSlug) => {
            m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
            tb.name AS team_b_name,
-           ta.created_by AS team_a_owner_id,
-           tb.created_by AS team_b_owner_id,
+           -- Người ban/pick = đội trưởng lượt đăng ký giải đó (không có thì chủ đội)
+           COALESCE(rta.captain_user_id, ta.created_by) AS team_a_owner_id,
+           COALESCE(rtb.captain_user_id, tb.created_by) AS team_b_owner_id,
            tr.created_by AS tournament_owner_id
     FROM ban_picks bp
     LEFT JOIN matches m ON m.id = bp.match_id
     LEFT JOIN teams ta ON ta.id = COALESCE(m.team_a_id, bp.team_a_id)
     LEFT JOIN teams tb ON tb.id = COALESCE(m.team_b_id, bp.team_b_id)
     LEFT JOIN tournaments tr ON tr.id = COALESCE(m.tournament_id, bp.tournament_id)
+    LEFT JOIN tournament_teams rta
+      ON rta.team_id = ta.id AND rta.tournament_id = COALESCE(m.tournament_id, bp.tournament_id)
+    LEFT JOIN tournament_teams rtb
+      ON rtb.team_id = tb.id AND rtb.tournament_id = COALESCE(m.tournament_id, bp.tournament_id)
     WHERE bp.round_slug = $1
     LIMIT 1
     `,
@@ -674,14 +680,19 @@ const getBanPickRowByMatchId = async (matchId) => {
            m.team_b_id AS match_team_b_id,
            ta.name AS team_a_name,
            tb.name AS team_b_name,
-           ta.created_by AS team_a_owner_id,
-           tb.created_by AS team_b_owner_id,
+           -- Người ban/pick = đội trưởng lượt đăng ký giải đó (không có thì chủ đội)
+           COALESCE(rta.captain_user_id, ta.created_by) AS team_a_owner_id,
+           COALESCE(rtb.captain_user_id, tb.created_by) AS team_b_owner_id,
            tr.created_by AS tournament_owner_id
     FROM ban_picks bp
     LEFT JOIN matches m ON m.id = bp.match_id
     LEFT JOIN teams ta ON ta.id = COALESCE(m.team_a_id, bp.team_a_id)
     LEFT JOIN teams tb ON tb.id = COALESCE(m.team_b_id, bp.team_b_id)
     LEFT JOIN tournaments tr ON tr.id = COALESCE(m.tournament_id, bp.tournament_id)
+    LEFT JOIN tournament_teams rta
+      ON rta.team_id = ta.id AND rta.tournament_id = COALESCE(m.tournament_id, bp.tournament_id)
+    LEFT JOIN tournament_teams rtb
+      ON rtb.team_id = tb.id AND rtb.tournament_id = COALESCE(m.tournament_id, bp.tournament_id)
     WHERE bp.match_id = $1
     LIMIT 1
     `,
@@ -987,7 +998,7 @@ export const deleteBanPickSession = async ({ roundSlug, matchId }) => {
 
 /* ───────────── Quyền ───────────── */
 
-/** Chỉ chủ đội (teams.created_by của đội trong trận) được thao tác lượt. */
+/** Chỉ đội trưởng lượt đăng ký giải (captain_user_id, không có thì teams.created_by) được thao tác lượt. */
 export const resolveUserTeamSlot = (user, session) => {
   const userId = toNumber(user?.id);
   if (!userId || !session) return null;
@@ -997,7 +1008,7 @@ export const resolveUserTeamSlot = (user, session) => {
   return null;
 };
 
-/** BTC: role 1–3 hoặc người tạo giải. */
+/** BTC: role 1–3 (admin / mod / trọng tài) hoặc người tạo giải. */
 export const isBanPickAdmin = (user, session) => {
   if (!user) return false;
   if (STAFF_ROLE_IDS.has(toNumber(user.role_id))) return true;
@@ -1406,7 +1417,10 @@ export const listOwnerBanPickSessions = async (user) => {
     LEFT JOIN teams tb ON tb.id = m.team_b_id
     LEFT JOIN tournaments t ON t.id = m.tournament_id
     LEFT JOIN games g ON g.id = t.game_id
-    WHERE (ta.created_by = $1 OR tb.created_by = $1)
+    LEFT JOIN tournament_teams rta ON rta.team_id = ta.id AND rta.tournament_id = m.tournament_id
+    LEFT JOIN tournament_teams rtb ON rtb.team_id = tb.id AND rtb.tournament_id = m.tournament_id
+    WHERE (COALESCE(rta.captain_user_id, ta.created_by) = $1
+        OR COALESCE(rtb.captain_user_id, tb.created_by) = $1)
       AND bp.status <> 'done'
       AND LOWER(COALESCE(m.status, '')) NOT IN ('completed', 'complete', 'finished')
     ORDER BY bp.updated_at DESC

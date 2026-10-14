@@ -8,10 +8,14 @@ export type AovPlayerRow = {
   slot: number;
   ign: string;
   performance_score?: number | null;
-  kills: number;
-  deaths: number;
-  assists: number;
+  /** null = chưa đọc được (vd. đọc ảnh lỗi) — phải sửa trước khi Generate. */
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
   gold?: number | null;
+  /** Tên đọc từ ảnh khi ign đã được thay bằng tên người đăng ký. */
+  matched_from_ign?: string;
+  matched_user_id?: number | string | null;
 };
 
 export type AovParsedPayload = {
@@ -21,7 +25,8 @@ export type AovParsedPayload = {
     duration_sec?: number | null;
     duration_mmss?: string | null;
     played_at?: string | null;
-    winner_side: "blue" | "red";
+    /** null = chưa xác định — phải chọn trước khi Generate. */
+    winner_side: "blue" | "red" | null;
   };
   players: {
     blue: AovPlayerRow[];
@@ -52,6 +57,23 @@ export const generateAovStagingStats = (
   axios.post<{ status: string; message: string; data: AovStagingBatchResult }>(
     `${matchesBaseUrl}/aov/staging/generate`,
     { data },
+    getAuthConfig(),
+  );
+
+export type AovUsernameMatch = {
+  name: string;
+  username: string | null;
+  user_id: number | null;
+  nickname: string | null;
+  score: number;
+  matched: boolean;
+};
+
+/** Ghép tên đọc từ ảnh với username tài khoản đã đăng ký (mỗi ván ghép 1–1). */
+export const matchAovUsernames = (games: Array<{ blue: string[]; red: string[] }>) =>
+  axios.post<{ data: Array<{ blue: AovUsernameMatch[]; red: AovUsernameMatch[] }> }>(
+    `${matchesBaseUrl}/aov/match-usernames`,
+    { games },
     getAuthConfig(),
   );
 

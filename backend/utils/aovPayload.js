@@ -29,6 +29,11 @@ const normalizePlayer = (player, slotFallback) => {
     deaths: toNumber(player?.deaths) ?? 0,
     assists: toNumber(player?.assists) ?? 0,
     gold: toNumber(player?.gold ?? player?.money),
+    // Đọc từ ảnh + ghép với người đăng ký: ign = tên đăng ký, matched_from_ign = tên đọc được trong game
+    ...(String(player?.matched_from_ign ?? "").trim()
+      ? { matched_from_ign: String(player.matched_from_ign).trim() }
+      : {}),
+    ...(toNumber(player?.matched_user_id) ? { matched_user_id: toNumber(player.matched_user_id) } : {}),
   };
 };
 

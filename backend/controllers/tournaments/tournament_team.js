@@ -117,7 +117,8 @@ teamTourRoute.patch(
          t.register_end,
          COALESCE(t.check_in_start, t.register_start) AS check_in_start,
          COALESCE(t.check_in_end, t.register_end) AS check_in_end,
-         tm.created_by
+         tm.created_by,
+         tt.captain_user_id
        FROM tournament_teams tt
        JOIN tournaments t ON t.id = tt.tournament_id
        JOIN teams tm ON tm.id = tt.team_id
@@ -135,8 +136,10 @@ teamTourRoute.patch(
     const isCaptainOfTeam =
       roleId === 4 && Number(user.team_id) === Number(registration.team_id);
     const isTeamOwner = Number(registration.created_by) === Number(user.id);
+    // Đội trưởng của lượt đăng ký giải này (lead org chỉ định khi đăng ký)
+    const isRegistrationCaptain = Number(registration.captain_user_id) === Number(user.id);
 
-    if (!isStaff && !isCaptainOfTeam && !isTeamOwner) {
+    if (!isStaff && !isCaptainOfTeam && !isTeamOwner && !isRegistrationCaptain) {
       set.status = 401;
       return {
         message: "Bạn không có quyền check-in cho đội này",

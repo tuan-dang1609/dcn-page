@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { Bell, Check, LogOut, User, X } from "lucide-react";
+import { LogOut, User, Users } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,130 +13,45 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import LoginDialog from "./LoginDialog";
 import { toast } from "sonner";
-import {
-  acceptTeamInvite,
-  declineTeamInvite,
-  getMyTeamInvites,
-  type TeamInviteRecord,
-} from "@/api/teamInvites";
 import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
+
+/** Sự kiện org / đội lẻ (backend/utils/groups.js → notifyUsers). */
+const GROUP_EVENT_TOAST: Record<string, { tone: "success" | "error" | "info"; text: string }> = {
+  join_request: { tone: "info", text: "Có đơn xin vào org / đội của bạn" },
+  join_approved: { tone: "success", text: "Bạn đã được duyệt vào org / đội" },
+  join_declined: { tone: "error", text: "Đơn xin vào của bạn bị từ chối" },
+  member_removed: { tone: "error", text: "Bạn đã bị mời ra khỏi org / đội" },
+  member_joined: { tone: "info", text: "Có thành viên mới vào org / đội của bạn" },
+  member_left: { tone: "info", text: "Một thành viên đã rời org / đội của bạn" },
+};
 
 const UserMenu = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user, token, logout, refreshUser } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [pendingInvites, setPendingInvites] = useState<TeamInviteRecord[]>([]);
-  const [inviteActionId, setInviteActionId] = useState<number | null>(null);
 
-  const hasTeam = Boolean((user as any)?.team_id);
-
-  const loadInvites = useCallback(async () => {
-    if (!user) return;
-
-    try {
-      const response = await getMyTeamInvites(token);
-      setPendingInvites(response.data?.invites ?? []);
-    } catch {
-      setPendingInvites([]);
-    }
-  }, [user, token]);
-
-  useEffect(() => {
-    if (!user) {
-      setPendingInvites([]);
-      return;
-    }
-
-    void loadInvites();
-  }, [user, loadInvites]);
-
+  // Realtime: thay đổi org / đội → báo + tải lại dữ liệu liên quan
   useTeamInviteStream({
     enabled: Boolean(user && token),
     token,
     userId: Number(user?.id),
     onEvent: useCallback(
       (payload) => {
-        // membership change -> refresh profile + invites
-        if (payload.type === "team_membership_changed") {
-          const eventName = String(payload.event_name ?? "");
-          if (eventName.includes("removed")) {
-            void (async () => {
-              try {
-                await refreshUser();
-              } catch {
-                // ignore
-              }
-              void loadInvites();
-            })();
-            toast.error("Bạn đã bị gỡ khỏi team");
-            return;
-          }
-          if (eventName.includes("joined")) {
-            void (async () => {
-              try {
-                await refreshUser();
-              } catch {
-                // ignore
-              }
-              void loadInvites();
-            })();
-            toast.success("Bạn đã được thêm vào team");
-            return;
-          }
+        if (payload.type !== "group") return;
+        const eventName = String((payload as { event?: string }).event ?? "");
+        const info = GROUP_EVENT_TOAST[eventName];
+        if (info) toast[info.tone](info.text);
+        void refreshUser?.().catch(() => {});
+        for (const key of ["group", "my-groups", "registration-options", "registration-entry"]) {
+          void queryClient.invalidateQueries({ queryKey: [key] });
         }
-
-        void loadInvites();
       },
-      [loadInvites],
+      [queryClient, refreshUser],
     ),
   });
-
-  const handleOpenInviteModal = async () => {
-    setInviteModalOpen(true);
-    await loadInvites();
-  };
-
-  const handleAcceptInvite = async (inviteId: number) => {
-    setInviteActionId(inviteId);
-    try {
-      await acceptTeamInvite(inviteId, token);
-      await loadInvites();
-      toast.success("Đã chấp nhận lời mời");
-    } catch (error: any) {
-      toast.error(
-        error?.response?.data?.error || error?.message || "Không thể chấp nhận",
-      );
-    } finally {
-      setInviteActionId(null);
-    }
-  };
-
-  const handleDeclineInvite = async (inviteId: number) => {
-    setInviteActionId(inviteId);
-    try {
-      await declineTeamInvite(inviteId, token);
-      await loadInvites();
-      toast.success("Đã từ chối lời mời");
-    } catch (error: any) {
-      toast.error(
-        error?.response?.data?.error || error?.message || "Không thể từ chối",
-      );
-    } finally {
-      setInviteActionId(null);
-    }
-  };
-
-  const inviteCount = useMemo(() => pendingInvites.length, [pendingInvites]);
 
   const handleLogout = () => {
     logout();
@@ -145,11 +61,7 @@ const UserMenu = () => {
   if (!user) {
     return (
       <>
-        <Button
-          onClick={() => setLoginOpen(true)}
-          variant="outline"
-          className="font-bold"
-        >
+        <Button onClick={() => setLoginOpen(true)} variant="outline" className="font-bold">
           Đăng nhập
         </Button>
         <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
@@ -158,156 +70,75 @@ const UserMenu = () => {
   }
 
   const displayName =
-    (user as any)?.nickname ||
-    (user as any)?.name ||
-    (user as any)?.username ||
+    (user as { nickname?: string; name?: string; username?: string }).nickname ||
+    (user as { name?: string }).name ||
+    (user as { username?: string }).username ||
     "User";
   const displayUsername =
-    (user as any)?.username || (user as any)?.nickname || "user";
+    (user as { username?: string }).username || (user as { nickname?: string }).nickname || "user";
 
   const initials = displayName
-    ? displayName
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    : "US";
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 
   return (
-    <>
-      <div className="flex items-center gap-2">
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="icon"
-          className="relative h-10 w-10 rounded-full border border-border"
-          onClick={handleOpenInviteModal}
-          disabled={!user}
-          aria-label="Thông báo lời mời"
+          className="relative h-10 gap-2 rounded-none border border-neutral-600 bg-[#141414] px-2.5 hover:bg-[#1c1c1c] hover:text-white"
+          title="Tài khoản"
         >
-          <Bell className="h-4 w-4" />
-          {inviteCount > 0 && (
-            <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-white">
-              {inviteCount}
-            </span>
-          )}
+          <Avatar className="h-7 w-7 rounded-none">
+            <AvatarImage
+              src={(user as { profile_picture?: string | null }).profile_picture ?? undefined}
+              alt={displayName}
+              className="rounded-none object-cover"
+            />
+            <AvatarFallback className="rounded-none bg-[#2d2d2d] text-[10px] font-bold text-white">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <span className="hidden max-w-24 truncate text-xs font-bold text-neutral-200 sm:inline">
+            {displayName}
+          </span>
         </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              className="relative h-10 gap-2 rounded-none border border-neutral-600 bg-[#141414] px-2.5 hover:bg-[#1c1c1c] hover:text-white"
-              title="Tài khoản"
-            >
-              <Avatar className="h-7 w-7 rounded-none">
-                <AvatarImage
-                  src={(user as { profile_picture?: string | null }).profile_picture ?? undefined}
-                  alt={displayName}
-                  className="rounded-none object-cover"
-                />
-                <AvatarFallback className="rounded-none bg-[#2d2d2d] text-[10px] font-bold text-white">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-              <span className="hidden max-w-24 truncate text-xs font-bold text-neutral-200 sm:inline">
-                {displayName}
-              </span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-56 rounded-none border-neutral-700 bg-[#141414]" align="end" forceMount>
-            <DropdownMenuLabel className="font-normal">
-              <div className="flex flex-col space-y-1">
-                <p className="text-sm font-bold leading-none text-white">{displayName}</p>
-                <p className="text-xs leading-none text-neutral-500">
-                  @{displayUsername}
-                </p>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator className="bg-neutral-800" />
-            <DropdownMenuItem
-              className="cursor-pointer focus:bg-neutral-900 focus:text-white"
-              onClick={() => navigate("/profile")}
-            >
-              <User className="mr-2 h-4 w-4" />
-              <span>Hồ sơ cá nhân</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-neutral-800" />
-            <DropdownMenuItem
-              onClick={handleLogout}
-              className="cursor-pointer text-red-400 focus:bg-neutral-900 focus:text-red-300"
-            >
-              <LogOut className="mr-2 h-4 w-4" />
-              <span>Đăng xuất</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
-        <DialogContent className="sm:max-w-lg rounded-2xl border-border bg-card p-6 shadow-xl">
-          <DialogHeader>
-            <DialogTitle>Lời mời team</DialogTitle>
-            <DialogDescription>
-              {hasTeam
-                ? "Bạn đang có team. Nếu muốn nhận team mới, hãy rời team hiện tại trước."
-                : "Chấp nhận hoặc từ chối các lời mời đang chờ."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-            {inviteCount === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                Không có lời mời nào.
-              </div>
-            ) : (
-              pendingInvites.map((invite) => (
-                <div
-                  key={invite.id}
-                  className="rounded-xl border border-border bg-background p-4 shadow-sm"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold truncate">
-                        {invite.team_name}
-                      </p>
-                      <p className="text-sm text-muted-foreground truncate">
-                        Mời bởi {invite.inviter_username}
-                      </p>
-                    </div>
-                    <div className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
-                      Pending
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => handleDeclineInvite(invite.id)}
-                      disabled={inviteActionId === invite.id}
-                    >
-                      <X className="mr-2 h-4 w-4" />
-                      Từ chối
-                    </Button>
-                    <Button
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => handleAcceptInvite(invite.id)}
-                      disabled={inviteActionId === invite.id || hasTeam}
-                    >
-                      <Check className="mr-2 h-4 w-4" />
-                      {inviteActionId === invite.id
-                        ? "Đang xử lý..."
-                        : "Chấp nhận"}
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-56 rounded-none border-neutral-700 bg-[#141414]" align="end" forceMount>
+        <DropdownMenuLabel className="font-normal">
+          <div className="flex flex-col space-y-1">
+            <p className="text-sm font-bold leading-none text-white">{displayName}</p>
+            <p className="text-xs leading-none text-neutral-500">@{displayUsername}</p>
           </div>
-        </DialogContent>
-      </Dialog>
-    </>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator className="bg-neutral-800" />
+        <DropdownMenuItem
+          className="cursor-pointer focus:bg-neutral-900 focus:text-white"
+          onClick={() => navigate("/profile")}
+        >
+          <User className="mr-2 h-4 w-4" />
+          <span>Hồ sơ cá nhân</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="cursor-pointer focus:bg-neutral-900 focus:text-white"
+          onClick={() => navigate("/orgs")}
+        >
+          <Users className="mr-2 h-4 w-4" />
+          <span>Org của tôi</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator className="bg-neutral-800" />
+        <DropdownMenuItem
+          onClick={handleLogout}
+          className="cursor-pointer text-red-400 focus:bg-neutral-900 focus:text-red-300"
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          <span>Đăng xuất</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 

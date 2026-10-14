@@ -48,6 +48,16 @@ export default defineConfig(({ mode }) => ({
           if (id.includes("react-router")) return "vendor-router";
           if (id.includes("lucide-react")) return "vendor-icons";
           if (id.includes("axios")) return "vendor-http";
+          // Bộ đọc chữ (trang nhập số liệu Liên Quân) — để Rollup tách theo dynamic import,
+          // không gộp vào "vendor" tải sẵn ở mọi trang
+          if (
+            id.includes("tesseract.js") ||
+            id.includes("regenerator-runtime") ||
+            id.includes("is-url") ||
+            id.includes("bmp-js")
+          ) {
+            return;
+          }
           return "vendor";
         },
       },

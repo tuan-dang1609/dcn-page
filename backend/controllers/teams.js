@@ -51,12 +51,8 @@ teamRouter.post(
       RETURNING id, name, short_name, logo_url, team_color_hex, created_by, created_at
     )
     UPDATE users
-    SET team_id = new_team.id,
-        role_id = CASE
-          -- Promote the creator to role 3 (team owner) if they have no role or a lower priority numeric id (>3).
-          WHEN users.role_id IS NULL OR users.role_id > 3 THEN 3
-          ELSE users.role_id
-        END
+    -- Không đổi role_id: role 1–3 là BTC toàn hệ thống. Chủ đội xác định qua teams.created_by.
+    SET team_id = new_team.id
     FROM new_team
     WHERE users.id = $5
     RETURNING

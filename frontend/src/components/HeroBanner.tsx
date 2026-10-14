@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { API_BASE } from "@/lib/apiBase";
 import { Link, useNavigate, useLocation, useParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Bell, Check, X } from "lucide-react";
 import InfoGrid from "@/components/InfoGrid";
 import { PAGE_FRAME_CLASS } from "@/components/TournamentMasthead";
 import { formatShortDateTime } from "@/lib/tournamentFormat";
@@ -18,17 +17,11 @@ import {
 import TournamentRegistration from "@/components/TournamentRegistration";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
-import {
-  acceptTeamInvite,
-  declineTeamInvite,
-  getMyTeamInvites,
-  type TeamInviteRecord,
-} from "@/api/teamInvites";
 import { unregisterSoloFromTournament, syncSoloRiotOnTournament } from "@/api/tournaments";
-import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
+import { getRegistrationOptions } from "@/api/groups";
 import TeamRosterDialog from "@/components/TeamRosterDialog";
 import { isRiotGameSlug } from "@/components/tournamentTheme";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface HeroBannerProps {
   tournament?: {
@@ -99,13 +92,15 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
   const [rosterTeamId, setRosterTeamId] = useState<number | string | null>(
     null,
   );
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [pendingInvites, setPendingInvites] = useState<TeamInviteRecord[]>([]);
-  const [inviteActionId, setInviteActionId] = useState<number | null>(null);
-  const previousInviteCountRef = useRef(0);
-  const hasTeam = Boolean((user as any)?.team_id);
-  const isTeamCaptain = Boolean(
-    user?.team && Number(user.team.created_by) === Number(user.id),
+  // Giải theo đội: đội của tôi trong giải này (org hoặc đội lẻ) + đội trưởng — API đăng ký mới
+  const { data: registrationOptions } = useQuery({
+    queryKey: ["registration-options", tournament?.id, user?.id],
+    enabled: Boolean(user && token && tournament?.id && !isIndividualMode),
+    queryFn: async () => (await getRegistrationOptions(tournament!.id, token)).data.data,
+  });
+  const myTeamEntry = registrationOptions?.my_registrations?.[0] ?? null;
+  const isEntryCaptain = Boolean(
+    myTeamEntry && Number(myTeamEntry.captain_user_id) === Number(user?.id),
   );
 
   const fromSeriesSlug =
@@ -320,9 +315,11 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
             ) ||
             String(team.short_name ?? "").trim() === `S${Number(user.id)}`,
         )
-      : registered.find(
-          (team) => Number(team.team_id) === Number(user?.team_id),
-        );
+      : myTeamEntry
+        ? registered.find(
+            (team) => Number(team.id) === Number(myTeamEntry.registration_id),
+          ) ?? { id: myTeamEntry.registration_id, team_id: myTeamEntry.team_id, isCheckedIn: false }
+        : undefined;
     const nextRegisteredTeamId = myEntry
       ? Number(myEntry.id ?? myEntry.team_id)
       : null;
@@ -336,6 +333,7 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     user,
     setIsRegistered,
     isIndividualMode,
+    myTeamEntry,
   ]);
 
   const checkInTournament = tournament as
@@ -353,9 +351,9 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
     nowMs >= checkInStartMs &&
     nowMs <= checkInEndMs;
 
+  // Check-in: cá nhân tự check-in; giải theo đội thì đội trưởng của lượt đăng ký
   const canShowHeaderCheckIn = Boolean(
-    myRegisteredTeamId &&
-      (isIndividualMode || (isTeamCaptain && user?.team_id)),
+    myRegisteredTeamId && (isIndividualMode || isEntryCaptain),
   );
 
   const showUpdateRegistration = Boolean(myRegisteredTeamId || isRegistered);
@@ -376,121 +374,6 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
       toast.error("Check-in thất bại");
     } finally {
       setCheckingInTeamId(null);
-    }
-  };
-
-  const syncInvites = useCallback(
-    async ({ notify = false }: { notify?: boolean } = {}) => {
-      if (!user) return [] as TeamInviteRecord[];
-
-      try {
-        const response = await getMyTeamInvites(token);
-        const invites = response.data?.invites ?? [];
-
-        setPendingInvites(invites);
-
-        const nextCount = invites.length;
-        const previousCount = previousInviteCountRef.current;
-
-        if (notify && nextCount > previousCount) {
-          toast.success(
-            nextCount === 1
-              ? "Bạn có 1 lời mời team mới"
-              : `Bạn có ${nextCount} lời mời team mới`,
-          );
-        }
-
-        previousInviteCountRef.current = nextCount;
-        return invites;
-      } catch {
-        setPendingInvites([]);
-        return [] as TeamInviteRecord[];
-      }
-    },
-    [user, token],
-  );
-
-  useEffect(() => {
-    if (!user) {
-      setPendingInvites([]);
-      previousInviteCountRef.current = 0;
-      return;
-    }
-
-    void syncInvites({ notify: false });
-  }, [user, syncInvites]);
-
-  useTeamInviteStream({
-    enabled: Boolean(user && token),
-    token,
-    userId: Number(user?.id),
-    onEvent: useCallback(
-      (payload) => {
-        // Treat invite_created as notify; treat invite_updated with accepted status or event_name containing 'accept' as notify
-        const isCreated = payload.type === "invite_created";
-        const isUpdated = payload.type === "invite_updated";
-        const isAcceptedEventName =
-          typeof payload.event_name === "string" &&
-          payload.event_name.includes("accept");
-        const isInviteAccepted =
-          isUpdated &&
-          (isAcceptedEventName || payload.invite?.status === "accepted");
-
-        const shouldNotify = isCreated || isInviteAccepted;
-        void syncInvites({ notify: shouldNotify });
-
-        // handle membership changes pushed by server (kicked or joined)
-        if (payload.type === "team_membership_changed") {
-          const eventName = String(payload.event_name ?? "");
-          if (eventName.includes("removed")) {
-            // we were removed -> refresh user profile and show toast
-            void refreshUser().catch(() => {});
-            toast.error("Bạn đã bị gỡ khỏi team");
-          } else if (eventName.includes("joined")) {
-            void refreshUser().catch(() => {});
-            toast.success("Bạn đã được thêm vào team");
-          }
-        }
-      },
-      [syncInvites],
-    ),
-  });
-
-  const inviteCount = useMemo(() => pendingInvites.length, [pendingInvites]);
-
-  const handleOpenInviteModal = async () => {
-    setInviteModalOpen(true);
-    await syncInvites({ notify: false });
-  };
-
-  const handleAcceptInvite = async (inviteId: number) => {
-    setInviteActionId(inviteId);
-    try {
-      await acceptTeamInvite(inviteId, token);
-      await syncInvites({ notify: false });
-      toast.success("Đã chấp nhận lời mời");
-      window.location.reload();
-    } catch (error: any) {
-      toast.error(
-        error?.response?.data?.error || error?.message || "Không thể chấp nhận",
-      );
-    } finally {
-      setInviteActionId(null);
-    }
-  };
-
-  const handleDeclineInvite = async (inviteId: number) => {
-    setInviteActionId(inviteId);
-    try {
-      await declineTeamInvite(inviteId, token);
-      await syncInvites({ notify: false });
-      toast.success("Đã từ chối lời mời");
-    } catch (error: any) {
-      toast.error(
-        error?.response?.data?.error || error?.message || "Không thể từ chối",
-      );
-    } finally {
-      setInviteActionId(null);
     }
   };
 
@@ -604,23 +487,19 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                       {showUpdateRegistration ? "Quản lý đăng ký" : "Đăng ký cá nhân"}
                     </Button>
                   ) : null
-                ) : hasTeam && !isTeamCaptain ? (
+                ) : myTeamEntry ? (
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={handleOpenRoster}
-                    className={`${actionBtn} max-w-60`}
-                    aria-label="Xem đồng đội trong giải"
-                  >
-                    <span className="truncate">{user?.team?.name}</span>
-                  </Button>
-                ) : isRegistrationOpen || isRegistered ? (
-                  <Button
                     onClick={handleOpenRegistration}
-                    className={actionBtn}
-                    variant={showUpdateRegistration ? "outline" : "default"}
+                    className={`${actionBtn} max-w-64`}
+                    aria-label="Đội của bạn trong giải"
                   >
-                    {showUpdateRegistration ? "Cập nhật đăng ký" : "Đăng ký giải"}
+                    <span className="truncate">{myTeamEntry.name}</span>
+                  </Button>
+                ) : isRegistrationOpen ? (
+                  <Button onClick={handleOpenRegistration} className={actionBtn}>
+                    Đăng ký giải
                   </Button>
                 ) : null}
 
@@ -642,24 +521,10 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
                     </Button>
                   ) : (
                     <span className="flex h-11 items-center px-1 text-sm text-[#9A9893]">
-                      {user?.team?.name}
+                      {isIndividualMode ? user?.nickname : myTeamEntry?.name}
                     </span>
                   )
                 ) : null}
-
-                <button
-                  type="button"
-                  onClick={handleOpenInviteModal}
-                  className="flex h-11 items-center gap-2 border border-[#2C2B29] px-3 text-sm transition-colors hover:border-[#F2F0EB]"
-                  aria-label={`Lời mời vào đội${inviteCount ? `: ${inviteCount} mới` : ""}`}
-                >
-                  <Bell className="h-4 w-4" aria-hidden="true" />
-                  {inviteCount > 0 ? (
-                    <span className="font-bold tabular-nums text-[#FF4A3D]">
-                      {inviteCount}
-                    </span>
-                  ) : null}
-                </button>
 
                 <Link
                   to="/profile"
@@ -788,69 +653,6 @@ const HeroBanner = ({ tournament }: HeroBannerProps) => {
         showRiotId={showRiotId}
       />
 
-      <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
-        <DialogContent className="sm:max-w-lg border-[#F2F0EB] bg-[#0B0B0B] p-6 shadow-none">
-          <DialogHeader>
-            <DialogTitle>Lời mời team</DialogTitle>
-            <DialogDescription>
-              {hasTeam
-                ? "Bạn đang có team. Nếu muốn nhận team mới, hãy rời team hiện tại trước."
-                : "Chấp nhận hoặc từ chối các lời mời đang chờ."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-            {inviteCount === 0 ? (
-              <div className="border-t-2 border-[#F2F0EB] py-4 text-sm text-muted-foreground">
-                Không có lời mời nào.
-              </div>
-            ) : (
-              pendingInvites.map((invite) => (
-                <div
-                  key={invite.id}
-                  className="border-t border-[#2C2B29] py-4"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold truncate">
-                        {invite.team_name}
-                      </p>
-                      <p className="text-sm text-muted-foreground truncate">
-                        Mời bởi {invite.inviter_username}
-                      </p>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Pending
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => handleDeclineInvite(invite.id)}
-                      disabled={inviteActionId === invite.id}
-                    >
-                      <X className="mr-2 h-4 w-4" />
-                      Từ chối
-                    </Button>
-                    <Button
-                      className="h-11 flex-1"
-                      onClick={() => handleAcceptInvite(invite.id)}
-                      disabled={inviteActionId === invite.id || hasTeam}
-                    >
-                      <Check className="mr-2 h-4 w-4" />
-                      {inviteActionId === invite.id
-                        ? "Đang xử lý..."
-                        : "Chấp nhận"}
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 };

@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { ArrowLeft, Link2, Loader2, Save, Upload } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -21,13 +21,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "@/hooks/use-toast";
 import { uploadImageToSupabase } from "@/lib/supabaseUpload";
 import { API_BASE } from "@/lib/apiBase";
-import {
-  acceptTeamInvite,
-  declineTeamInvite,
-  getMyTeamInvites,
-  type TeamInviteRecord,
-} from "@/api/teamInvites";
-import { useTeamInviteStream } from "@/hooks/useTeamInviteStream";
+import { useQuery } from "@tanstack/react-query";
+import { getMyGroups, ROLE_LABEL } from "@/api/groups";
+import GroupLogo from "@/components/groups/GroupLogo";
 import {
   DEFAULT_USER_AVATAR_URL,
   TOURNAMENT_PAGE_BG_CLASS,
@@ -56,9 +52,6 @@ const ProfilePage = () => {
   const [savingNickname, setSavingNickname] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [connectingRiot, setConnectingRiot] = useState(false);
-  const [pendingInvites, setPendingInvites] = useState<TeamInviteRecord[]>([]);
-  const [inviteActionId, setInviteActionId] = useState<number | null>(null);
-  const hasTeam = Boolean(user?.team_id);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -120,31 +113,11 @@ const ProfilePage = () => {
     navigate("/profile", { replace: true });
   }, [searchParams, navigate, refreshUser]);
 
-  const loadInvites = useCallback(async () => {
-    if (!user || hasTeam) {
-      setPendingInvites([]);
-      return;
-    }
-
-    try {
-      const response = await getMyTeamInvites(token);
-      setPendingInvites(response.data?.invites ?? []);
-    } catch {
-      setPendingInvites([]);
-    }
-  }, [user, hasTeam, token]);
-
-  useEffect(() => {
-    void loadInvites();
-  }, [loadInvites]);
-
-  useTeamInviteStream({
+  // Org + đội lẻ của tôi (thay cho lời mời team cũ)
+  const { data: myGroups } = useQuery({
+    queryKey: ["my-groups", user?.id],
     enabled: Boolean(user && token),
-    token,
-    userId: Number(user?.id),
-    onEvent: useCallback(() => {
-      void loadInvites();
-    }, [loadInvites]),
+    queryFn: async () => (await getMyGroups(token!)).data.data,
   });
 
   const initials = useMemo(() => {
@@ -288,51 +261,6 @@ const ProfilePage = () => {
     }
   };
 
-  const handleAcceptInvite = async (inviteId: number) => {
-    setInviteActionId(inviteId);
-    try {
-      await acceptTeamInvite(inviteId, token);
-      await refreshUser();
-      const response = await getMyTeamInvites(token);
-      setPendingInvites(response.data?.invites ?? []);
-      toast({
-        title: "Đã tham gia team",
-        description: "Lời mời đã được chấp nhận.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Không thể chấp nhận lời mời",
-        description:
-          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
-        variant: "destructive",
-      });
-    } finally {
-      setInviteActionId(null);
-    }
-  };
-
-  const handleDeclineInvite = async (inviteId: number) => {
-    setInviteActionId(inviteId);
-    try {
-      await declineTeamInvite(inviteId, token);
-      const response = await getMyTeamInvites(token);
-      setPendingInvites(response.data?.invites ?? []);
-      toast({
-        title: "Đã từ chối lời mời",
-        description: "Lời mời đã được cập nhật.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Không thể từ chối lời mời",
-        description:
-          error?.response?.data?.error || error?.message || "Vui lòng thử lại.",
-        variant: "destructive",
-      });
-    } finally {
-      setInviteActionId(null);
-    }
-  };
-
   if (isLoading || !user) {
     return <PageLoader label="Đang tải hồ sơ..." />;
   }
@@ -383,57 +311,41 @@ const ProfilePage = () => {
           </div>
         </section>
 
-        {!hasTeam && pendingInvites.length > 0 && (
-          <section className={`${TOURNAMENT_PANEL_CLASS} overflow-hidden`}>
-            <div className={TOURNAMENT_PANEL_TITLE_CLASS}>
-              Lời mời team · {pendingInvites.length} đang chờ
-            </div>
-            <div className="space-y-0">
-              {pendingInvites.map((invite) => (
-                <div
-                  key={invite.id}
-                  className="flex flex-col gap-3 border-b border-neutral-800 px-4 py-3.5 last:border-b-0 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-neutral-600 bg-[#2d2d2d] text-xs font-bold uppercase text-white">
-                      {(invite.team_short_name ?? invite.team_name ?? "T")[0]}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-white">
-                        {invite.team_name}
-                      </p>
-                      <p className="truncate text-sm text-neutral-400">
-                        Mời bởi {invite.inviter_username}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 sm:shrink-0">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => handleDeclineInvite(invite.id)}
-                      disabled={inviteActionId === invite.id}
-                      className="rounded-none border-neutral-600 bg-transparent text-neutral-300 hover:bg-neutral-900 hover:text-white"
+        <section className={`${TOURNAMENT_PANEL_CLASS} overflow-hidden`}>
+          <div className={TOURNAMENT_PANEL_TITLE_CLASS}>Org & đội</div>
+          <div className="p-5 sm:p-6">
+            {myGroups?.orgs?.length || myGroups?.squads?.length ? (
+              <ul className="m-0 list-none p-0">
+                {[...(myGroups?.orgs ?? []), ...(myGroups?.squads ?? [])].map((group) => (
+                  <li key={`${group.kind}-${group.id}`}>
+                    <Link
+                      to={`/orgs/${group.id}`}
+                      className="flex min-h-14 items-center gap-3 border-b border-neutral-800 py-2 no-underline hover:opacity-80"
                     >
-                      Từ chối
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => handleAcceptInvite(invite.id)}
-                      disabled={inviteActionId === invite.id}
-                      className="rounded-none bg-white text-neutral-900 hover:bg-neutral-200"
-                    >
-                      {inviteActionId === invite.id
-                        ? "Đang xử lý..."
-                        : "Chấp nhận"}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+                      <GroupLogo group={group} size={40} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-bold text-white">{group.name}</span>
+                        <span className="block truncate text-xs text-neutral-400">
+                          {group.kind === "org" ? "Org" : `Đội lẻ · ${"tournament_name" in group ? group.tournament_name ?? "" : ""}`}
+                          {" · "}
+                          {ROLE_LABEL[group.role]}
+                        </span>
+                      </span>
+                      <span className="text-sm font-semibold text-neutral-300">Xem →</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="m-0 text-sm text-neutral-400">
+                Bạn chưa ở org nào.{" "}
+                <Link to="/orgs" className="font-semibold text-white underline underline-offset-4">
+                  Xem các org / lập org
+                </Link>
+              </p>
+            )}
+          </div>
+        </section>
 
         <section className={`${TOURNAMENT_PANEL_CLASS} overflow-hidden`}>
           <div className={TOURNAMENT_PANEL_TITLE_CLASS}>Thông tin cơ bản</div>

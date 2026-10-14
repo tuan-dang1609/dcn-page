@@ -11,12 +11,20 @@ import {
 } from "lucide-react";
 import {
   generateAovStagingStats,
+  matchAovUsernames,
   type AovParsedPayload,
   type AovPlayerRow,
   type AovStagingResult,
 } from "@/api/aovStats";
 import { useAuth } from "@/contexts/AuthContext";
 import PageLoader from "@/components/PageLoader";
+import {
+  disposeScoreboardOcr,
+  OcrCancelledError,
+  readAovScoreboards,
+  type OcrProgress,
+  type ScoreboardReadResult,
+} from "@/lib/aovScoreboardOcr";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,7 +102,7 @@ const normalizeParsed = (raw: Record<string, unknown>): AovParsedPayload => {
       blue_kills: Number(game.blue_kills) || 0,
       red_kills: Number(game.red_kills) || 0,
       duration_sec: game.duration_sec ?? null,
-      winner_side: game.winner_side === "red" ? "red" : "blue",
+      winner_side: game.winner_side === "red" || game.winner_side === "blue" ? game.winner_side : null,
     },
     players: {
       blue: padSide(players.blue ?? []),
@@ -187,21 +195,21 @@ const PlayerTable = ({ title, side, players, onChange }: PlayerTableProps) => (
               </td>
               <td className="px-2 py-1.5">
                 <Input
-                  value={player.kills}
+                  value={player.kills ?? ""}
                   onChange={(e) => onChange(side, index, "kills", e.target.value)}
                   className="h-8 w-16"
                 />
               </td>
               <td className="px-2 py-1.5">
                 <Input
-                  value={player.deaths}
+                  value={player.deaths ?? ""}
                   onChange={(e) => onChange(side, index, "deaths", e.target.value)}
                   className="h-8 w-16"
                 />
               </td>
               <td className="px-2 py-1.5">
                 <Input
-                  value={player.assists}
+                  value={player.assists ?? ""}
                   onChange={(e) =>
                     onChange(side, index, "assists", e.target.value)
                   }
@@ -233,8 +241,101 @@ const AovStatsImportPage = () => {
   const [generatedItems, setGeneratedItems] = useState<AovStagingResult[]>([]);
   const [generating, setGenerating] = useState(false);
 
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
+  const [ocrReports, setOcrReports] = useState<ScoreboardReadResult[]>([]);
+  /**
+   * Ghép tên đọc được với USERNAME tài khoản trên hệ thống (backend: so theo số ký tự trùng với
+   * nickname / username). Khớp → ign = username, matched_from_ign = tên đọc được.
+   * Trả các ván đã ghép + cảnh báo theo từng ván.
+   */
+  const snapGamesToUsernames = async (list: AovParsedPayload[]) => {
+    const sourceName = (p: AovPlayerRow) => (p.matched_from_ign || p.ign || "").trim();
+    const { data } = await matchAovUsernames(
+      list.map((game) => ({ blue: game.players.blue.map(sourceName), red: game.players.red.map(sourceName) })),
+    );
+    return list.map((game, gameIndex) => {
+      const warnings: string[] = [];
+      const apply = (side: "blue" | "red") =>
+        game.players[side].map((player, index) => {
+          const name = sourceName(player);
+          const hit = data.data?.[gameIndex]?.[side]?.[index];
+          if (!name) return player;
+          if (!hit?.matched || !hit.username) {
+            warnings.push(`${side === "blue" ? "Xanh" : "Đỏ"} #${player.slot}: "${name}" không khớp tài khoản nào — giữ tên đọc được`);
+            return { ...player, ign: name, matched_from_ign: undefined, matched_user_id: null };
+          }
+          return { ...player, ign: hit.username, matched_from_ign: name, matched_user_id: hit.user_id };
+        });
+      return { game: { ...game, players: { blue: apply("blue"), red: apply("red") } }, warnings };
+    });
+  };
+
+  /** Ghép username cho tất cả ván đang có (dùng cả khi dán JSON tay). */
+  const handleSnapAll = async () => {
+    try {
+      const snapped = await snapGamesToUsernames(games);
+      setGames(snapped.map((item) => item.game));
+      const notes = snapped.reduce((sum, item) => sum + item.warnings.length, 0);
+      toast({ title: "Đã ghép tên với username", description: notes ? `${notes} tên không khớp tài khoản nào` : undefined });
+    } catch {
+      toast({ title: "Không ghép được username", variant: "destructive" });
+    }
+  };
+
   const hasAccess = allowedRoleIds.has(Number(user?.role_id));
   const parsed = games[activeGame] ?? null;
+
+  useEffect(() => () => void disposeScoreboardOcr(), []);
+
+  /** Đọc ảnh tổng kết (mỗi ảnh 1 ván) → JSON đúng định dạng nhập → bảng kiểm tra bên dưới. */
+  const handleReadImages = async (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+    setOcrBusy(true);
+    setOcrReports([]);
+    try {
+      const reports = await readAovScoreboards(files, setOcrProgress);
+      const ok = reports.filter((report) => report.result);
+      const gamesJson = ok.map((report) => report.result);
+      setJsonInput(JSON.stringify(gamesJson, null, 2));
+      // 1 ảnh = 1 ván, kể cả khi chưa đọc được tên nào (sửa tay trong bảng)
+      let nextGames = gamesJson.map((game) => normalizeParsed(game as unknown as Record<string, unknown>));
+      try {
+        const okReports = reports.filter((report) => report.result);
+        const snapped = await snapGamesToUsernames(nextGames);
+        nextGames = snapped.map((item, index) => {
+          okReports[index].warnings.push(...item.warnings.map((message) => ({ key: "name-snap", message })));
+          return item.game;
+        });
+        setJsonInput(JSON.stringify(nextGames, null, 2));
+      } catch {
+        toast({ title: "Không ghép được username — tên giữ như đọc được", variant: "destructive" });
+      }
+      setGames(nextGames);
+      setActiveGame(0);
+      setGeneratedItems([]);
+      setOcrReports(reports);
+      const failed = reports.length - ok.length;
+      toast({
+        title: `Đã đọc ${ok.length}/${reports.length} ảnh`,
+        description: failed
+          ? `${failed} ảnh lỗi (xem bên dưới) — các ván còn lại đã điền vào bảng.`
+          : "Kiểm tra các ô được đánh dấu rồi sửa trong bảng bên dưới trước khi Generate.",
+        variant: failed ? "destructive" : undefined,
+      });
+    } catch (error) {
+      if (error instanceof OcrCancelledError) return;
+      toast({
+        title: "Không đọc được ảnh",
+        description: error instanceof Error ? error.message : "Thử lại hoặc nhập JSON tay",
+        variant: "destructive",
+      });
+    } finally {
+      setOcrBusy(false);
+      setOcrProgress(null);
+    }
+  };
 
   useEffect(() => {
     if (isLoading) return;
@@ -263,6 +364,7 @@ const AovStatsImportPage = () => {
         return;
       }
       setGames(nextGames);
+      setOcrReports([]);
       setActiveGame(0);
       setGeneratedItems([]);
       toast({
@@ -299,7 +401,7 @@ const AovStatsImportPage = () => {
       else if (key === "performance_score" || key === "gold") {
         current[key] = value.trim() === "" ? null : Number(value);
       } else if (key === "kills" || key === "deaths" || key === "assists") {
-        current[key] = Number(value) || 0;
+        current[key] = value.trim() === "" ? null : Number(value) || 0;
       }
 
       list[index] = current;
@@ -311,18 +413,22 @@ const AovStatsImportPage = () => {
     });
   };
 
-  const updateGameField = (field: "blue_kills" | "red_kills", value: string) => {
+  const updateGameField = (field: "blue_kills" | "red_kills" | "winner_side", value: string) => {
     setGames((prev) => {
       const next = [...prev];
       const currentGame = next[activeGame];
       if (!currentGame) return prev;
-      next[activeGame] = {
-        ...currentGame,
-        game: {
-          ...currentGame.game,
-          [field]: Number(value) || 0,
-        },
-      };
+      const game = { ...currentGame.game };
+      if (field === "winner_side") {
+        game.winner_side = value === "red" || value === "blue" ? value : null;
+      } else {
+        game[field] = Number(value) || 0;
+        // Chưa chọn đội thắng → suy theo tỉ số vừa sửa (vẫn cần xác nhận)
+        if (game.winner_side === null && game.blue_kills !== game.red_kills) {
+          game.winner_side = game.blue_kills > game.red_kills ? "blue" : "red";
+        }
+      }
+      next[activeGame] = { ...currentGame, game };
       return next;
     });
   };
@@ -330,6 +436,23 @@ const AovStatsImportPage = () => {
   const handleGenerate = async () => {
     if (!games.length) {
       toast({ title: "Parse JSON trước", variant: "destructive" });
+      return;
+    }
+
+    const missingWinner = games.findIndex((game) => game.game.winner_side === null);
+    if (missingWinner >= 0) {
+      toast({ title: `Ván ${missingWinner + 1}: chưa chọn đội thắng`, variant: "destructive" });
+      setActiveGame(missingWinner);
+      return;
+    }
+    const missingStats = games.findIndex((game) =>
+      [...game.players.blue, ...game.players.red].some(
+        (p) => p.ign.trim() && (p.kills === null || p.deaths === null || p.assists === null),
+      ),
+    );
+    if (missingStats >= 0) {
+      toast({ title: `Ván ${missingStats + 1}: còn ô K/D/A trống`, variant: "destructive" });
+      setActiveGame(missingStats);
       return;
     }
 
@@ -411,6 +534,68 @@ const AovStatsImportPage = () => {
 
         <Card>
           <CardHeader>
+            <CardTitle>0. Đọc từ ảnh tổng kết trận</CardTitle>
+            <CardDescription>
+              Chọn ảnh chụp màn hình kết quả sau trận (mỗi ảnh 1 ván, theo thứ tự ván). Ảnh được đọc ngay trên
+              máy bạn rồi điền JSON bên dưới. Lần đầu cần tải bộ đọc chữ (~vài chục MB). Dùng ảnh gốc, không cắt
+              hay thu nhỏ.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <label
+              className={`flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1 border border-dashed border-input px-4 text-center text-sm ${
+                ocrBusy ? "pointer-events-none opacity-60" : "hover:border-foreground"
+              }`}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                disabled={ocrBusy}
+                onChange={(event) => {
+                  void handleReadImages(event.target.files);
+                  event.target.value = "";
+                }}
+              />
+              {ocrBusy ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {ocrProgress
+                    ? `Đang đọc ảnh ${ocrProgress.file}/${ocrProgress.files} · ô ${ocrProgress.cell}/${ocrProgress.cells}`
+                    : "Đang tải bộ đọc chữ…"}
+                </span>
+              ) : (
+                <>
+                  <span className="font-semibold">Chọn ảnh tổng kết trận</span>
+                  <span className="text-xs text-muted-foreground">PNG / JPG · chọn nhiều ảnh cho Bo3 / Bo5</span>
+                </>
+              )}
+            </label>
+
+            {ocrReports.map((report, index) => (
+              <div key={`${report.fileName}-${index}`} className="border-t border-border pt-3 text-sm">
+                <div className="font-semibold">
+                  Ván {index + 1} · {report.fileName}
+                </div>
+                {report.error ? (
+                  <p className="mt-1 text-destructive">Không đọc được: {report.error}</p>
+                ) : report.warnings.length ? (
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted-foreground">
+                    {report.warnings.map((warning, warningIndex) => (
+                      <li key={`${warning.key}-${warningIndex}`}>{warning.message}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-muted-foreground">Không có ô nào cần kiểm tra.</p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>1. Nhập stats (JSON)</CardTitle>
             <CardDescription>
               blue = team A (trái), red = team B (phải). Hỗ trợ object đơn hoặc
@@ -430,6 +615,7 @@ const AovStatsImportPage = () => {
                 variant="outline"
                 onClick={() => {
                   setJsonInput(JSON_TEMPLATE);
+                  setOcrReports([]);
                   setGames([]);
                   setActiveGame(0);
                   setGeneratedItems([]);
@@ -494,6 +680,28 @@ const AovStatsImportPage = () => {
                           updateGameField("red_kills", e.target.value)
                         }
                       />
+                    </div>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void handleSnapAll()}>
+                    Ghép tên với username trên hệ thống
+                  </Button>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Đội thắng</span>
+                    <div className="flex gap-2">
+                      {(["blue", "red"] as const).map((side) => (
+                        <Button
+                          key={side}
+                          type="button"
+                          size="sm"
+                          variant={parsed.game.winner_side === side ? "default" : "outline"}
+                          onClick={() => updateGameField("winner_side", side)}
+                        >
+                          {side === "blue" ? "Xanh (team A)" : "Đỏ (team B)"}
+                        </Button>
+                      ))}
+                      {parsed.game.winner_side === null ? (
+                        <span className="self-center text-xs text-destructive">Chưa chọn</span>
+                      ) : null}
                     </div>
                   </div>
                   <PlayerTable
