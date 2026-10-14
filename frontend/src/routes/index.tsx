@@ -32,6 +32,9 @@ const TournamentSetupPage = lazy(() => import("@/pages/TournamentSetupPage"));
 const BracketSetupPage = lazy(() => import("@/pages/BracketSetupPage"));
 const MatchDetailPage = lazy(() => import("@/pages/MatchDetailPage"));
 const BanPickPage = lazy(() => import("@/pages/BanPickPage"));
+const OrgsPage = lazy(() => import("@/pages/OrgsPage"));
+const OrgDetailPage = lazy(() => import("@/pages/OrgDetailPage"));
+const JoinInvitePage = lazy(() => import("@/pages/JoinInvitePage"));
 const withSuspense = (element: ReactNode) => (
   <Suspense fallback={<PageLoader />}>{element}</Suspense>
 );
@@ -67,6 +70,18 @@ const routes = [
   {
     path: "/series/:slug/pickem",
     element: withTitle(withSuspense(<SeriesPickemPage />), "Pickem"),
+  },
+  {
+    path: "/orgs",
+    element: withTitle(withSuspense(<OrgsPage />), "Org"),
+  },
+  {
+    path: "/orgs/:id",
+    element: withTitle(withSuspense(<OrgDetailPage />), "Org"),
+  },
+  {
+    path: "/join/:token",
+    element: withTitle(withSuspense(<JoinInvitePage />), "Lời mời"),
   },
   {
     path: "/round/:slug",

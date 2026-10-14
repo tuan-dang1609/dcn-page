@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import TeamRegistrationDialog from "@/components/groups/TeamRegistrationDialog";
 import axios from "axios";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -1142,6 +1143,11 @@ const TournamentRegistration = ({
 
   // Keep hook order stable: guard only after all hooks are declared.
   if (!user) return null;
+
+  // Giải theo đội: org / đội lẻ + đội trưởng (components/groups/TeamRegistrationDialog)
+  if (!isIndividualMode) {
+    return <TeamRegistrationDialog open={open} onOpenChange={onOpenChange} tournamentId={tournamentId} />;
+  }
 
   if (isIndividualMode && !isRosterView) {
     const riotAccount = String(user.riot_account ?? "").trim();

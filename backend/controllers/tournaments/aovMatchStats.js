@@ -12,6 +12,7 @@ import {
   ensureMatchAovStatsFromStaging,
   getStagedAovStats,
 } from "../../utils/aovStagingDb.js";
+import { loadMatchableUsers, matchGameToUsers } from "../../utils/aovUsernameMatch.js";
 
 
 
@@ -72,6 +73,32 @@ aovStatsRouter.onBeforeHandle(async () => {
 });
 
 
+
+/**
+ * Ghép tên đọc từ ảnh tổng kết (OCR) với username tài khoản trên hệ thống.
+ * body: { games: [ { blue: string[], red: string[] } ] } → mỗi ván ghép 1–1 riêng.
+ */
+aovStatsRouter.post(
+  "/aov/match-usernames",
+  async ({ body, user, set }) => {
+    const access = ensureOpsPermission(user, set);
+    if (!access.ok) return access.error;
+
+    const games = Array.isArray(body?.games) ? body.games.slice(0, 7) : [];
+    const users = await loadMatchableUsers();
+    const toNames = (list) => (Array.isArray(list) ? list : []).slice(0, 5).map((name) => String(name ?? ""));
+    // Mỗi ván ghép 1–1 chung 10 tên (1 tài khoản không bị dùng ở cả 2 đội)
+    const data = games.map((game) => matchGameToUsers({ blue: toNames(game?.blue), red: toNames(game?.red) }, users));
+
+    set.status = 200;
+    return { data };
+  },
+  {
+    tags: [TAG],
+    summary: "Match OCR names to registered usernames",
+    security: [{ bearerAuth: [] }],
+  },
+);
 
 aovStatsRouter.post(
   "/aov/staging/generate",
