@@ -17,6 +17,7 @@ import {
   toNumber,
   withTransaction,
 } from "../utils/groups.js";
+import { loadTournamentWithGame, placeInSquad } from "../utils/teamFinder.js";
 
 /**
  * Org (teams.kind = 'org') và đội lẻ (kind = 'squad'): xem, tạo org, xin vào, link mời,
@@ -150,17 +151,17 @@ groupRouter.get(
     if (user) {
       const { rows } = await pool.query(
         `SELECT id, status, created_at FROM team_join_requests
-         WHERE team_id = $1 AND user_id = $2 AND status = 'pending'`,
+         WHERE team_id = $1 AND user_id = $2 AND status = 'pending' AND direction = 'request'`,
         [group.id, user.id],
       );
       myRequest = rows[0] ?? null;
     }
     if (manager) {
       ({ rows: pendingRequests } = await pool.query(
-        `SELECT r.id, r.user_id, r.message, r.created_at,
+        `SELECT r.id, r.user_id, r.message, r.ingame_role, r.created_at,
                 u.username, u.nickname, u.profile_picture, u.riot_account
          FROM team_join_requests r JOIN users u ON u.id = r.user_id
-         WHERE r.team_id = $1 AND r.status = 'pending'
+         WHERE r.team_id = $1 AND r.status = 'pending' AND r.direction = 'request'
          ORDER BY r.created_at`,
         [group.id],
       ));
@@ -320,13 +321,30 @@ groupRouter.post(
         [toNumber(params.requestId)],
       );
       const request = rows[0];
-      if (!request || request.status !== "pending") {
+      if (!request || request.status !== "pending" || request.direction === "invite") {
         throw new GroupError(404, "Đơn không còn chờ duyệt");
       }
       const group = await loadGroup(request.team_id, client);
       await requireManager(group, user, client);
 
-      if (decision === "approve") await addMember(group, toNumber(request.user_id), "member", client);
+      if (decision === "approve" && group.kind === "squad") {
+        // Đội lẻ: vào luôn đội hình (nếu còn chỗ) với vai trò đã chọn khi xin vào
+        const tournament = await loadTournamentWithGame(group.squad_tournament_id, client);
+        const { rows: reg } = await client.query(
+          "SELECT id FROM tournament_teams WHERE team_id = $1 AND tournament_id = $2",
+          [group.id, tournament.id],
+        );
+        if (reg[0]) {
+          await placeInSquad(
+            { registrationId: toNumber(reg[0].id), group, tournament, userId: toNumber(request.user_id), role: request.ingame_role },
+            client,
+          );
+        } else {
+          await addMember(group, toNumber(request.user_id), "member", client);
+        }
+      } else if (decision === "approve") {
+        await addMember(group, toNumber(request.user_id), "member", client);
+      }
       await client.query(
         `UPDATE team_join_requests SET status = $1, decided_by = $2, decided_at = NOW() WHERE id = $3`,
         [decision === "approve" ? "approved" : "declined", user.id, request.id],

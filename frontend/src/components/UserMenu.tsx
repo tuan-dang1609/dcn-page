@@ -25,6 +25,12 @@ const GROUP_EVENT_TOAST: Record<string, { tone: "success" | "error" | "info"; te
   member_removed: { tone: "error", text: "Bạn đã bị mời ra khỏi org / đội" },
   member_joined: { tone: "info", text: "Có thành viên mới vào org / đội của bạn" },
   member_left: { tone: "info", text: "Một thành viên đã rời org / đội của bạn" },
+  team_invite: { tone: "info", text: "Có đội mời bạn vào — mở trang đăng ký giải để trả lời" },
+  invite_declined: { tone: "info", text: "Người chơi đã từ chối lời mời vào đội" },
+  team_formed: { tone: "success", text: "Đã ghép đội xong — bạn đã có đội trong giải" },
+  team_unplaced: { tone: "error", text: "Ghép đội xong nhưng chưa đủ người để xếp bạn vào đội" },
+  lineup_forfeit_lost: { tone: "error", text: "Đội bạn bị xử thua vì không chốt đội hình ra sân trước hạn" },
+  lineup_forfeit_won: { tone: "success", text: "Đối thủ không chốt đội hình ra sân — đội bạn được xử thắng" },
 };
 
 const UserMenu = () => {
@@ -45,7 +51,7 @@ const UserMenu = () => {
         const info = GROUP_EVENT_TOAST[eventName];
         if (info) toast[info.tone](info.text);
         void refreshUser?.().catch(() => {});
-        for (const key of ["group", "my-groups", "registration-options", "registration-entry"]) {
+        for (const key of ["group", "my-groups", "registration-options", "registration-entry", "team-finder", "my-pending-lineups", "match-lineups"]) {
           void queryClient.invalidateQueries({ queryKey: [key] });
         }
       },

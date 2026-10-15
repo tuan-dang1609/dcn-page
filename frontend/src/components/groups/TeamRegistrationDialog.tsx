@@ -17,20 +17,33 @@ import {
   getRegistrationEntry,
   getRegistrationOptions,
   inviteUrl,
+  kickMember,
   memberName,
   registerOrg,
   registerSquad,
+  transferGroup,
   updateRegistration,
   withdrawRegistration,
 } from "@/api/groups";
 import RosterPicker from "@/components/groups/RosterPicker";
+import RecruitPanel from "@/components/groups/RecruitPanel";
+import SquadRoster from "@/components/groups/SquadRoster";
+import TeamFinderPanel from "@/components/groups/TeamFinderPanel";
 
 /**
  * Đăng ký giải theo đội (registration_mode = 'org'):
- *   - Đã có đội trong giải → xem / sửa đội hình + đội trưởng, rút đăng ký; đội lẻ có link mời.
- *   - Chưa có: "Đăng ký bằng org" (sáng lập / lead) và — giải ngoài series — "Tạo đội lẻ cho giải này".
+ *   - Đã có đội trong giải → xem / sửa đội hình + đội trưởng, rút đăng ký.
+ *     Org: tick chọn người thi đấu trong số thành viên. Đội lẻ: thành viên = đội hình (link mời, mời ra).
+ *   - Chưa có: "Đăng ký bằng org" (sáng lập / lead) và — giải ngoài series — "Tạo đội lẻ cho giải này"
+ *     + "Tìm đội" (đội đang tuyển, lời mời, ghép ngẫu nhiên khi hết hạn).
  * Đội trưởng = người ban/pick và check-in cho giải này.
+ * Vai trò trong game chỉ chọn khi xin vào đội / ghép ngẫu nhiên (tab "Tìm đội"), không chọn trong đội hình.
  */
+
+type Mode = "org" | "squad" | "find";
+
+const MODE_LABEL: Record<Mode, string> = { org: "Bằng org", squad: "Tạo đội lẻ", find: "Tìm đội" };
+
 
 type Props = {
   open: boolean;
@@ -48,9 +61,10 @@ const INPUT = `min-h-11 w-full border ${RULE} bg-transparent px-3 text-sm outlin
 const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => {
   const { user, token } = useAuth();
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<"org" | "squad">("org");
+  const [mode, setMode] = useState<Mode>("org");
   const [selected, setSelected] = useState<Array<number | string>>([]);
   const [captainId, setCaptainId] = useState<number | string | null>(null);
+
   const [squadName, setSquadName] = useState("");
   const [squadTag, setSquadTag] = useState("");
   const [busy, setBusy] = useState(false);
@@ -95,7 +109,6 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
   useEffect(() => {
     if (options && !options.org?.can_register && !options.tournament.in_series) setMode("squad");
   }, [options]);
-
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["registration-options"] });
     await queryClient.invalidateQueries({ queryKey: ["registration-entry"] });
@@ -148,6 +161,7 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
     // ── Đã có đội trong giải ──
     if (entry) {
       const isSquad = entry.team.kind === "squad";
+
       const captain = entry.roster.find((player) => String(player.user_id) === String(entry.captain_user_id));
       return (
         <div className="grid gap-5">
@@ -177,19 +191,37 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
                   </button>
                 </div>
               ) : null}
-              <RosterPicker
-                members={entry.members}
-                selected={selected}
-                captainId={captainId}
-                min={entry.roster_min}
-                max={entry.roster_max}
-                disabled={busy || !entry.is_open}
-                onChange={(next) => {
-                  setSelected(next.selected);
-                  setCaptainId(next.captainId);
-                }}
-              />
+              {isSquad ? (
+                <SquadRoster
+                  entry={entry}
+                  disabled={busy || !entry.is_open}
+                  onMakeCaptain={(userId) => {
+                    const target = entry.roster.find((player) => String(player.user_id) === String(userId));
+                    if (!window.confirm(`Chuyển đội trưởng cho ${target ? memberName(target) : "người này"}? Bạn sẽ không quản lý đội nữa.`)) return;
+                    void run(() => transferGroup(entry.team.id, userId, token!), "Đã đổi đội trưởng");
+                  }}
+                  onRemove={(userId) => {
+                    const target = entry.roster.find((player) => String(player.user_id) === String(userId));
+                    if (!window.confirm(`Mời ${target ? memberName(target) : "người này"} ra khỏi đội?`)) return;
+                    void run(() => kickMember(entry.team.id, userId, token!), "Đã mời ra khỏi đội");
+                  }}
+                />
+              ) : (
+                <RosterPicker
+                  members={entry.members}
+                  selected={selected}
+                  captainId={captainId}
+                  min={entry.roster_min}
+                  max={entry.roster_max}
+                  disabled={busy || !entry.is_open}
+                  onChange={(next) => {
+                    setSelected(next.selected);
+                    setCaptainId(next.captainId);
+                  }}
+                />
+              )}
               {!entry.is_open ? <p className={`text-sm ${GREY}`}>Đã hết hạn đăng ký — chỉ BTC sửa được đội hình.</p> : null}
+
               <div className="flex flex-wrap justify-between gap-2">
                 <button
                   type="button"
@@ -202,20 +234,23 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
                 >
                   Rút đăng ký
                 </button>
-                <button
-                  type="button"
-                  disabled={busy || !entry.is_open || !captainId}
-                  className={PRIMARY_BTN}
-                  onClick={() =>
-                    void run(
-                      () => updateRegistration(entry.id, { player_ids: selected, captain_user_id: captainId! }, token!),
-                      "Đã lưu đội hình",
-                    )
-                  }
-                >
-                  Lưu đội hình
-                </button>
+                {isSquad ? null : (
+                  <button
+                    type="button"
+                    disabled={busy || !entry.is_open || !captainId}
+                    className={PRIMARY_BTN}
+                    onClick={() =>
+                      void run(
+                        () => updateRegistration(entry.id, { player_ids: selected, captain_user_id: captainId! }, token!),
+                        "Đã lưu đội hình",
+                      )
+                    }
+                  >
+                    Lưu đội hình
+                  </button>
+                )}
               </div>
+              {isSquad && entry.team_finder ? <RecruitPanel entry={entry} token={token!} /> : null}
             </>
           ) : (
             <ul className="m-0 list-none p-0">
@@ -240,23 +275,31 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
     const org = options?.org;
     const canOrg = Boolean(org?.can_register);
     const canSquad = !tournament.in_series;
+    const canFind = Boolean(tournament.team_finder);
+    const modes = (["org", "squad", "find"] as const).filter(
+      (value) => (value === "org" && canOrg) || (value === "squad" && canSquad) || (value === "find" && canFind),
+    );
+
 
     return (
       <div className="grid gap-5">
-        {canOrg && canSquad ? (
-          <div className={`grid grid-cols-2 border ${RULE}`}>
-            {(["org", "squad"] as const).map((value) => (
+        {modes.length > 1 ? (
+          <div className={`grid border ${RULE}`} style={{ gridTemplateColumns: `repeat(${modes.length}, minmax(0, 1fr))` }}>
+            {modes.map((value) => (
               <button
                 key={value}
                 type="button"
+                aria-pressed={mode === value}
                 onClick={() => setMode(value)}
-                className={`min-h-11 text-sm font-bold ${mode === value ? "bg-[#F2F0EB] text-[#0B0B0B]" : ""}`}
+                className={`min-h-11 px-1 text-sm font-bold ${mode === value ? "bg-[#F2F0EB] text-[#0B0B0B]" : ""}`}
               >
-                {value === "org" ? `Bằng org ${org!.short_name}` : "Tạo đội lẻ"}
+                {value === "org" ? `Org ${org!.short_name}` : MODE_LABEL[value]}
               </button>
             ))}
           </div>
         ) : null}
+
+        {mode === "find" && canFind ? <TeamFinderPanel tournamentId={tournament.id} token={token!} /> : null}
 
         {mode === "org" && canOrg ? (
           <>
@@ -271,11 +314,13 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
               min={tournament.roster_min}
               max={tournament.roster_max}
               disabled={busy}
+
               onChange={(next) => {
                 setSelected(next.selected);
                 setCaptainId(next.captainId);
               }}
             />
+
             <div className="flex justify-end">
               <button
                 type="button"
@@ -286,7 +331,11 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
                     () =>
                       registerOrg(
                         tournament.id,
-                        { org_id: org!.id, player_ids: selected, captain_user_id: captainId! },
+                        {
+                          org_id: org!.id,
+                          player_ids: selected,
+                          captain_user_id: captainId!,
+                        },
                         token!,
                       ),
                     "Đã đăng ký",
@@ -302,7 +351,8 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
         {mode === "squad" && canSquad ? (
           <>
             <p className={`m-0 text-sm ${GREY}`}>
-              Đội lẻ chỉ dùng cho giải này. Bạn là đội trưởng; sau khi tạo, gửi link mời cho đồng đội rồi chọn đội hình.
+              Đội lẻ chỉ dùng cho giải này. Bạn là đội trưởng; sau khi tạo, gửi link mời cho đồng đội hoặc mở tuyển công
+              khai để người chơi lẻ xin vào.
             </p>
             <div className="grid grid-cols-[minmax(0,1fr)_120px] gap-2">
               <input
@@ -320,6 +370,7 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
                 onChange={(event) => setSquadTag(event.target.value)}
               />
             </div>
+
             <div className="flex justify-end">
               <button
                 type="button"
@@ -327,7 +378,8 @@ const TeamRegistrationDialog = ({ open, onOpenChange, tournamentId }: Props) => 
                 className={PRIMARY_BTN}
                 onClick={() =>
                   void run(
-                    () => registerSquad(tournament.id, { name: squadName.trim(), short_name: squadTag.trim() }, token!),
+                    () =>
+                      registerSquad(tournament.id, { name: squadName.trim(), short_name: squadTag.trim() }, token!),
                     "Đã tạo đội lẻ — gửi link mời cho đồng đội",
                   )
                 }

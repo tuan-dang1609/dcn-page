@@ -4,6 +4,7 @@ import middleware from "../../utils/middleware.js";
 import logger from "../../utils/logger.js";
 import { deleteBanPickSession } from "../../utils/banPick.js";
 import { scheduleTournamentResultsRecalculate } from "../../utils/tournamentRanking.js";
+import { isLineupLocked, loadLineups, loadMatchForLineup } from "../../utils/matchLineups.js";
 import {
   applyMatchProgression,
   ensureDoubleElimLoserNextLinks,
@@ -606,11 +607,27 @@ matchRouter.get(
       return rows;
     };
 
-    const [team1Players, team2Players, allPlayers] = await Promise.all([
+    const [team1Roster, team2Roster, allPlayers, lineups] = await Promise.all([
       fetchPlayersForTeam(teamAId),
       fetchPlayersForTeam(teamBId),
       fetchAllTournamentPlayers(),
+      // Chỉ công khai đội hình ra sân khi đã khoá (mở ban/pick / tới giờ) — trước đó đối thủ không được biết
+      loadMatchForLineup(matchId)
+        .then((match) => (match && isLineupLocked(match) ? loadLineups(matchId) : new Map()))
+        .catch(() => new Map()),
     ]);
+
+    // Đội hình ra sân đã chọn (utils/matchLineups.js) → lên đầu danh sách, đánh dấu in_lineup
+    const withLineup = (players, teamId) => {
+      const lineup = lineups.get(toNumber(teamId)) ?? [];
+      if (!lineup.length) return players;
+      const order = new Map(lineup.map((id, index) => [id, index]));
+      return players
+        .map((player) => ({ ...player, in_lineup: order.has(toNumber(player.user_id)) }))
+        .sort((a, b) => (order.get(toNumber(a.user_id)) ?? 99) - (order.get(toNumber(b.user_id)) ?? 99));
+    };
+    const team1Players = withLineup(team1Roster, teamAId);
+    const team2Players = withLineup(team2Roster, teamBId);
 
     set.status = 200;
     return {

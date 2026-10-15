@@ -30,6 +30,19 @@ export class GroupError extends Error {
 
 export const isAdmin = (user) => ADMIN_ROLE_IDS.has(toNumber(user?.role_id));
 
+/** Đội hình: tối thiểu = số người mỗi đội của giải, tối đa thêm 2 dự bị. */
+export const rosterLimits = (tournament) => {
+  const min = Math.max(1, toNumber(tournament.max_player_per_team) ?? 1);
+  return { min, max: min + 2 };
+};
+
+export const isRegistrationOpen = (tournament) => {
+  const now = Date.now();
+  const start = tournament.register_start ? new Date(tournament.register_start).getTime() : null;
+  const end = tournament.register_end ? new Date(tournament.register_end).getTime() : null;
+  return (!start || now >= start) && (!end || now <= end);
+};
+
 const query = (client, sql, params) => (client ?? pool).query(sql, params);
 
 export const getGroup = async (groupId, client) => {
@@ -144,11 +157,43 @@ export const addMember = async (group, userId, role, client) => {
   if (await isUserInTournament(userId, group.squad_tournament_id, { excludeGroupId: group.id }, client)) {
     throw new GroupError(409, "Người này đã ở một đội khác trong giải này");
   }
+  // Đội lẻ: thành viên = đội hình thi đấu → đủ người thì không nhận thêm
+  const { rows: limitRows } = await query(
+    client,
+    `SELECT t.max_player_per_team,
+            (SELECT COUNT(*)::int FROM squad_members WHERE squad_id = $1 AND user_id <> $2) AS members
+     FROM tournaments t WHERE t.id = $3`,
+    [group.id, userId, group.squad_tournament_id],
+  );
+  if (limitRows[0] && limitRows[0].members >= rosterLimits(limitRows[0]).max) {
+    throw new GroupError(409, "Đội đã đủ người");
+  }
   await query(
     client,
     `INSERT INTO squad_members (squad_id, user_id, role) VALUES ($1, $2, $3)
      ON CONFLICT (squad_id, user_id) DO NOTHING`,
     [group.id, userId, role],
+  );
+  await query(
+    client,
+    `INSERT INTO tournament_team_players (tournament_team_id, user_id)
+     SELECT tt.id, $2 FROM tournament_teams tt WHERE tt.team_id = $1 AND tt.tournament_id = $3
+     ON CONFLICT (tournament_team_id, user_id) DO NOTHING`,
+    [group.id, userId, group.squad_tournament_id],
+  );
+  // Đã có đội trong giải → rời danh sách chờ ghép
+  await markFreeAgentsPlaced(group.squad_tournament_id, [userId], null, client);
+};
+
+/** Người chơi lẻ đã vào đội trong giải → không còn chờ ghép. */
+export const markFreeAgentsPlaced = async (tournamentId, userIds, registrationId, client) => {
+  if (!tournamentId || !userIds.length) return;
+  await query(
+    client,
+    `UPDATE tournament_free_agents
+     SET status = 'placed', placed_registration_id = COALESCE($3, placed_registration_id), updated_at = NOW()
+     WHERE tournament_id = $1 AND user_id = ANY($2::bigint[])`,
+    [tournamentId, userIds, registrationId ?? null],
   );
 };
 

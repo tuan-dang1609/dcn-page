@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import axios from "axios";
+import LineupSettingsCard from "@/components/LineupSettingsCard";
 
 const getApiErrorMessage = (error: unknown, fallback: string) => {
   if (!axios.isAxiosError(error)) {
@@ -1480,6 +1481,11 @@ const TournamentSetupPage = () => {
                 </>
               )}
             </Button>
+
+            {/* Giải theo đội đã lưu: cài đặt chốt đội hình ra sân (lưu riêng) */}
+            {tournamentMode === "update" && tournamentIdInput && !isIndividualMode ? (
+              <LineupSettingsCard tournamentId={tournamentIdInput} token={token} />
+            ) : null}
           </section>
         ) : null}
 
