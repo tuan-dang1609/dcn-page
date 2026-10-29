@@ -38,7 +38,7 @@ export interface MatchLineups {
   date_scheduled: string | null;
   /** Giờ mở chốt (giờ đấu − số phút BTC cài); null = mở ngay. */
   opens_at: string | null;
-  /** Hạn chốt: Valorant = giờ trận − 10 phút (giờ trận = giờ ban/pick); game khác = giờ trận. */
+  /** Hạn chốt: Valorant = giờ trận − 10 phút (giờ trận = giờ ban/pick); LMHT = giờ trận − 15 phút; game khác = giờ trận. */
   closes_at: string | null;
   not_open_yet: boolean;
   teams: LineupTeam[];

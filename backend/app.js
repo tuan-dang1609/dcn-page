@@ -14,6 +14,7 @@ import groupRouter from "./controllers/groups.js";
 import registrationRouter from "./controllers/tournaments/registrations.js";
 import teamFinderRouter from "./controllers/tournaments/teamFinder.js";
 import matchLineupRouter from "./controllers/tournaments/matchLineups.js";
+import lolTournamentRouter from "./controllers/tournaments/lolTournament.js";
 import tournamentRouter from "./controllers/tournaments/tournament.js";
 import ruleRouter from "./controllers/tournaments/rules.js";
 import prizeRouter from "./controllers/tournaments/prizes.js";
@@ -199,6 +200,7 @@ const app = new Elysia()
   .group("/api/registrations", (app) => app.use(registrationRouter))
   .group("/api/team-finder", (app) => app.use(teamFinderRouter))
   .group("/api/match-lineups", (app) => app.use(matchLineupRouter))
+  .group("/api/lol-tournament", (app) => app.use(lolTournamentRouter))
   .group("/api/series", (app) => app.use(seriesRouter))
   .group("/api/pickem", (app) => app.use(pickemRouter))
   .group("/api/tournaments", (app) => app.use(tournamentRouter))

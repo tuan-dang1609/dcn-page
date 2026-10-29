@@ -31,6 +31,8 @@ const GROUP_EVENT_TOAST: Record<string, { tone: "success" | "error" | "info"; te
   team_unplaced: { tone: "error", text: "Ghép đội xong nhưng chưa đủ người để xếp bạn vào đội" },
   lineup_forfeit_lost: { tone: "error", text: "Đội bạn bị xử thua vì không chốt đội hình ra sân trước hạn" },
   lineup_forfeit_won: { tone: "success", text: "Đối thủ không chốt đội hình ra sân — đội bạn được xử thắng" },
+  lol_code_ready: { tone: "info", text: "Đã có mã phòng LMHT cho trận của bạn — mở trang trận để lấy mã" },
+  lol_match_finished: { tone: "success", text: "Trận LMHT đã có kết quả" },
 };
 
 const UserMenu = () => {
@@ -51,7 +53,7 @@ const UserMenu = () => {
         const info = GROUP_EVENT_TOAST[eventName];
         if (info) toast[info.tone](info.text);
         void refreshUser?.().catch(() => {});
-        for (const key of ["group", "my-groups", "registration-options", "registration-entry", "team-finder", "my-pending-lineups", "match-lineups"]) {
+        for (const key of ["group", "my-groups", "registration-options", "registration-entry", "team-finder", "my-pending-lineups", "match-lineups", "my-lol-codes", "lol-match-codes"]) {
           void queryClient.invalidateQueries({ queryKey: [key] });
         }
       },

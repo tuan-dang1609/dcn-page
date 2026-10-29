@@ -10,7 +10,7 @@ import { getLineupSettings, saveLineupSettings } from "@/api/matchLineups";
 /**
  * BTC (trang thiết lập giải): chốt đội hình ra sân —
  *   mở chốt trước giờ đấu bao nhiêu phút (trống = mở ngay khi có trận), hết hạn không chốt thì xử thua.
- * Hạn chốt: Valorant = giờ trận − 10 phút (đúng giờ trận tự mở ban/pick); game khác = giờ trận.
+ * Hạn chốt: Valorant = giờ trận − 10 phút (đúng giờ trận tự mở ban/pick); LMHT = giờ trận − 15 phút (tạo mã phòng); game khác = giờ trận.
  */
 
 const PRESETS: Array<{ label: string; minutes: number | null }> = [
@@ -65,7 +65,7 @@ const LineupSettingsCard = ({ tournamentId, token }: { tournamentId: string; tok
       <div>
         <p className="text-sm font-medium">Chốt đội hình ra sân</p>
         <p className="text-xs text-muted-foreground">
-          Đội trưởng chọn người ra sân từng trận. Hạn chốt: Valorant 10 phút trước giờ trận (giờ trận = giờ ban/pick, phòng tự mở); game khác đúng giờ trận.
+          Đội trưởng chọn người ra sân từng trận. Hạn chốt: Valorant 10 phút trước giờ trận (giờ trận = giờ ban/pick, phòng tự mở); LMHT 15 phút trước giờ trận (mã phòng tự tạo lúc đó); game khác đúng giờ trận.
         </p>
       </div>
       {settingsQuery.isLoading ? (

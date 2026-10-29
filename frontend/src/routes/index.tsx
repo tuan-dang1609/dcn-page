@@ -3,6 +3,7 @@ import { createBrowserRouter, Outlet } from "react-router-dom";
 import PageLoader from "@/components/PageLoader";
 import BanPickAlertBar from "@/components/BanPickAlertBar";
 import LineupAlertBar from "@/components/LineupAlertBar";
+import LolCodeAlertBar from "@/components/LolCodeAlertBar";
 
 const BRAND_TITLE = "DCN Championship Series";
 
@@ -120,6 +121,7 @@ const RootShell = () => (
   <>
     <BanPickAlertBar />
     <LineupAlertBar />
+    <LolCodeAlertBar />
     <Outlet />
   </>
 );

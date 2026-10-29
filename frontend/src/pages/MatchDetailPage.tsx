@@ -55,6 +55,7 @@ import {
   TOURNAMENT_TEAM_TAG_BADGE_CLASS,
 } from "@/components/tournamentTheme";
 import MatchLineupEditor from "@/components/MatchLineupEditor";
+import LolCodePanel from "@/components/LolCodePanel";
 import { getMatchLineups } from "@/api/matchLineups";
 
 // Bảng chỉ số kiểu canvas: tiêu đề chữ xám không nền, kẻ 2px màu chữ dưới tiêu đề
@@ -4341,6 +4342,8 @@ const MatchDetailPage = ({
 
       {/* Đội trưởng chọn người ra sân trước giờ thi đấu (chỉ hiện với người sửa được) */}
       {!isPanel ? <MatchLineupEditor matchId={numId} token={token} /> : null}
+      {/* LMHT: mã phòng giải đấu Riot từng ván */}
+      {!isPanel && normalizedRouteGame === "lol" ? <LolCodePanel matchId={numId} /> : null}
 
       {shouldShowMatchDetailBlockedNotice ? (
         <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">

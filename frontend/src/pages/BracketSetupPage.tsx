@@ -35,6 +35,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import BracketSlotEditor from "@/components/BracketSlotEditor";
 
 const allowedRoleIds = new Set([1, 2, 3]);
 
@@ -65,6 +66,13 @@ const orderTeamIdsByTournament = (
     .map((team) => team.team_id);
 };
 
+/** Số slot cho template trống (backend: SINGLE_/DOUBLE_ELIM_/SWISS_TEMPLATE_SIZES). */
+const TEMPLATE_SIZES: Partial<Record<BracketType, number[]>> = {
+  "single-elimination": [2, 4, 8, 16, 32, 64],
+  "double-elimination": [4, 6, 8],
+  swiss: [8, 16],
+};
+
 const BracketSetupPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -85,7 +93,10 @@ const BracketSetupPage = () => {
     status: "scheduled",
     date_start: "",
     swiss_round: "",
+    mode: "teams" as "teams" | "template",
+    slot_count: "8",
   });
+  const [slotBracketId, setSlotBracketId] = useState<number | null>(null);
   const [savingDateBracketId, setSavingDateBracketId] = useState<number | null>(
     null,
   );
@@ -228,6 +239,8 @@ const BracketSetupPage = () => {
 
   const selectedFormatId = toNumber(form.format_id);
   const selectedLegs = toNumber(form.legs) ?? 2;
+  const templateSizes = TEMPLATE_SIZES[form.type] ?? [];
+  const isTemplate = form.mode === "template" && templateSizes.length > 0;
 
   const toggleDraftTeam = (teamId: number) => {
     setDraftTeamIds((prev) => {
@@ -284,9 +297,30 @@ const BracketSetupPage = () => {
     setSubmitting(true);
 
     try {
-      const parsedTeamIds = selectedTeamIds.length
-        ? selectedTeamIds
-        : undefined;
+      const slotCount = isTemplate ? toNumber(form.slot_count) : null;
+      if (isTemplate && (!slotCount || !templateSizes.includes(slotCount))) {
+        toast({
+          title: "Số slot không hợp lệ",
+          description: `Chọn ${templateSizes.join("/")} slot.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (
+        isTemplate &&
+        form.type === "double-elimination" &&
+        toNumber(form.teams_to_advance) === 2 &&
+        slotCount !== 4
+      ) {
+        toast({
+          title: "2 đội đi tiếp chỉ dùng cho 4 slot",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const parsedTeamIds =
+        !isTemplate && selectedTeamIds.length ? selectedTeamIds : undefined;
 
       const response = await generateBracket(tournamentId, form.type, {
         format_id: formatId,
@@ -303,10 +337,12 @@ const BracketSetupPage = () => {
           ? { date_start: form.date_start.trim() }
           : {}),
         ...(parsedTeamIds?.length ? { team_ids: parsedTeamIds } : {}),
+        ...(slotCount ? { slot_count: slotCount } : {}),
       });
 
       const bracketId = toNumber(response.data?.data?.bracket_id);
       setGeneratedBracketId(bracketId);
+      setSlotBracketId(bracketId);
 
       await reloadBrackets(tournamentId);
 
@@ -500,6 +536,54 @@ const BracketSetupPage = () => {
                 <option value="round-robin">round-robin</option>
               </select>
             </div>
+
+            {templateSizes.length ? (
+              <div>
+                <Label htmlFor="bracket-mode">Cách tạo</Label>
+                <select
+                  id="bracket-mode"
+                  value={form.mode}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      mode: event.target.value as "teams" | "template",
+                    }))
+                  }
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm"
+                >
+                  <option value="teams">Theo đội đã chọn</option>
+                  <option value="template">Template trống — xếp đội sau</option>
+                </select>
+                {isTemplate ? (
+                  <>
+                    <Label htmlFor="bracket-slots" className="mt-2 block">
+                      Số slot
+                    </Label>
+                    <select
+                      id="bracket-slots"
+                      value={form.slot_count}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          slot_count: event.target.value,
+                        }))
+                      }
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm"
+                    >
+                      {templateSizes.map((size) => (
+                        <option key={size} value={String(size)}>
+                          {size} đội
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Tạo khung trận chưa có đội. Sau khi tạo, chọn đội cho từng
+                      cặp và đặt giờ ở mục bên dưới.
+                    </p>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
 
             {form.type === "double-elimination" ? (
               <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 md:col-span-1">
@@ -731,6 +815,19 @@ const BracketSetupPage = () => {
 
                       <Button
                         type="button"
+                        variant={slotBracketId === bracketId ? "default" : "outline"}
+                        size="sm"
+                        onClick={() =>
+                          setSlotBracketId((prev) =>
+                            prev === bracketId ? null : bracketId,
+                          )
+                        }
+                      >
+                        {slotBracketId === bracketId ? "Đóng xếp đội" : "Xếp đội & giờ"}
+                      </Button>
+
+                      <Button
+                        type="button"
                         variant="destructive"
                         size="sm"
                         className="gap-1"
@@ -751,7 +848,12 @@ const BracketSetupPage = () => {
             ) : null}
           </div>
 
-          <div className="space-y-2">
+          {slotBracketId &&
+          existingBrackets.some((bracket) => toNumber(bracket.id) === slotBracketId) ? (
+            <BracketSlotEditor key={slotBracketId} bracketId={slotBracketId} />
+          ) : null}
+
+          <div className="space-y-2" hidden={isTemplate}>
             <Label>Teams</Label>
 
             <Popover open={teamPickerOpen} onOpenChange={setTeamPickerOpen}>

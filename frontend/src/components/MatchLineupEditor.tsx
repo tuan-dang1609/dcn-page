@@ -182,7 +182,9 @@ const MatchLineupEditor = ({ matchId, token }: { matchId: number | null; token: 
           {data.closes_at ? ` Hạn chốt: ${formatTime(data.closes_at)}.` : ""}
           {data.game === "valorant" && data.date_scheduled
             ? ` Ban/pick tự bắt đầu lúc ${formatTime(data.date_scheduled)}.`
-            : ""}
+            : data.game === "lol" && data.closes_at && data.date_scheduled
+              ? ` Mã phòng giải đấu tự tạo lúc ${formatTime(data.closes_at)} để kịp vào phòng, ván 1 bắt đầu lúc ${formatTime(data.date_scheduled)}. Chỉ người đã chốt vào được phòng.`
+              : ""}
         </p>
         {data.forfeit_score ? (
           <p className="m-0 mt-2 text-sm font-bold text-[#FF4A3D]">

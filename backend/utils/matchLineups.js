@@ -51,12 +51,17 @@ const DONE_STATUSES = new Set(["completed", "complete", "finished", "done", "ong
 
 /**
  * Hạn chốt: Valorant = giờ trận − 10 phút (giờ trận = giờ ban/pick, server tự mở phòng lúc đó);
+ * LMHT = giờ trận − 15 phút (mã phòng tạo lúc hạn chốt để kịp vào phòng, ván 1 bắt đầu đúng giờ);
  * game khác = đúng giờ trận.
  */
 export const VALORANT_LINEUP_CLOSE_MINUTES = 10;
-const closeOffsetMinutes = (game) => (game === "valorant" ? VALORANT_LINEUP_CLOSE_MINUTES : 0);
-const CLOSE_OFFSET_SQL = (gameAlias) =>
-  `(CASE WHEN LOWER(${gameAlias}.short_name) IN ('val', 'valorant') THEN INTERVAL '${VALORANT_LINEUP_CLOSE_MINUTES} minutes' ELSE INTERVAL '0' END)`;
+export const LOL_LINEUP_CLOSE_MINUTES = 15;
+export const closeOffsetMinutes = (game) =>
+  game === "valorant" ? VALORANT_LINEUP_CLOSE_MINUTES : game === "lol" ? LOL_LINEUP_CLOSE_MINUTES : 0;
+export const CLOSE_OFFSET_SQL = (gameAlias) =>
+  `(CASE WHEN LOWER(${gameAlias}.short_name) IN ('val', 'valorant') THEN INTERVAL '${VALORANT_LINEUP_CLOSE_MINUTES} minutes'
+         WHEN LOWER(${gameAlias}.short_name) IN ('lol', 'leagueoflegends') THEN INTERVAL '${LOL_LINEUP_CLOSE_MINUTES} minutes'
+         ELSE INTERVAL '0' END)`;
 
 export const lineupClosesAt = (match) =>
   match.date_scheduled
@@ -227,26 +232,40 @@ const listDueMatches = async (matchId = null) => {
   return rows;
 };
 
-/** Ghi kết quả xử thua như BTC nhập tỉ số: completed + đội thắng đi tiếp + cập nhật BXH. */
-const applyForfeit = async (match, winnerTeamId) => {
-  const wins = forfeitWins(match.best_of);
-  const winnerIsA = winnerTeamId === toNumber(match.team_a_id);
+/**
+ * Kết thúc trận như BTC nhập tỉ số: completed + đội thắng đi tiếp (kể cả nhánh thua) + cập nhật BXH.
+ * Không ghi đè trận đã xong. Trả false nếu trận đã completed từ trước.
+ */
+export const completeMatch = async ({ matchId, tournamentId, scoreA, scoreB, winnerTeamId }) => {
   const { rows } = await pool.query(
     `UPDATE matches SET score_a = $1, score_b = $2, winner_team_id = $3, status = 'completed'
      WHERE id = $4 AND LOWER(COALESCE(status, '')) <> ALL($5::text[])
      RETURNING *`,
-    [winnerIsA ? wins : 0, winnerIsA ? 0 : wins, winnerTeamId, match.id, COMPLETED],
+    [scoreA, scoreB, winnerTeamId, matchId, COMPLETED],
   );
   const updated = rows[0];
-  if (!updated) return false; // BTC vừa nhập kết quả
+  if (!updated) return false;
   if (updated.bracket_id) {
     await ensureDoubleElimLoserNextLinks(Number(updated.bracket_id)).catch(() => {});
-    const { rows: fresh } = await pool.query("SELECT * FROM matches WHERE id = $1", [match.id]);
+    const { rows: fresh } = await pool.query("SELECT * FROM matches WHERE id = $1", [matchId]);
     Object.assign(updated, fresh[0] ?? {});
   }
   await applyMatchProgression({ updatedMatch: updated, winnerTeamId });
-  await scheduleTournamentResultsRecalculate(Number(match.tid)).catch(() => {});
+  await scheduleTournamentResultsRecalculate(Number(tournamentId ?? updated.tournament_id)).catch(() => {});
   return true;
+};
+
+/** Ghi kết quả xử thua: 1-0 / 2-0 / 3-0 theo BO. */
+const applyForfeit = async (match, winnerTeamId) => {
+  const wins = forfeitWins(match.best_of);
+  const winnerIsA = winnerTeamId === toNumber(match.team_a_id);
+  return completeMatch({
+    matchId: match.id,
+    tournamentId: match.tid,
+    scoreA: winnerIsA ? wins : 0,
+    scoreB: winnerIsA ? 0 : wins,
+    winnerTeamId,
+  });
 };
 
 /** Xét 1 trận (hoặc mọi trận tới hạn). Trả danh sách kết quả. */

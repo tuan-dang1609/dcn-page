@@ -329,7 +329,66 @@ export interface GenerateBracketPayload {
   stage?: string;
   status?: string;
   date_start?: string | null;
+  /** Template trống: tạo khung N slot chưa có đội (single-elim 2–64, double-elim 4/6/8, swiss 8/16). */
+  slot_count?: number;
 }
+
+export interface BracketSlotMatch {
+  id: number;
+  round_number: number;
+  match_no: number;
+  team_a_id: number | null;
+  team_b_id: number | null;
+  seed_a: number | null;
+  seed_b: number | null;
+  date_scheduled: string | null;
+  best_of: number | null;
+  status: string | null;
+  score_a: number | null;
+  score_b: number | null;
+  slot_a_editable: boolean;
+  slot_b_editable: boolean;
+  feeder_a: { round_number: number; match_no: number } | null;
+  feeder_b: { round_number: number; match_no: number } | null;
+}
+
+export interface BracketSlotsData {
+  bracket: {
+    id: number;
+    tournament_id: number;
+    name: string | null;
+    format_type: string | null;
+    has_losers_bracket: boolean | null;
+  };
+  matches: BracketSlotMatch[];
+  /** Swiss: nhãn thành tích từng vòng ("0-0", "1-0", …). */
+  round_labels?: Record<number, string> | null;
+  teams?: { team_id: number; name: string | null; short_name: string | null; logo_url: string | null }[];
+}
+
+export interface BracketSlotUpdate {
+  id: number;
+  team_a_id?: number | null;
+  team_b_id?: number | null;
+  date_scheduled?: string | null;
+  best_of?: number;
+}
+
+export const getBracketSlots = (bracketId: number | string) =>
+  axios.get<{ data: BracketSlotsData }>(
+    `${tournamentsBaseUrl}/brackets/slots/${bracketId}`,
+    getAuthConfig(),
+  );
+
+export const saveBracketSlots = (
+  bracketId: number | string,
+  matches: BracketSlotUpdate[],
+) =>
+  axios.put<{ message: string; data: BracketSlotsData }>(
+    `${tournamentsBaseUrl}/brackets/slots/${bracketId}`,
+    { matches },
+    getAuthConfig(),
+  );
 
 export const updateBracketMeta = (
   bracketId: number | string,
@@ -577,12 +636,32 @@ export interface TournamentPlayerStatRow {
   deaths: number | null;
   assists: number | null;
   kda: number | null;
-  avg_performance: number | null;
-  avg_gold: number | null;
+  /** AOV (từ ảnh tổng kết) */
+  avg_performance?: number | null;
+  avg_gold?: number | null;
+  /** Valorant (từ dữ liệu trận Riot) */
+  wins?: number;
+  acs?: number | null;
+  adr?: number | null;
+  hs_pct?: number | null;
+  first_kills?: number | null;
+  first_deaths?: number | null;
+  /** Valorant: đặc vụ hay dùng; LMHT: tướng hay chơi */
+  top_agents?: Array<{ name: string; icon: string | null; count: number }>;
+  /** LMHT (từ match-v5) */
+  cs_per_min?: number | null;
+  gold_per_min?: number | null;
+  damage_per_min?: number | null;
+  vision_per_game?: number | null;
+  main_position?: string | null;
 }
 
 export interface TournamentPlayerStatsEnvelope {
+  /** "valorant" | "lol" | "aov" */
+  game?: string;
   min_games: number;
+  /** Valorant: số ván chưa lấy xong từ Riot (lấy tiếp ở lần tải sau) */
+  pending_games?: number;
   data: TournamentPlayerStatRow[];
 }
 
