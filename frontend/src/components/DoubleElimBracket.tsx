@@ -1223,9 +1223,9 @@ const DoubleElimBracket = ({
     };
   }, [rounds, displayMatches]);
 
+  // Nhận dạng bố cục theo số trận mỗi vòng (4-2-1-2-2-1-1-1), không theo số đội đã có:
+  // bracket tạo từ template trống chưa có đội nào.
   const eightTeamSpecial = useMemo(() => {
-    const likelyEightTeamBracket = inferredTeamCount >= 7;
-    if (!likelyEightTeamBracket) return null;
     if (rounds.length < 8) return null;
 
     const byRound = new Map(rounds);
@@ -1261,12 +1261,10 @@ const DoubleElimBracket = ({
       r7: r7[0],
       r8: r8[0],
     };
-  }, [rounds, inferredTeamCount]);
+  }, [rounds]);
 
+  // Bố cục 6 đội (2-2-1-2-1-1-1), nhận dạng theo cấu trúc như 8 đội.
   const sixTeamSpecial = useMemo(() => {
-    const likelySixTeamBracket =
-      inferredTeamCount > 0 && inferredTeamCount <= 6;
-    if (!likelySixTeamBracket) return null;
     if (rounds.length < 7) return null;
 
     const byRound = new Map(rounds);
@@ -1299,7 +1297,7 @@ const DoubleElimBracket = ({
       r6: r6[0],
       r7: r7[0],
     };
-  }, [rounds, inferredTeamCount]);
+  }, [rounds]);
 
   const layout = useMemo(
     () =>
@@ -1335,6 +1333,14 @@ const DoubleElimBracket = ({
   const totalRounds = rounds.length;
   const firstRoundMatchCount = rounds[0]?.[1]?.length ?? 0;
   const isAdvanceMode = Boolean(fourTeamAdvanceSpecial);
+  // Số đội theo cấu trúc bracket trước, rồi mới tới số đội đăng ký / đã xếp
+  const labelTeamCount = eightTeamSpecial
+    ? 8
+    : sixTeamSpecial
+      ? 6
+      : fourTeamSpecial || fourTeamAdvanceSpecial
+        ? 4
+        : teamCount || inferredTeamCount;
 
   // Layout có tiêu đề nhánh/vòng: thẻ trận chỉ cần mã ngắn U1, L1, CK
   const shortCodes = new Map<number, string>();
@@ -1353,7 +1359,7 @@ const DoubleElimBracket = ({
         match.round,
         totalRounds,
         firstRoundMatchCount,
-        teamCount || inferredTeamCount,
+        labelTeamCount,
         { isAdvanceMode },
       ),
       match.matchNo,
@@ -1377,7 +1383,7 @@ const DoubleElimBracket = ({
         round,
         totalRounds,
         firstRoundMatchCount,
-        teamCount || inferredTeamCount,
+        labelTeamCount,
         { isAdvanceMode },
       );
       const short = toSentence(full).replace(/s*nhánh (trên|thua|thắng)$/i, "");

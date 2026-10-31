@@ -11,6 +11,8 @@ import {
   setTournamentRankingBracketId,
 } from "../../utils/tournamentRanking.js";
 import { getTournamentPlayerStatsLeaderboard } from "../../utils/aovMatchStatsDb.js";
+import { VALORANT_MIN_MAPS, getValorantPlayerLeaderboard } from "../../utils/valorantPlayerStats.js";
+import { LOL_MIN_GAMES, getLolPlayerLeaderboard } from "../../utils/lolPlayerStats.js";
 
 const tournamentRouter = new Elysia().derive(middleware.deriveAuthContext);
 const TAG = "Tournaments";
@@ -540,9 +542,30 @@ tournamentRouter.get(
     }
 
     try {
+      const { rows: gameRows } = await pool.query(
+        "SELECT LOWER(g.short_name) AS game FROM tournaments t LEFT JOIN games g ON g.id = t.game_id WHERE t.id = $1",
+        [tournamentId],
+      );
+      const gameShort = gameRows[0]?.game ?? "";
+
+      // Valorant: chỉ số từng ván lấy từ Riot (lưu DB); AOV: từ ảnh tổng kết
+      if (gameShort === "val" || gameShort === "valorant") {
+        const { data, pending } = await getValorantPlayerLeaderboard(tournamentId);
+        set.status = 200;
+        return { game: "valorant", min_games: VALORANT_MIN_MAPS, pending_games: pending, data };
+      }
+
+      // LMHT: chỉ số từng ván từ match-v5 (mã ván VN2_… — mã phòng giải đấu tự ghi hoặc BTC nhập)
+      if (gameShort === "lol") {
+        const { data, pending } = await getLolPlayerLeaderboard(tournamentId);
+        set.status = 200;
+        return { game: "lol", min_games: LOL_MIN_GAMES, pending_games: pending, data };
+      }
+
       const rows = await getTournamentPlayerStatsLeaderboard(tournamentId);
       set.status = 200;
       return {
+        game: "aov",
         min_games: 3,
         data: rows,
       };
@@ -557,7 +580,7 @@ tournamentRouter.get(
   },
   {
     tags: [TAG],
-    summary: "Get individual AOV player stats leaderboard for a tournament",
+    summary: "Individual player leaderboard (Valorant from Riot match data, AOV from scoreboards)",
   },
 );
 

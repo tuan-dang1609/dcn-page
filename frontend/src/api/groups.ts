@@ -52,6 +52,7 @@ export interface JoinRequest {
   nickname: string | null;
   profile_picture: string | null;
   riot_account: string | null;
+  ingame_role?: string | null;
 }
 
 export interface InviteLink {
@@ -105,6 +106,13 @@ export interface RegistrationOptions {
     register_end: string | null;
     roster_min: number;
     roster_max: number;
+    /** valorant | lol | aov | tft… */
+    game: string | null;
+    /** Valorant / LMHT: mỗi người trong đội hình cần vai trò. */
+    roles_required: boolean;
+    /** Giải lẻ của game đồng đội: có tìm đội / ghép đội. */
+    team_finder: boolean;
+    team_formed_at: string | null;
   };
   org: (GroupSummary & {
     my_role: GroupRole | null;
@@ -129,13 +137,25 @@ export interface RegistrationEntry {
   team_id: number | string;
   captain_user_id: number | string | null;
   team: { id: number | string; name: string; short_name: string; logo_url: string | null; kind: GroupKind };
-  roster: Array<Pick<GroupMember, "user_id" | "username" | "nickname" | "profile_picture" | "riot_account">>;
+  roster: Array<
+    Pick<GroupMember, "user_id" | "username" | "nickname" | "profile_picture" | "riot_account"> & {
+      ingame_role: string | null;
+    }
+  >;
   can_manage: boolean;
   members: GroupMember[];
   roster_min: number;
   roster_max: number;
   is_open: boolean;
+  game: string | null;
+  roles_required: boolean;
+  team_finder: boolean;
+  recruit_mode: "closed" | "approval" | "open";
+  recruit_roles: string[];
+  recruit_note: string | null;
+  accept_auto_fill: boolean;
 }
+
 
 const auth = (token?: string | null) =>
   token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
@@ -192,7 +212,11 @@ export const getRegistrationEntry = (registrationId: number | string, token?: st
   axios.get<{ data: RegistrationEntry }>(`${regBase}/entry/${registrationId}`, auth(token));
 export const registerOrg = (
   tournamentId: number | string,
-  payload: { org_id: number | string; player_ids: Array<number | string>; captain_user_id: number | string },
+  payload: {
+    org_id: number | string;
+    player_ids: Array<number | string>;
+    captain_user_id: number | string;
+  },
   token: string,
 ) => axios.post(`${regBase}/${tournamentId}`, { kind: "org", ...payload }, auth(token));
 export const registerSquad = (

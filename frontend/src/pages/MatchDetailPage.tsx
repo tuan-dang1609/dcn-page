@@ -54,6 +54,9 @@ import {
   TOURNAMENT_TABLE_ROW_INTERACTIVE_CLASS,
   TOURNAMENT_TEAM_TAG_BADGE_CLASS,
 } from "@/components/tournamentTheme";
+import MatchLineupEditor from "@/components/MatchLineupEditor";
+import LolCodePanel from "@/components/LolCodePanel";
+import { getMatchLineups } from "@/api/matchLineups";
 
 // Bảng chỉ số kiểu canvas: tiêu đề chữ xám không nền, kẻ 2px màu chữ dưới tiêu đề
 const MATCH_STAT_PANEL = "overflow-hidden bg-[#0B0B0B]";
@@ -3665,6 +3668,15 @@ const MatchDetailPage = ({
       },
     });
 
+  // Giai đoạn chọn người ra sân (trước khi BTC mở phòng ban/pick / tới giờ) — khác thời điểm với ban/pick
+  const { data: matchLineups } = useQuery({
+    // Theo người xem: can_edit phụ thuộc đăng nhập (lần tải trước khi có token không được dùng lại)
+    queryKey: ["match-lineups", numId, user?.id ?? null],
+    enabled: Boolean(numId),
+    queryFn: async () => (await getMatchLineups(numId!, token)).data.data,
+  });
+  const isLineupPhase = Boolean(matchLineups && !matchLineups.locked);
+
   const linkedTeamContext = useMemo(() => {
     const context = createEmptyLinkedTeamContext();
     context.team1Players = linkedTeamPlayers?.team1Players ?? [];
@@ -4079,7 +4091,7 @@ const MatchDetailPage = ({
   const shouldShowPostMatchData =
     !isLobbyRoute && (!isValorantMatch || isMatchCompleted);
   const shouldShowMatchDetailBlockedNotice =
-    !isLobbyRoute && isValorantMatch && !isMatchCompleted;
+    !isLobbyRoute && isValorantMatch && !isMatchCompleted && !isLineupPhase;
   const shouldShowLobbyCompletedNotice =
     isLobbyRoute && isValorantMatch && isMatchCompleted;
   const shouldShowLobbyUnsupportedNotice = isLobbyRoute && !isValorantMatch;
@@ -4328,6 +4340,11 @@ const MatchDetailPage = ({
       </>
       )}
 
+      {/* Đội trưởng chọn người ra sân trước giờ thi đấu (chỉ hiện với người sửa được) */}
+      {!isPanel ? <MatchLineupEditor matchId={numId} token={token} /> : null}
+      {/* LMHT: mã phòng giải đấu Riot từng ván */}
+      {!isPanel && normalizedRouteGame === "lol" ? <LolCodePanel matchId={numId} /> : null}
+
       {shouldShowMatchDetailBlockedNotice ? (
         <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">
           <div className="flex flex-wrap items-center justify-between gap-4 border border-[#2C2B29] px-4 py-4 md:px-5">
@@ -4403,7 +4420,8 @@ const MatchDetailPage = ({
 
       {shouldShowLobby &&
       !shouldShowEmbeddedBanPick &&
-      !shouldShowPendingMatchOverview ? (
+      !shouldShowPendingMatchOverview &&
+      !isLineupPhase ? (
         <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 py-6">
           <div className="space-y-2">
             <p className="text-sm text-white">

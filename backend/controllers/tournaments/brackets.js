@@ -81,6 +81,11 @@ const ensureTournamentManagePermission = async (user, tournamentId, set) => {
   return { ok: true, tournament };
 };
 
+/** Số slot cho phép khi tạo bracket từ template trống (chưa có đội). */
+const SINGLE_ELIM_TEMPLATE_SIZES = [2, 4, 8, 16, 32, 64];
+const DOUBLE_ELIM_TEMPLATE_SIZES = [4, 6, 8];
+const SWISS_TEMPLATE_SIZES = [8, 16];
+
 const getTournamentTeamIds = async (tournamentId) => {
   const { rows } = await pool.query(
     "SELECT team_id FROM tournament_teams WHERE tournament_id = $1 ORDER BY id ASC",
@@ -1468,18 +1473,27 @@ bracketRouter.post(
       };
     }
 
-    const rawTeamIds = Array.isArray(body?.team_ids)
-      ? body.team_ids.map(toNumber).filter(Number.isFinite)
-      : await getTournamentTeamIds(tournamentId);
+    // Template trống: tạo khung N slot, xếp đội sau bằng PUT /:bracket_id/slots
+    const slotCount = toNumber(body?.slot_count);
+    if (slotCount !== null && !SINGLE_ELIM_TEMPLATE_SIZES.includes(slotCount)) {
+      set.status = 400;
+      return { error: `Template loại trực tiếp hỗ trợ ${SINGLE_ELIM_TEMPLATE_SIZES.join("/")} slot` };
+    }
+
+    const rawTeamIds = slotCount
+      ? []
+      : Array.isArray(body?.team_ids)
+        ? body.team_ids.map(toNumber).filter(Number.isFinite)
+        : await getTournamentTeamIds(tournamentId);
 
     const uniqueTeamIds = [...new Set(rawTeamIds)];
 
-    if (uniqueTeamIds.length < 2) {
+    if (!slotCount && uniqueTeamIds.length < 2) {
       set.status = 400;
       return { error: "Cần tối thiểu 2 đội để tạo bracket" };
     }
 
-    if (Array.isArray(body?.team_ids)) {
+    if (!slotCount && Array.isArray(body?.team_ids)) {
       const { rows: validRows } = await pool.query(
         "SELECT team_id FROM tournament_teams WHERE tournament_id = $1 AND team_id IN (" +
           uniqueTeamIds.map((_, index) => `$${index + 2}`).join(", ") +
@@ -1537,8 +1551,9 @@ bracketRouter.post(
       await generateSingleEliminationMatches({
         bracketId,
         tournamentId,
-        teamIds: uniqueTeamIds,
+        teamIds: slotCount ? Array(slotCount).fill(null) : uniqueTeamIds,
         bestOf,
+        autoAdvanceByes: !slotCount,
       });
 
     set.status = 201;
@@ -1551,7 +1566,8 @@ bracketRouter.post(
           id: format.id,
           name: format.name,
         },
-        participant_count: uniqueTeamIds.length,
+        participant_count: slotCount ?? uniqueTeamIds.length,
+        template: Boolean(slotCount),
         bracket_size: bracketSize,
         rounds: totalRounds,
         matches,
@@ -1638,17 +1654,26 @@ bracketRouter.post(
       return { error: "Format hiện tại không phải double-elimination" };
     }
 
-    const teamIds = await resolveParticipantTeamIds({
-      tournamentId,
-      teamIds: body?.team_ids,
-    });
+    // Template trống: N slot chưa có đội, xếp đội sau bằng PUT /:bracket_id/slots
+    const slotCount = toNumber(body?.slot_count);
+    if (slotCount !== null && !DOUBLE_ELIM_TEMPLATE_SIZES.includes(slotCount)) {
+      set.status = 400;
+      return { error: `Template nhánh thắng-thua hỗ trợ ${DOUBLE_ELIM_TEMPLATE_SIZES.join("/")} slot` };
+    }
+
+    const teamIds = slotCount
+      ? Array(slotCount).fill(null)
+      : await resolveParticipantTeamIds({
+          tournamentId,
+          teamIds: body?.team_ids,
+        });
 
     if (teamIds === null) {
       set.status = 400;
       return { error: "team_ids chứa đội không thuộc tournament này" };
     }
 
-    if (Array.isArray(body?.team_ids)) {
+    if (!slotCount && Array.isArray(body?.team_ids)) {
       const normalizedProvidedTeamIds = body.team_ids
         .map((id) => toNumber(id))
         .filter(Number.isFinite);
@@ -2071,10 +2096,19 @@ bracketRouter.post(
       return { error: "Format hiện tại không phải swiss" };
     }
 
-    const teamIds = await resolveParticipantTeamIds({
-      tournamentId,
-      teamIds: body?.team_ids,
-    });
+    // Template trống: khung 8/16 đội, xếp đội vòng 0-0 sau bằng PUT /slots/:bracket_id
+    const slotCount = toNumber(body?.slot_count);
+    if (slotCount !== null && !SWISS_TEMPLATE_SIZES.includes(slotCount)) {
+      set.status = 400;
+      return { error: `Template swiss hỗ trợ ${SWISS_TEMPLATE_SIZES.join("/")} đội` };
+    }
+
+    const teamIds = slotCount
+      ? Array(slotCount).fill(null)
+      : await resolveParticipantTeamIds({
+          tournamentId,
+          teamIds: body?.team_ids,
+        });
 
     if (teamIds === null) {
       set.status = 400;
@@ -2872,6 +2906,258 @@ bracketRouter.post(
   {
     tags: [TAG],
     summary: "Re-propagate DE winners/losers for a bracket",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+const LOCKED_MATCH_STATUSES = new Set(["completed", "complete", "finished", "done", "ongoing", "live", "in_progress"]);
+const ALLOWED_BEST_OF = new Set([1, 2, 3, 5, 7]);
+
+/**
+ * Trận + slot của 1 bracket để BTC xếp đội / đặt giờ.
+ * Slot chọn đội được: slot đầu vào (có seed) không nhận đội thắng từ trận khác, trận chưa đấu.
+ * Bracket không có seed nào (tạo tay) → mọi slot không có liên kết đều chọn được.
+ */
+const loadBracketSlots = async (client, bracketId) => {
+  const { rows: bracketRows } = await client.query(
+    `SELECT b.id, b.tournament_id, b.name, f.type AS format_type, f.has_losers_bracket
+     FROM brackets b LEFT JOIN formats f ON f.id = b.format_id
+     WHERE b.id = $1`,
+    [bracketId],
+  );
+  const bracket = bracketRows[0];
+  if (!bracket) return null;
+
+  const { rows: matches } = await client.query(
+    `SELECT m.id, m.round_number, m.match_no, m.team_a_id, m.team_b_id, m.seed_a, m.seed_b,
+            m.date_scheduled, m.best_of, m.status, m.score_a, m.score_b, m.winner_team_id,
+            m.next_match_id, m.next_slot
+     FROM matches m
+     WHERE m.bracket_id = $1
+     ORDER BY m.round_number ASC, m.match_no ASC, m.id ASC`,
+    [bracketId],
+  );
+
+  const byId = new Map(matches.map((match) => [Number(match.id), match]));
+  const feeders = new Map();
+  for (const match of matches) {
+    const target = toNumber(match.next_match_id);
+    const slot = String(match.next_slot ?? "").toUpperCase();
+    if (!target || !["A", "B"].includes(slot) || !byId.has(target)) continue;
+    feeders.set(`${target}:${slot}`, { round_number: Number(match.round_number), match_no: Number(match.match_no) });
+  }
+
+  // Swiss: chỉ vòng 1 (0-0) xếp tay; vòng sau ghép theo thành tích (pair-next-round)
+  const isSwiss = String(bracket.format_type ?? "") === "swiss";
+  const swissTemplate = isSwiss
+    ? getSwissStageTemplate(matches.filter((match) => Number(match.round_number) === 1).length * 2)
+    : null;
+
+  const hasSeeds = matches.some((match) => match.seed_a !== null || match.seed_b !== null);
+  const slotInfo = (match, side) => {
+    const feeder = feeders.get(`${match.id}:${side}`) ?? null;
+    const seed = side === "A" ? match.seed_a : match.seed_b;
+    const locked =
+      LOCKED_MATCH_STATUSES.has(String(match.status ?? "").trim().toLowerCase()) ||
+      toNumber(match.winner_team_id) !== null;
+    const entry = isSwiss ? Number(match.round_number) === 1 : hasSeeds ? seed !== null : true;
+    return {
+      feeder,
+      editable: !locked && !feeder && entry,
+    };
+  };
+
+  return {
+    bracket,
+    round_labels: swissTemplate
+      ? Object.fromEntries(swissTemplate.map((stage, index) => [index + 1, stage.label]))
+      : null,
+    matches: matches.map((match) => {
+      const a = slotInfo(match, "A");
+      const b = slotInfo(match, "B");
+      return {
+        id: Number(match.id),
+        round_number: Number(match.round_number),
+        match_no: Number(match.match_no),
+        team_a_id: toNumber(match.team_a_id),
+        team_b_id: toNumber(match.team_b_id),
+        seed_a: toNumber(match.seed_a),
+        seed_b: toNumber(match.seed_b),
+        date_scheduled: match.date_scheduled,
+        best_of: toNumber(match.best_of),
+        status: match.status,
+        score_a: toNumber(match.score_a),
+        score_b: toNumber(match.score_b),
+        slot_a_editable: a.editable,
+        slot_b_editable: b.editable,
+        feeder_a: a.feeder,
+        feeder_b: b.feeder,
+      };
+    }),
+  };
+};
+
+bracketRouter.get(
+  "/slots/:bracket_id",
+  async ({ params, set, user }) => {
+    const bracketId = toNumber(params.bracket_id);
+    if (!bracketId) {
+      set.status = 400;
+      return { error: "bracket_id không hợp lệ" };
+    }
+
+    const data = await loadBracketSlots(pool, bracketId);
+    if (!data) {
+      set.status = 404;
+      return { error: "Bracket không tồn tại" };
+    }
+
+    const permission = await ensureTournamentManagePermission(user, Number(data.bracket.tournament_id), set);
+    if (!permission.ok) return permission.error;
+
+    const { rows: teams } = await pool.query(
+      `SELECT tt.team_id, t.name, t.short_name, t.logo_url
+       FROM tournament_teams tt
+       JOIN teams t ON t.id = tt.team_id
+       WHERE tt.tournament_id = $1
+       ORDER BY tt.id ASC`,
+      [data.bracket.tournament_id],
+    );
+
+    set.status = 200;
+    return { data: { ...data, teams } };
+  },
+  {
+    tags: [TAG],
+    summary: "List bracket matches with editable team slots + schedule",
+    security: [{ bearerAuth: [] }],
+  },
+);
+
+bracketRouter.put(
+  "/slots/:bracket_id",
+  async ({ params, body, set, user }) => {
+    const bracketId = toNumber(params.bracket_id);
+    const updates = Array.isArray(body?.matches) ? body.matches : null;
+    if (!bracketId || !updates) {
+      set.status = 400;
+      return { error: "Cần bracket_id và danh sách matches" };
+    }
+
+    const current = await loadBracketSlots(pool, bracketId);
+    if (!current) {
+      set.status = 404;
+      return { error: "Bracket không tồn tại" };
+    }
+    const tournamentId = Number(current.bracket.tournament_id);
+
+    const permission = await ensureTournamentManagePermission(user, tournamentId, set);
+    if (!permission.ok) return permission.error;
+
+    const fail = (message) => {
+      set.status = 400;
+      return { error: message };
+    };
+
+    const matchById = new Map(current.matches.map((match) => [match.id, { ...match }]));
+    const label = (match) => `Vòng ${match.round_number} · Trận ${match.match_no}`;
+    const changes = [];
+
+    for (const raw of updates) {
+      const match = matchById.get(toNumber(raw?.id));
+      if (!match) return fail(`Trận #${raw?.id} không thuộc bracket này`);
+      const change = { id: match.id };
+
+      for (const [side, field, editable] of [
+        ["A", "team_a_id", match.slot_a_editable],
+        ["B", "team_b_id", match.slot_b_editable],
+      ]) {
+        if (raw[field] === undefined) continue;
+        const teamId = raw[field] === null || raw[field] === "" ? null : toNumber(raw[field]);
+        if (raw[field] !== null && raw[field] !== "" && teamId === null) return fail(`${label(match)}: đội ${side} không hợp lệ`);
+        if (teamId === match[field]) continue;
+        if (!editable) return fail(`${label(match)}: slot ${side} không chọn đội tay được (nhận đội từ trận khác, ghép theo thành tích swiss, hoặc trận đã đấu)`);
+        match[field] = teamId;
+        change[field] = teamId;
+      }
+
+      if (raw.date_scheduled !== undefined) {
+        if (raw.date_scheduled === null || raw.date_scheduled === "") {
+          change.date_scheduled = null;
+        } else {
+          const date = new Date(raw.date_scheduled);
+          if (Number.isNaN(date.getTime())) return fail(`${label(match)}: giờ thi đấu không hợp lệ`);
+          change.date_scheduled = date.toISOString();
+        }
+      }
+
+      if (raw.best_of !== undefined && raw.best_of !== null) {
+        const bestOf = toNumber(raw.best_of);
+        if (!ALLOWED_BEST_OF.has(bestOf)) return fail(`${label(match)}: BO phải là 1/2/3/5/7`);
+        change.best_of = bestOf;
+      }
+
+      if (Object.keys(change).length > 1) changes.push(change);
+    }
+
+    const teamChanged = changes.some((change) => change.team_a_id !== undefined || change.team_b_id !== undefined);
+    if (
+      teamChanged &&
+      String(current.bracket.format_type ?? "") === "swiss" &&
+      current.matches.some((match) => match.round_number > 1 && (match.team_a_id !== null || match.team_b_id !== null))
+    ) {
+      return fail("Swiss đã ghép cặp vòng sau, không đổi đội vòng 1 được nữa");
+    }
+
+    // Một đội chỉ đứng 1 slot đầu vào; 2 bên 1 trận phải khác nhau
+    const usedAt = new Map();
+    for (const match of matchById.values()) {
+      if (match.team_a_id !== null && match.team_a_id === match.team_b_id) return fail(`${label(match)}: 2 bên trùng đội`);
+      for (const [field, editable] of [["team_a_id", match.slot_a_editable], ["team_b_id", match.slot_b_editable]]) {
+        if (!editable || match[field] === null) continue;
+        const previous = usedAt.get(match[field]);
+        if (previous) return fail(`Đội #${match[field]} đã được xếp ở ${previous}, không xếp thêm ở ${label(match)}`);
+        usedAt.set(match[field], label(match));
+      }
+    }
+
+    const newTeamIds = [...new Set(changes.flatMap((change) => [change.team_a_id, change.team_b_id]).filter((id) => id != null))];
+    if (newTeamIds.length) {
+      const { rows } = await pool.query(
+        "SELECT team_id FROM tournament_teams WHERE tournament_id = $1 AND team_id = ANY($2::bigint[])",
+        [tournamentId, newTeamIds],
+      );
+      const valid = new Set(rows.map((row) => Number(row.team_id)));
+      const invalid = newTeamIds.filter((id) => !valid.has(id));
+      if (invalid.length) return fail(`Đội ${invalid.map((id) => `#${id}`).join(", ")} chưa đăng ký giải này`);
+    }
+
+    await pool.transaction(async (client) => {
+      for (const change of changes) {
+        const sets = [];
+        const values = [];
+        for (const field of ["team_a_id", "team_b_id", "date_scheduled", "best_of"]) {
+          if (change[field] === undefined) continue;
+          values.push(change[field]);
+          sets.push(`${field} = $${values.length}`);
+        }
+        values.push(change.id);
+        await client.query(`UPDATE matches SET ${sets.join(", ")} WHERE id = $${values.length}`, values);
+      }
+    });
+
+    try {
+      await scheduleTournamentResultsRecalculate(tournamentId);
+    } catch {
+      // ranking sync optional
+    }
+
+    set.status = 200;
+    return { message: `Đã lưu ${changes.length} trận`, data: await loadBracketSlots(pool, bracketId) };
+  },
+  {
+    tags: [TAG],
+    summary: "Assign teams to entry slots + set match schedule/best_of",
     security: [{ bearerAuth: [] }],
   },
 );

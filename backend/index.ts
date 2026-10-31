@@ -1,6 +1,9 @@
 import logger from "./utils/logger.js";
 import app from "./app.js";
 import config from "./utils/config.js";
+import { startTeamFormationSweeper } from "./utils/teamFinder.js";
+import { startLineupForfeitSweeper } from "./utils/matchLineups.js";
+import { startLolTournamentSweeper } from "./utils/lolTournament.js";
 
 const isPromiseLike = (value: unknown): value is Promise<unknown> =>
   Boolean(value && typeof (value as { then?: unknown }).then === "function");
@@ -40,6 +43,13 @@ const resolveListenResult = async (listenResult: unknown) => {
 
     void pingAlive();
     setInterval(pingAlive, 30_000);
+
+    // Hết hạn đăng ký → tự ghép đội cho người chơi lẻ (utils/teamFinder.js)
+    startTeamFormationSweeper();
+    // Hết hạn chốt đội hình ra sân mà đội không chốt → xử thua (utils/matchLineups.js)
+    startLineupForfeitSweeper();
+    // LMHT: tới giờ trận tự tạo mã phòng giải đấu Riot, hỏi kết quả ván (utils/lolTournament.js)
+    startLolTournamentSweeper();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("error connecting to Postgres:", msg);

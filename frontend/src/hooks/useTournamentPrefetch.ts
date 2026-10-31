@@ -2,9 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   fetchNormalizedTournamentBrackets,
-  fetchTournamentLeaderboardEnvelope,
   tournamentBracketsQueryKey,
-  tournamentLeaderboardQueryKey,
 } from "@/api/tournaments/queryFns";
 import { getMatchesByBracketId } from "@/api/tournaments/index";
 
@@ -46,20 +44,16 @@ const prefetchBracketMatches = async (
   );
 };
 
-/** Prefetch data for a specific tab — safe to call on nav hover. */
+/**
+ * Prefetch data for a specific tab — safe to call on nav hover.
+ * Bảng xếp hạng (tuyển thủ) không prefetch: Valorant lấy dữ liệu trận từ Riot khi mở tab.
+ */
 export const prefetchTournamentTab = (
   queryClient: ReturnType<typeof useQueryClient>,
   tournamentId: number | string,
   tab: TournamentTab,
 ) => {
   switch (tab) {
-    case "leaderboard":
-      void queryClient.prefetchQuery({
-        queryKey: tournamentLeaderboardQueryKey(tournamentId),
-        queryFn: () => fetchTournamentLeaderboardEnvelope(tournamentId),
-        staleTime: 60_000,
-      });
-      break;
     case "bracket":
       void prefetchBracketMatches(queryClient, tournamentId);
       break;
@@ -101,23 +95,9 @@ export const useTournamentPrefetch = (
 
     if (activeTab === "bracket") {
       void prefetchBracketMatches(queryClient, id);
-    } else if (activeTab === "leaderboard") {
-      void queryClient.prefetchQuery({
-        queryKey: tournamentLeaderboardQueryKey(id),
-        queryFn: () => fetchTournamentLeaderboardEnvelope(id),
-        staleTime: 60_000,
-      });
     }
 
     const cancelIdle = scheduleIdle(() => {
-      if (activeTab !== "leaderboard") {
-        void queryClient.prefetchQuery({
-          queryKey: tournamentLeaderboardQueryKey(id),
-          queryFn: () => fetchTournamentLeaderboardEnvelope(id),
-          staleTime: 60_000,
-        });
-      }
-
       if (activeTab !== "bracket") {
         void queryClient.prefetchQuery({
           queryKey: tournamentBracketsQueryKey(id),

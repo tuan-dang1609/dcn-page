@@ -4,6 +4,7 @@ import { ROLE_LABEL, memberName } from "@/api/groups";
 /**
  * Chọn đội hình + đội trưởng cho 1 giải: chạm hàng để thêm/bỏ người thi đấu,
  * "Đội trưởng" chỉ bấm được với người đã chọn (đội trưởng ban/pick và check-in cho giải này).
+
  */
 
 type Props = {
@@ -73,11 +74,12 @@ const RosterPicker = ({ members, selected, captainId, min, max, onChange, disabl
                   </span>
                 </span>
               </button>
+
               <button
                 type="button"
                 disabled={disabled || !on}
                 onClick={() => onChange({ selected, captainId: member.user_id })}
-                className={`min-h-9 shrink-0 px-2.5 text-xs font-bold ${
+                className={`min-h-11 shrink-0 px-2.5 text-xs font-bold ${
                   captain
                     ? "bg-[#F2F0EB] text-[#0B0B0B]"
                     : on

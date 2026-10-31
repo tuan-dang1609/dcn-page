@@ -9,11 +9,16 @@ import {
   getMemberRole,
   getUserOrgId,
   isAdmin,
+  isRegistrationOpen,
   isUserInTournament,
   listMembers,
+  markFreeAgentsPlaced,
+  rosterLimits,
   toNumber,
   withTransaction,
 } from "../../utils/groups.js";
+import { rolesRequired } from "../../utils/ingameRoles.js";
+import { isFormationFinal, loadTournamentWithGame } from "../../utils/teamFinder.js";
 
 /**
  * Đăng ký giải theo đội (registration_mode = 'org'), 1 lệnh duy nhất:
@@ -42,29 +47,7 @@ const handle = (fn) => async (ctx) => {
   }
 };
 
-const loadTournament = async (tournamentId, client) => {
-  const { rows } = await (client ?? pool).query(
-    `SELECT id, name, slug, series_id, registration_mode, register_start, register_end,
-            date_start, max_player_per_team, max_participate, created_by
-     FROM tournaments WHERE id = $1`,
-    [tournamentId],
-  );
-  if (!rows[0]) throw new GroupError(404, "Không tìm thấy giải");
-  return rows[0];
-};
-
-/** Đội hình: tối thiểu = số người mỗi đội của giải, tối đa thêm 2 dự bị. */
-const rosterLimits = (tournament) => {
-  const min = Math.max(1, toNumber(tournament.max_player_per_team) ?? 1);
-  return { min, max: min + 2 };
-};
-
-const isRegistrationOpen = (tournament) => {
-  const now = Date.now();
-  const start = tournament.register_start ? new Date(tournament.register_start).getTime() : null;
-  const end = tournament.register_end ? new Date(tournament.register_end).getTime() : null;
-  return (!start || now >= start) && (!end || now <= end);
-};
+const loadTournament = (tournamentId, client) => loadTournamentWithGame(tournamentId, client);
 
 const isStaffOfTournament = (user, tournament) =>
   isAdmin(user) || toNumber(tournament.created_by) === toNumber(user?.id);
@@ -76,6 +59,7 @@ const requireOpen = (tournament, user) => {
 };
 
 const uniqueIds = (ids) => [...new Set((Array.isArray(ids) ? ids : []).map(toNumber).filter(Boolean))];
+
 
 /** Kiểm tra đội hình: thuộc nhóm, đủ số lượng, không trùng đội khác trong giải, đội trưởng nằm trong đội hình. */
 const validateRoster = async ({ group, tournament, playerIds, captainId, requireMin }, client) => {
@@ -97,15 +81,34 @@ const validateRoster = async ({ group, tournament, playerIds, captainId, require
   }
 };
 
-const writeRoster = async (registrationId, playerIds, client) => {
+/**
+ * Ghi đội hình. Vai trò trong game không chọn ở đây — chỉ chọn khi xin vào đội / ghép ngẫu nhiên;
+ * người đã có vai trò (vào qua tìm đội) được giữ nguyên khi đội trưởng sửa đội hình.
+ */
+const writeRoster = async (registrationId, tournamentId, playerIds, client) => {
+  const { rows: previous } = await client.query(
+    "SELECT user_id, ingame_role FROM tournament_team_players WHERE tournament_team_id = $1",
+    [registrationId],
+  );
+  const roles = new Map(previous.map((row) => [toNumber(row.user_id), row.ingame_role]));
   await client.query("DELETE FROM tournament_team_players WHERE tournament_team_id = $1", [registrationId]);
   for (const id of playerIds) {
     await client.query(
-      "INSERT INTO tournament_team_players (tournament_team_id, user_id) VALUES ($1, $2)",
-      [registrationId, id],
+      "INSERT INTO tournament_team_players (tournament_team_id, user_id, ingame_role) VALUES ($1, $2, $3)",
+      [registrationId, id, roles.get(id) ?? null],
     );
   }
+  // Có đội rồi → rời danh sách chờ ghép
+  await markFreeAgentsPlaced(tournamentId, playerIds, registrationId, client);
 };
+
+/** Tìm đội / ghép đội chỉ cho giải lẻ (ngoài series) của game đồng đội. */
+const teamFinderInfo = (tournament) => ({
+  game: tournament.game,
+  roles_required: rolesRequired(tournament.game),
+  team_finder: !tournament.series_id && ["valorant", "lol", "aov"].includes(tournament.game),
+  team_formed_at: isFormationFinal(tournament) ? tournament.team_formed_at : null,
+});
 
 /** Lựa chọn đăng ký của tôi cho 1 giải: org tôi quản lý (kèm thành viên), đăng ký hiện có của tôi. */
 registrationRouter.get(
@@ -123,6 +126,7 @@ registrationRouter.get(
         register_end: tournament.register_end,
         roster_min: limits.min,
         roster_max: limits.max,
+        ...teamFinderInfo(tournament),
       },
     };
     if (!user) {
@@ -180,7 +184,8 @@ registrationRouter.get(
   "/entry/:registrationId",
   handle(async ({ params, user, set }) => {
     const { rows } = await pool.query(
-      `SELECT tt.id, tt.tournament_id, tt.team_id, tt.captain_user_id
+      `SELECT tt.id, tt.tournament_id, tt.team_id, tt.captain_user_id,
+              tt.recruit_mode, tt.recruit_roles, tt.recruit_note, tt.accept_auto_fill
        FROM tournament_teams tt WHERE tt.id = $1`,
       [toNumber(params.registrationId)],
     );
@@ -191,8 +196,22 @@ registrationRouter.get(
     const role = user ? await getMemberRole(group, user.id) : null;
     const manageable = user ? canManage(role, user) || isStaffOfTournament(user, tournament) : false;
 
+    // Đội lẻ: thành viên = đội hình. Đồng bộ đội cũ (trước đây phải tick tay) — tối đa số người của giải.
+    if (group.kind === "squad") {
+      await pool.query(
+        `INSERT INTO tournament_team_players (tournament_team_id, user_id)
+         SELECT $1, sm.user_id FROM squad_members sm
+         WHERE sm.squad_id = $2
+           AND NOT EXISTS (SELECT 1 FROM tournament_team_players p WHERE p.tournament_team_id = $1 AND p.user_id = sm.user_id)
+         ORDER BY sm.joined_at
+         LIMIT GREATEST(0, $3 - (SELECT COUNT(*) FROM tournament_team_players WHERE tournament_team_id = $1))
+         ON CONFLICT (tournament_team_id, user_id) DO NOTHING`,
+        [entry.id, group.id, rosterLimits(tournament).max],
+      );
+    }
+
     const { rows: roster } = await pool.query(
-      `SELECT u.id AS user_id, u.username, u.nickname, u.profile_picture, u.riot_account
+      `SELECT u.id AS user_id, u.username, u.nickname, u.profile_picture, u.riot_account, p.ingame_role
        FROM tournament_team_players p JOIN users u ON u.id = p.user_id
        WHERE p.tournament_team_id = $1 ORDER BY p.id`,
       [entry.id],
@@ -208,6 +227,7 @@ registrationRouter.get(
         roster_min: rosterLimits(tournament).min,
         roster_max: rosterLimits(tournament).max,
         is_open: isRegistrationOpen(tournament),
+        ...teamFinderInfo(tournament),
       },
     };
   }),
@@ -218,7 +238,7 @@ registrationRouter.get(
  * Đăng ký:
  *   { kind: "org", org_id, player_ids: [...], captain_user_id }
  *   { kind: "squad", squad: { name, short_name, logo_url } }   ← tạo đội lẻ, tôi là đội trưởng;
- *                                                                thành viên vào sau qua link mời / xin vào
+ *                                                                thành viên vào sau qua link mời / xin vào / tìm đội
  */
 registrationRouter.post(
   "/:tournamentId",
@@ -265,7 +285,7 @@ registrationRouter.post(
            VALUES ($1, $2, $3) RETURNING id`,
           [squad.id, tournament.id, user.id],
         );
-        await writeRoster(reg[0].id, [user.id], client);
+        await writeRoster(reg[0].id, tournament.id, [user.id], client);
         return { registration_id: reg[0].id, team_id: squad.id, kind: "squad" };
       }
 
@@ -284,7 +304,7 @@ registrationRouter.post(
          VALUES ($1, $2, $3) RETURNING id`,
         [group.id, tournament.id, captainId],
       );
-      await writeRoster(reg[0].id, playerIds, client);
+      await writeRoster(reg[0].id, tournament.id, playerIds, client);
       return { registration_id: reg[0].id, team_id: group.id, kind: "org" };
     });
 
@@ -320,7 +340,7 @@ registrationRouter.put(
         { group, tournament, playerIds, captainId, requireMin: group.kind === "org" },
         client,
       );
-      await writeRoster(entry.id, playerIds, client);
+      await writeRoster(entry.id, tournament.id, playerIds, client);
       await client.query("UPDATE tournament_teams SET captain_user_id = $1 WHERE id = $2", [captainId, entry.id]);
       // Đội lẻ: đội trưởng giải = đội trưởng đội
       if (group.kind === "squad" && captainId !== toNumber(group.created_by)) {
@@ -358,6 +378,14 @@ registrationRouter.delete(
         throw new GroupError(403, "Bạn không có quyền rút đăng ký");
       }
       requireOpen(tournament, user);
+      // Người vào đội qua tìm đội → quay lại danh sách chờ ghép (nếu giải chưa ghép)
+      if (!isFormationFinal(tournament)) {
+        await client.query(
+          `UPDATE tournament_free_agents SET status = 'waiting', placed_registration_id = NULL, updated_at = NOW()
+           WHERE placed_registration_id = $1 AND user_id <> $2`,
+          [entry.id, user.id],
+        );
+      }
       await client.query("DELETE FROM tournament_teams WHERE id = $1", [entry.id]);
       if (group.kind === "squad") await client.query("DELETE FROM teams WHERE id = $1", [group.id]);
     });
