@@ -8,10 +8,6 @@ const SUPABASE_SERVICE_ROLE_KEY = String(
     "",
 ).trim();
 const SUPABASE_BUCKET = String(process.env.SUPABASE_BUCKET ?? "image").trim();
-const ALLOW_UPLOAD_BYPASS =
-  String(process.env.ALLOW_UPLOAD_BYPASS ?? "")
-    .trim()
-    .toLowerCase() === "true";
 const UPLOAD_BYPASS_URL = String(
   process.env.UPLOAD_BYPASS_URL ??
     "https://nybmykdjtkjaatepkfog.supabase.co/storage/v1/object/public/image/users/default-avatar-icon-of-social-media-user-vector.jpg",
@@ -52,7 +48,7 @@ export const isSupabaseUploadConfigured = () =>
 const getSupabaseConfig = () => {
   if (!isSupabaseUploadConfigured()) {
     throw new Error(
-      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY). To skip upload temporarily, set ALLOW_UPLOAD_BYPASS=true.",
+      "Missing Supabase server config. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY).",
     );
   }
 
@@ -106,9 +102,11 @@ export const uploadImageBuffer = async ({
   contentType,
   userId = null,
 }) => {
-  if (!isSupabaseUploadConfigured() || ALLOW_UPLOAD_BYPASS) {
-    // Key missing / bypass — don't block signup/register; use default image.
-    if (!isSupabaseUploadConfigured()) warnMissingConfigOnce();
+  if (!isSupabaseUploadConfigured()) {
+    // Thiếu key — không chặn đăng ký; dùng ảnh mặc định.
+    // Có key thì luôn upload thật, kể cả khi .env còn ALLOW_UPLOAD_BYPASS=true
+    // (trước đây cờ này làm banner / logo nào cũng bị thay bằng ảnh mặc định).
+    warnMissingConfigOnce();
     return UPLOAD_BYPASS_URL;
   }
 
@@ -137,8 +135,8 @@ export const uploadImageBuffer = async ({
 export const deleteImageByPublicUrl = async (publicUrl) => {
   if (!String(publicUrl ?? "").trim()) return false;
 
-  if (!isSupabaseUploadConfigured() || ALLOW_UPLOAD_BYPASS) {
-    if (!isSupabaseUploadConfigured()) warnMissingConfigOnce();
+  if (!isSupabaseUploadConfigured()) {
+    warnMissingConfigOnce();
     return true;
   }
 
