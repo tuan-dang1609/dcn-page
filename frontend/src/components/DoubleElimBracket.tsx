@@ -100,6 +100,7 @@ type DisplayMatch = {
   routeMatchId?: number;
   status?: string;
   dateScheduled?: string | null;
+  bestOf?: number | null;
   /** Phòng ban/pick đang mở (chờ / đang chạy). */
   banPickOpen?: boolean;
   round: number;
@@ -970,16 +971,27 @@ const BracketHeadings = ({ items }: { items: BracketHeading[] }) => (
   </>
 );
 
-/** Ngày của vòng = ngày sớm nhất trong các trận của vòng: "Thứ Năm, 9/10". */
+/**
+ * Dòng phụ của vòng: ngày sớm nhất trong vòng + thể thức, "Thứ Năm, 9/10 · BO3".
+ * Vòng có nhiều BO khác nhau thì lấy BO lớn nhất.
+ */
 const formatRoundDate = (matches: DisplayMatch[]) => {
   const times = matches
     .map((match) => new Date(String(match.dateScheduled ?? "")).getTime())
     .filter((time) => Number.isFinite(time));
-  if (!times.length) return undefined;
+  const bestOfs = matches
+    .map((match) => match.bestOf ?? 0)
+    .filter((value) => value > 0);
 
-  const date = new Date(Math.min(...times));
-  const weekday = date.toLocaleDateString("vi-VN", { weekday: "long" });
-  return `${weekday.charAt(0).toLocaleUpperCase("vi-VN")}${weekday.slice(1)}, ${date.getDate()}/${date.getMonth() + 1}`;
+  let dateLabel: string | undefined;
+  if (times.length) {
+    const date = new Date(Math.min(...times));
+    const weekday = date.toLocaleDateString("vi-VN", { weekday: "long" });
+    dateLabel = `${weekday.charAt(0).toLocaleUpperCase("vi-VN")}${weekday.slice(1)}, ${date.getDate()}/${date.getMonth() + 1}`;
+  }
+  const boLabel = bestOfs.length ? `BO${Math.max(...bestOfs)}` : undefined;
+
+  return [dateLabel, boLabel].filter(Boolean).join(" · ") || undefined;
 };
 
 const DoubleElimBracket = ({
@@ -1081,6 +1093,7 @@ const DoubleElimBracket = ({
           routeMatchId: Number(match.id),
           status: String(match.status ?? "").trim(),
           dateScheduled: match.date_scheduled ?? null,
+          bestOf: toNumber((match as { best_of?: unknown }).best_of),
           banPickOpen: isBanPickOpenStatus(match.ban_pick_status),
           round: Number(match.round_number ?? 0),
           matchNo: Number(match.match_no ?? 0),

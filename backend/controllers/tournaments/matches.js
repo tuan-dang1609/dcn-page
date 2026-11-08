@@ -437,6 +437,7 @@ matchRouter.get(
              m.match_no,
               m.room_id,
               m.date_scheduled,
+              m.best_of,
               (to_jsonb(m)->>'room_id') AS room_id,
               t.slug AS tournament_slug,
               g.short_name AS tournament_game_short_name,
